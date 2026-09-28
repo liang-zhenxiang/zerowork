@@ -50,6 +50,14 @@
 - **维护流程 skill**：`.claude/skills/` 下的 `oss-bootstrap` 与 `maintain-loop`，随仓库分发
 - **仓库自动化**：自动打标签、首次贡献者欢迎、过期 Issue 清理、依赖更新、
   OSSF Scorecard 供应链评分、依赖审查、可选 AI 代码审查
+- **CodeQL 静态安全分析**：每周定时 + main 推送 + PR 触发，查询集用 `security-extended`，
+  结果写进 Security → Code scanning。它**不进 `CI 总览` 门禁** ——
+  慢一个量级，而且它的产出是「发现」不是「通过/失败」（CodeQL 默认不会因告警而失败，
+  接进门禁只会得到一个人以为有门禁、实际永远为绿的假象）
+- **构建溯源证明（SLSA provenance）**：安装包没有代码签名，
+  用户无法判断它是不是由这段代码构建的 —— 溯源证明补上了可验证的那一半：
+  由 CI 用 OIDC 身份签发，记录「哪个仓库、哪个 commit、哪个工作流」产出了该摘要的文件。
+  用户可验证：`gh attestation verify <文件> --repo liang-zhenxiang/zerowork`
 - **安装包**：Release 附带 Windows（NSIS）与 macOS（dmg，arm64 + x64）安装包，
   由 `release.yml` 在同一次运行内构建并附上。**不签名**，
   发布说明里会自动附上各平台的打开方式（详见下方「安全」一节）

@@ -27,6 +27,11 @@ jobs:
     name: macOS 安装包
     runs-on: macos-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      # 生成构建溯源证明需要：OIDC 换取签名身份 + 写入 attestation
+      id-token: write
+      attestations: write
     steps:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -69,6 +74,33 @@ jobs:
       - name: 列出产物
         run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
 
+      # ---------------------------------------------------------------------
+      # 构建溯源证明（SLSA provenance）
+      #
+      # 为什么需要它：**安装包没有代码签名**（没有证书）。用户无法从产物本身
+      # 判断它是不是由这个仓库的这段代码构建出来的 —— 而这正是「从 GitHub
+      # Release 下载一个未签名安装包」最大的信任缺口。
+      #
+      # 溯源证明补上了其中可验证的那一半：它由 CI 用 OIDC 身份签发，
+      # 记录了「哪个仓库、哪个 commit、哪个工作流」产出了这个摘要的文件。
+      # 用户可以验证它：
+      #
+      #     gh attestation verify <文件> --repo liang-zhenxiang/zerowork
+      #
+      # 它**替代不了代码签名**（不解决「首次打开的拦截」），
+      # 但把「无法验证来源」变成了「可验证」。
+      # 这也是 OSSF Scorecard 的 Signed-Releases 检查项接受的形式之一。
+      # ---------------------------------------------------------------------
+      - name: 生成构建溯源证明
+        # PR 上拿不到 OIDC token；本工作流本身也只由 tag / 手动触发，
+        # 这行是防御性的，防止将来有人把它接到 pull_request 上
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release/*.dmg
+            release/*.zip
+
       - name: 上传产物
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -89,6 +121,10 @@ jobs:
     name: Windows 安装包
     runs-on: windows-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     steps:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -125,6 +161,31 @@ jobs:
       - name: 列出产物
         shell: bash
         run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
+
+      # ---------------------------------------------------------------------
+      # 构建溯源证明（SLSA provenance）
+      #
+      # 为什么需要它：**安装包没有代码签名**（没有证书）。用户无法从产物本身
+      # 判断它是不是由这个仓库的这段代码构建出来的 —— 而这正是「从 GitHub
+      # Release 下载一个未签名安装包」最大的信任缺口。
+      #
+      # 溯源证明补上了其中可验证的那一半：它由 CI 用 OIDC 身份签发，
+      # 记录了「哪个仓库、哪个 commit、哪个工作流」产出了这个摘要的文件。
+      # 用户可以验证它：
+      #
+      #     gh attestation verify <文件> --repo liang-zhenxiang/zerowork
+      #
+      # 它**替代不了代码签名**（不解决「首次打开的拦截」），
+      # 但把「无法验证来源」变成了「可验证」。
+      # 这也是 OSSF Scorecard 的 Signed-Releases 检查项接受的形式之一。
+      # ---------------------------------------------------------------------
+      - name: 生成构建溯源证明
+        # PR 上拿不到 OIDC token；本工作流本身也只由 tag / 手动触发，
+        # 这行是防御性的，防止将来有人把它接到 pull_request 上
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*.exe
 
       - name: 上传产物
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
