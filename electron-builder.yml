@@ -1,0 +1,119 @@
+# electron-builder 配置
+#
+# 用 YAML 而不是 .js / .mjs：配置文件的 CJS/ESM 之争是一个已知的坑区
+# （本项目是 `"type": "module"`，JS 配置需要走 dynamic import 才被识别）。
+# YAML 绕开整个问题。
+#
+# 文档：https://www.electron.build/configuration/configuration
+
+appId: com.zerowork.app
+productName: ZeroWork
+copyright: Copyright 2026 ZeroWork
+
+directories:
+  output: release
+  # 图标等构建资源目录。**这里不要放别的图片** ——
+  # electron-builder 会把目录里每张图当候选图标，尺寸不足就报错。
+  buildResources: build
+
+# ---------------------------------------------------------------------------
+# 打包哪些文件
+#
+# 默认 files 是 `**/*`，而 electron-builder **不读 .gitignore** ——
+# 不显式限定的话，tests/、docs/、artifacts/（测试截图）都会被塞进产物，
+# 而且 resources/ 会被**再打一份**（它已经通过 extraResources 进去了）。
+#
+# 生产依赖（node_modules）由 electron-builder 按 package.json 自动带上，
+# 不受这里的 patterns 影响 —— 这一点很关键：`electron.vite.config.mjs` 用了
+# externalizeDepsPlugin()，daemon 产物里是裸 `import "@earendil-works/pi-coding-agent"`，
+# 运行时真的需要 node_modules。
+# ---------------------------------------------------------------------------
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+
+# ---------------------------------------------------------------------------
+# resources/ 必须在 asar 之外
+#
+# 两个原因，都不是洁癖：
+#   ① 里面的二进制（resources/bin/*.exe）要被 spawn —— asar 内的路径不是真实文件路径
+#   ② 打包态的代码按 `join(process.resourcesPath, "resources")` 找它
+#      （见 src/main/index.js），而 process.resourcesPath 指向 app 的资源目录
+# ---------------------------------------------------------------------------
+extraResources:
+  - from: resources
+    to: resources
+
+# ---------------------------------------------------------------------------
+# 真源是 `npm run build` 的产物 out/。
+# 这里只做一次「产物存在吗」的保险 —— 忘了构建就打包会产出一个跑不起来的安装包，
+# 而那比打包失败更糟（用户装完才发现）。
+# ---------------------------------------------------------------------------
+beforePack: scripts/before-pack.cjs
+
+# ---------------------------------------------------------------------------
+# 不用 asar
+#
+# daemon 通过 `utilityProcess.fork(join(import.meta.dirname, "daemon.mjs"))` 启动，
+# 而 **asar 内的入口不是 utilityProcess.fork 能接受的真实文件路径**
+# （electron#2708 / #41396）。asar:false 让 out/ 以真实文件形式落盘，
+# 换来的是最可预期的行为 —— 代价只是启动时多几次文件读取。
+# 这条是实测后定的，不是猜的。
+# ---------------------------------------------------------------------------
+asar: false
+
+# koffi 是**预编译**的 N-API 模块（沙箱用它调 kernel32/advapi32），
+# 没有需要重新编译的原生代码。关掉 rebuild 可以省下打包时的一大截时间，
+# 也避免在 CI runner 上因为缺编译器而失败。
+npmRebuild: false
+
+# ---------------------------------------------------------------------------
+# macOS
+# ---------------------------------------------------------------------------
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  # 不签名。没有 Developer ID 证书，签名与公证都做不到 ——
+  # 这不是配置问题，是证书问题，文档里必须如实告诉用户怎么打开
+  # （见 release.yml 附在发布说明末尾的那段提示）。
+  identity: null
+  hardenedRuntime: false
+  gatekeeperAssess: false
+
+# ---------------------------------------------------------------------------
+# Windows
+# ---------------------------------------------------------------------------
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+
+# `nsis` 在 electron-builder 26 里是**顶层键**，不是 `win.nsis` ——
+# 写成 `win.nsis` 会被 schema 拒掉（报「must NOT have additional properties: nsis」，
+# 而 CLI 只给出一句 "configuration.win should be one of these: null"，看不出所以然）。
+# 这是实测出来的，不是照抄文档能得到的。
+nsis:
+  # 默认是一键装到用户目录且不给选；让用户能自选安装位置更友好
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+# ---------------------------------------------------------------------------
+# Linux：**刻意不做**
+#
+# 命令沙箱依赖 Windows 专有的系统调用，托管 Bash 运行时也只面向 Windows。
+# 在这个前提下发 Linux 包，等于对外承诺一个不成立的平台支持 ——
+# 用户装完会发现「命令执行被拒」，而这是设计使然，不是 bug。
+# 详见 README 的「平台支持」与 docs/USAGE.md。
+# ---------------------------------------------------------------------------
+linux: null
+
+# 打包时不要去查 GitHub 有没有新版本（那会在 CI 上产生一次无意义的网络请求）
+publish: null

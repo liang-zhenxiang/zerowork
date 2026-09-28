@@ -271,8 +271,19 @@ jobs:
 
           tar -xzf actionlint.tar.gz actionlint
 
+      # 这里有一条**极窄的**忽略，只针对一条消息形态，理由是工具版本落后：
+      #
+      # release.yml 用 `$/ .github/workflows/build-installers.yml` 调用同仓库的可复用工作流。
+      # `$/` 是 GitHub 2026-07 引入的**自仓库引用**语法（避免 `./` 的歧义、
+      # 且解析到当前运行的 commit），zizmor 的 self-repository 审计要求用它。
+      # 而 actionlint 1.7.12（本项目固定的版本）**还不认识这个前缀**，会报
+      # 「is not following the format "owner/repo/path/to/workflow.yml@ref"」。
+      #
+      # 忽略模式写成这条消息的稳定片段，而不是放宽 `workflow-call` 这一类 ——
+      # 其它任何格式错误照旧会被拦下。
+      # 升级 actionlint 后请回头确认这条忽略是否还需要。
       - name: 运行 actionlint
-        run: ./actionlint -color
+        run: ./actionlint -color -ignore 'is not following the format "owner/repo/path/to/workflow.yml@ref"'
 
       - name: 安装 yamllint
         env:

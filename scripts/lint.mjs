@@ -135,7 +135,13 @@ function main() {
 				`actionlint：本地 ${localVersion}，CI ${versions.actionlint} —— 版本不同，结论未必一致`,
 			);
 		}
-		runCheck('actionlint（工作流静态检查）', 'actionlint', ['-color']);
+		// 忽略模式与 CI 完全一致（同源的唯一实现方式就是两处写同一个字符串；
+		// 它只匹配 `$/` 自仓库引用那一条消息，理由写在 ci.yml 的注释里）
+		runCheck('actionlint（工作流静态检查）', 'actionlint', [
+			'-color',
+			'-ignore',
+			'is not following the format "owner/repo/path/to/workflow.yml@ref"',
+		]);
 	} else {
 		skipCheck(
 			'actionlint（工作流静态检查）',

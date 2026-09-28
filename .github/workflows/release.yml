@@ -285,13 +285,37 @@ jobs:
           retention-days: 7
 
   # ---------------------------------------------------------------------------
-  # ⑥ 创建 Release
+  # ⑥ 构建安装包
+  #
+  # 作为**可复用工作流**调用，而不是另起一个 tag 触发的工作流 ——
+  # 两个 tag 触发的工作流之间没有任何机制保证先后，谁先跑完不确定，
+  # 于是「把产物附到 Release 上」这句话在架构上就不成立。
+  # 用 `uses:` 调用则同一个 run 内顺序确定，且 build-installers.yml 仍然可以单独手动触发。
+  #
+  # 本 job 失败**不阻断发布**（见下方 publish 的 `if:`）：
+  # 发布说明本身是有价值的，安装包失败应当在总结里被看见，而不是让整个发布消失。
+  # ---------------------------------------------------------------------------
+  installers:
+    name: 构建安装包
+    needs: [notes]
+    # `$/` 是 GitHub 2026-07 引入的**自仓库引用**语法：无歧义，且解析到**当前运行的 commit**
+    # （`./` 需要先 checkout，硬编码 `owner/repo@ref` 又会与运行中的 commit 漂移）。
+    # zizmor 的 self-repository 审计要求用它；actionlint 1.7.12 尚不认识这个前缀，
+    # 因此在 ci.yml 里为它加了一条极窄的忽略 —— 理由写在那里，升级工具后应回头复核。
+    uses: $/.github/workflows/build-installers.yml
+    permissions:
+      contents: read
+
+  # ---------------------------------------------------------------------------
+  # ⑦ 创建 Release 并附上安装包
   # ---------------------------------------------------------------------------
   publish:
     name: 创建 Release
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [notes]
+    needs: [notes, installers]
+    # 安装包构建失败或没有产出，也要把 Release 发出来
+    if: always() && needs.notes.result == 'success'
     permissions:
       contents: write
     steps:
@@ -304,6 +328,15 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: release-notes
+
+      # 安装包可能一个都没有（构建全失败），所以这里不能要求必须有文件
+      - name: 取回安装包
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installer-*
+          path: installers
+          merge-multiple: true
+        continue-on-error: true
 
       - name: 创建 Release
         env:
@@ -338,10 +371,49 @@ jobs:
             echo "✅ Release ${TAG} 已创建"
           fi
 
-      - name: 总结
+      - name: 附上安装包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
+
+          if [[ ! -d installers ]] || [[ -z "$(find installers -type f -print -quit 2>/dev/null)" ]]; then
+            echo "::warning::没有可附上的安装包 —— 检查「构建安装包」job 的结果"
+            {
+              echo "### ⚠️ 本次发布未附带安装包"
+              echo ""
+              echo "安装包构建失败或没有产出。发布说明已正常生成，"
+              echo "请查看上面「构建安装包」job 的日志，修好后手动重跑本工作流。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          # `--clobber`：tag 被重复推送触发第二次运行时覆盖已有产物，而不是报错
+          gh release upload "$TAG" installers/* --clobber
+          echo "已附上 $(find installers -type f | wc -l) 个产物："
+          find installers -type f -exec ls -lh {} \;
+
+      - name: 总结
+        env:
+          # ${{ }} 一律经 env: 中转再进 shell（本项目红线）
+          INSTALLERS_RESULT: ${{ needs.installers.result }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          if [[ "$INSTALLERS_RESULT" == "success" ]]; then
+            installer_cell="✅"
+          else
+            installer_cell="❌（未附产物）"
+          fi
+
           {
             echo "### 🚀 Release [${GITHUB_REF_NAME}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}) 已发布"
+            echo ""
+            echo "| 环节 | 结果 |"
+            echo "| --- | --- |"
+            echo "| 发布说明 | ✅ |"
+            echo "| 安装包构建 | ${installer_cell} |"
           } >> "$GITHUB_STEP_SUMMARY"

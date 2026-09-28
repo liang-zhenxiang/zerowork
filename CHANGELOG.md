@@ -35,6 +35,9 @@
 - **维护流程 skill**：`.claude/skills/` 下的 `oss-bootstrap` 与 `maintain-loop`，随仓库分发
 - **仓库自动化**：自动打标签、首次贡献者欢迎、过期 Issue 清理、依赖更新、
   OSSF Scorecard 供应链评分、依赖审查、可选 AI 代码审查
+- **安装包**：Release 附带 Windows（NSIS）与 macOS（dmg，arm64 + x64）安装包，
+  由 `release.yml` 在同一次运行内构建并附上。**不签名**，
+  发布说明里会自动附上各平台的打开方式（详见下方「安全」一节）
 
 ### 变更
 
@@ -61,6 +64,10 @@
   改为**自建一个已知形状的仓库**做夹具，顺便真的验证了「能枚举多个分支」
 - `eslint.config.mjs` 与 `src/main/index.js` 的注释里混入了替换字符（U+FFFD），读起来是乱码
 - `CONTRIBUTING.md` 引用了「Issue 模板中的 Bug 报告」，但仓库里根本没有 Issue 模板（悬空引用）
+- **`release/` 不在 eslint 与 vitest 的排除范围内**。`npm run dist` 会把
+  **整份 `resources/**`**（含第三方模板里几千条 `no-undef`）复制进 `release/`，
+  而 eslint **不读 `.gitignore`** —— 只跑一次打包，`npm run lint` 就会从「无报错」
+  变成 12958 个问题。`.gitignore` 里的 `/release/` 挡不住它
 
 ### 安全
 
@@ -75,6 +82,10 @@
   文档解析库存在未修复漏洞（`decompress` 的 Zip Slip 类问题、`xlsx` 的原型污染与 ReDoS），
   而它们正是用来读用户文件的。跟踪见
   [#15](https://github.com/liangyuxiang/zerowork/issues/15)
+- **安装包没有代码签名**（没有证书，签名与公证都做不到）。
+  用户会看到 macOS 的「已损坏 / 无法验证开发者」或 Windows 的 SmartScreen 提示 ——
+  **这不是打包出错**。发布说明里会自动附上各平台的打开方式与原因，
+  避免用户把安全拦截误读成「下到了恶意软件」。拿到证书后应补上签名与公证
 
 ---
 
