@@ -67,14 +67,23 @@ jobs:
           version="${TAG#v}"
           echo "从 CHANGELOG.md 提取 ${version} 的说明"
 
-          # 取出版本标题之后、下一个版本标题之前的内容
+          # 取出版本标题之后、下一个版本标题之前的内容。
+          #
+          # 末尾要**去掉空行与水平分隔线** —— CHANGELOG 里各版本之间用 `---` 分隔，
+          # 而 `---` 正好落在上一个版本的段尾。不去掉的话，发布说明里会出现
+          # 「CHANGELOG 段尾的 ---」紧挨着「变更清单前的 ---」，
+          # 渲染成两条连在一起的分隔线（v0.2.0 首次发布时就是这样）。
           awk -v ver="$version" '
             BEGIN { found = 0 }
             /^## \[/ {
               if (found) exit
               if (index($0, "[" ver "]") > 0) { found = 1; next }
             }
-            found { print }
+            found { lines[n++] = $0 }
+            END {
+              while (n > 0 && (lines[n-1] == "" || lines[n-1] == "---")) n--
+              for (i = 0; i < n; i++) print lines[i]
+            }
           ' CHANGELOG.md > changelog-section.md
 
           if [[ -s changelog-section.md ]]; then
