@@ -153,7 +153,7 @@ function startDaemon() {
     serviceName: "zerowork-daemon",
     /*
      * daemon 的 cwd 继承本进程的启动目录、不可靠（换种启动方式就变，打包后更甚）。
-     * 而应用根是权限边界的���入（workspace 守卫拒「把应用目录设为工作空间」），
+     * 而应用根是权限边界的入口（workspace 守卫拒「把应用目录设为工作空间」），
      * 值漂了会误伤无关目录或让边界失效 —— 所以用 Electron 的权威值显式传给 daemon
      * （dev = 项目根，打包 = app.asar）。见 core/config-paths.ts 的 getAppDir。
      * 打包态的 resources 定位与随包 uv 见 daemonEnv。

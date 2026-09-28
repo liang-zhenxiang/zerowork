@@ -296,7 +296,7 @@ npm run check:daemon-graph
 
 校验 `src/main/daemon/` 的 40 个模块之间 import 是否闭合：相对 import 指向真文件、
 具名 import 对得上导出。这层错误构建期抓不到，只会在运行时冷门分支上抛
-`ReferenceError`。CI 里有一道同名检查（`daemon-module-graph`）。
+`ReferenceError`。CI 的「静态检查」job 里跑同一条命令。
 
 ## 贡献
 

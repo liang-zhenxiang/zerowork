@@ -34,7 +34,7 @@
 ```
 <类型>(<范围>): <描述>
 
-类型：feat | fix | refactor | perf | test | docs | build | chore | revert
+类型：feat | fix | docs | ci | chore | refactor | perf | test | style | revert | build
 范围：main | daemon | renderer | preload | shared | sandbox | tools | docs | ci
 ```
 
@@ -45,19 +45,36 @@ fix(daemon): 修正 daemon ready 推送与渲染层监听的竞态
 docs(tools): 补充模块图检查的用法说明
 ```
 
+上面那份类型清单**同时写在两个地方**，改一处必须改另一处：
+
+- 本文档这一节（给人看的）
+- `scripts/check-commit-msg.mjs` 的 `ALLOWED_TYPES`（给机器看的）
+
+CI 会校验 PR 标题与 PR 区间内的每条提交（squash 合并后 PR 标题就是提交信息）。
+本地可以自查一条：
+
+```bash
+npm run check:commit-msg -- --message "feat(daemon): 支持批量同步"
+```
+
 ## 开发流程
 
 ```bash
 npm install
 npm run dev            # 开发模式
 
-npm run lint           # 静态检查
+npm run lint:all       # 一条命令跑完 CI 里本地能跑的那些静态检查（推荐）
+npm run lint           # 只跑 eslint
 npm run typecheck      # 类型检查（当前为宽松模式，见 tsconfig.json 注释）
 npm run test           # 单元测试
 npm run test:gui       # 端到端 GUI 测试
+npm run check:commit-msg -- --message "feat(daemon): xxx"   # 校验一条提交信息
 ```
 
-**提交前请确保 `npm run test:all` 通过。**
+**提交前请确保 `npm run test:all` 通过**（= `lint:all` + 单元测试 + 端到端测试）。
+
+`npm run lint:all` 的覆盖范围写在 `scripts/lint.mjs` 的文件头：它**不覆盖**提交信息
+规范（CI 校的是 PR 标题，标题在 PR 建立前不存在）与端到端 GUI 测试。
 
 ### 关于测试
 
@@ -80,8 +97,8 @@ Electron 应用最常见的故障形态是「界面看着正常，但 IPC 全挂
 npm run check:daemon-graph
 ```
 
-它验相对 import 都指向真实文件、具名 import 都能对上导出。CI 里有一道
-同名检查（`daemon-module-graph`）。
+它验相对 import 都指向真实文件、具名 import 都能对上导出。CI 的「静态检查」job
+里跑同一条命令（`npm run check:daemon-graph`）。
 
 ## Pull Request
 

@@ -1,67 +1,228 @@
 name: CI
 
+# 怎样触发工作流
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
 
-# 只读权限足够：workflow 只做 checkout、构建、上传测试截图。
-# 显式收敛 GITHUB_TOKEN，避免来自 fork 的 PR 拿到写权限。
+# 默认只读。这个工作流只做 checkout、安装、构建、跑测试、上传截图，
+# 不需要写权限 —— 显式收敛，避免来自 fork 的 PR 拿到可写 token。
 permissions:
   contents: read
 
+# 同一分支上连续推送时取消上一次未跑完的运行。
+# 每个 job 都要装依赖，重复跑既浪费 Actions 额度，也让 PR 的首个反馈变慢。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 工具版本固定，保证可复现。scripts/lint.mjs 也从这里读，
+  # 于是「本地跑的那套」与「CI 跑的那套」用的是同一批编号。
+  NODE_VERSION: "22"
+  ACTIONLINT_VERSION: "1.7.12"
+  YAMLLINT_VERSION: "1.38.0"
+
+  # 端到端测试全部走 Playwright 的 `_electron`（21 个测试文件里没有任何
+  # `chromium.launch`），所以 Chromium / Firefox 的下载是纯粹的浪费。
+  # 这一条省掉每个 job 几百 MB 的下载。
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
 jobs:
-  verify:
-    name: 校验（${{ matrix.os }}）
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
-
+  # ---------------------------------------------------------------------------
+  # 静态检查：与平台无关，收敛在 ubuntu 上跑一次。
+  #
+  # 不放进三平台矩阵的原因：eslint / prettier / tsc / 文档与资源检查都读文件，
+  # 结论与操作系统无关；放三份只是把同一件事做三遍。
+  # 真正的跨平台差异由 unit-tests 的 Windows leg 覆盖（那是踩过坑的地方）。
+  # ---------------------------------------------------------------------------
+  static-checks:
+    name: 静态检查
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "22"
+          # 不让 GITHUB_TOKEN 残留在 runner 上，后续任何脚本都拿不到它
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: 安装依赖
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
-      - name: 静态检查
+      - name: 代码检查
         run: npm run lint
+
+      - name: 格式检查
+        run: npm run format:check
 
       - name: 类型检查
         run: npm run typecheck
 
+      # daemon 由 40 个 ES 模块组成，彼此用相对 import 相连。这层错误构建期抓不到：
+      # 漏一个 export、写错一个路径，只会在运行时某个冷门分支抛 ReferenceError。
+      # 它是仓库里唯一覆盖 daemon 模块边界的自动化检查（单元测试只跑 tests/unit）。
+      - name: 校验 daemon 模块图
+        run: npm run check:daemon-graph
+
+      - name: 校验文档有效性
+        run: npm run check:docs
+
+      - name: 校验随包内容完整性
+        run: npm run check:resources
+
+      - name: 校验行尾一致性
+        run: npm run check:line-endings
+
+  # ---------------------------------------------------------------------------
+  # 单元测试：保留 Windows leg。
+  #
+  # 这不是形式主义 —— `21553fa test(daemon): 路径测试改为平台无关，修正 Windows CI 失败`
+  # 就是 Windows leg 真实抓到的问题。路径拼接的分隔符、大小写敏感性、
+  # 保留设备名（CON / NUL）这些差异只在 Windows 上暴露。
+  # macOS leg 去掉了：4 个纯逻辑单测在 darwin 上没有任何增量。
+  # ---------------------------------------------------------------------------
+  unit-tests:
+    name: 单元测试（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      # 一个 leg 失败不要取消其他 leg —— 否则既丢失「哪些平台真的失败」，
+      # 也让汇总门禁更难判断
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      # Electron 的约 100 MB 二进制由 @electron/get 下载到这几个目录，
+      # **不在 setup-node 的 npm 缓存覆盖范围内** —— 不单独缓存的话每个 job 各下一次。
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
       - name: 单元测试
         run: npm run test
 
-      - name: 构建
-        run: npm run build
-
-  gui-test:
-    name: 端到端 GUI 测试
-    # Electron 的 GUI 测试需要真实显示环境，放在 macOS 上跑最稳
-    runs-on: macos-latest
+  # ---------------------------------------------------------------------------
+  # 构建：ubuntu 与 windows。
+  #
+  # Windows 要留 —— 这个应用的安装包与托管运行时本来就是面向 Windows 的，
+  # 在 Windows 上构建得出来是基本要求。macOS 的构建不做：产物与平台无关，
+  # 真正的 macOS 差异由 gui-tests 覆盖。
+  # ---------------------------------------------------------------------------
+  build:
+    name: 构建（${{ matrix.os }}）
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "22"
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
       - name: 安装依赖
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: 构建
         run: npm run build
 
-      - name: 端到端测试（启动健康度 + 分区域 + IPC 功能）
+      # 渲染层懒加载块用字面量字符串声明依赖表（viteMapDeps([...])），
+      # 构建工具不会改写它们 —— 产物一旦带上内容哈希，表里每一项都指向不存在的文件，
+      # CSS 那几条会让整个渲染层落进错误边界（真实事故，见 CHANGELOG 的 0.1.4-zerowork.23）。
+      # 这条检查比端到端测试快两个数量级，且顺带覆盖 JS 项。
+      - name: 校验渲染层产物契约
+        run: npm run check:renderer-assets
+
+  # ---------------------------------------------------------------------------
+  # 端到端 GUI 测试：只在 macOS 上跑。
+  #
+  # 为什么不能换成 Linux：21 个测试脚本硬编码了 POSIX 的 /tmp/... 路径，
+  # 而且 Electron 在 Linux 上还额外需要 xvfb 与 --no-sandbox。
+  # 为什么不能加 Windows leg：同一批硬编码路径会让它整体失败。
+  #
+  # 这些测试会真实启动 Electron、驱动 DOM、断言 daemon 存活与 IPC 应答。
+  # 只做「能启动不报错」的冒烟是抓不到 Electron 最常见故障的 ——
+  # 「界面看着在，但 IPC 全挂」。
+  # ---------------------------------------------------------------------------
+  gui-tests:
+    name: 端到端 GUI 测试
+    runs-on: macos-latest
+    # 12 个脚本串行执行（package.json 里是 && 链），且其中若干有固定的等待，
+    # 30 分钟是合理预期。GitHub 的默认超时是 360 分钟，卡住时会计费很久。
+    timeout-minutes: 45
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+
+      - name: 构建
+        run: npm run build
+
+      - name: 端到端测试（启动健康度 / 分区域 / 设置页 / IPC 功能 / 桥接面 / 本地状态 / 对话框 / 预览渲染）
         run: npm run test:gui
 
       - name: 主链路测试（mock 模型服务，无需凭据）
@@ -69,30 +230,224 @@ jobs:
 
       - name: 上传测试截图
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: gui-test-screenshots
           path: artifacts/
           if-no-files-found: warn
+          # 测试截图用于当场排查，没有长期保留的价值（默认 90 天）
+          retention-days: 14
 
-  daemon-module-graph:
-    name: 校验 daemon 模块图
-    # daemon 由 40 个 ES 模块组成，彼此用相对 import 相连。这层错误构建期抓不到：
-    # 漏一个 export、写错一个路径，只会在运行时某个冷门分支抛 ReferenceError。
-    # 这道检查逐个解析模块，验相对 import 都指向真实文件、具名 import 都能对上导出。
-    # 它是仓库里**唯一**覆盖 daemon 模块边界的自动化检查 —— 单元测试只跑 tests/unit，
-    # 不碰 daemon 的模块图。
+  # ---------------------------------------------------------------------------
+  # 工作流静态检查：actionlint + yamllint。
+  #
+  # 这两个 job（连同 zizmor）**不安装 npm 依赖** —— 它们只读 .github/，
+  # 每次跑都给它们装一遍 node_modules 是纯浪费。
+  # ---------------------------------------------------------------------------
+  workflow-lint:
+    name: 工作流静态检查
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "22"
-          cache: npm
+          persist-credentials: false
 
-      - name: 安装依赖
-        run: npm ci
+      - name: 安装 actionlint
+        env:
+          VERSION: ${{ env.ACTIONLINT_VERSION }}
+          # 发行包的 sha256：固定下载地址**并**校验内容，
+          # 这样即使 release 资产被替换也会在这里失败。
+          SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
 
-      - name: 校验 daemon 模块图闭合
-        run: npm run check:daemon-graph
+          url="https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          curl -sSfL -o actionlint.tar.gz "$url"
+
+          echo "${SHA256}  actionlint.tar.gz" | sha256sum -c -
+
+          tar -xzf actionlint.tar.gz actionlint
+
+      - name: 运行 actionlint
+        run: ./actionlint -color
+
+      - name: 安装 yamllint
+        env:
+          VERSION: ${{ env.YAMLLINT_VERSION }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          python3 -m pip install --user "yamllint==${VERSION}"
+
+      - name: 运行 yamllint
+        run: python3 -m yamllint .github/workflows/
+
+  # ---------------------------------------------------------------------------
+  # 工作流安全扫描（zizmor）。
+  #
+  # 基线要求 0 findings。豁免集中在 .github/zizmor.yml，**每条豁免必须写明
+  # 可验证的安全依据** —— 「暂时关掉」不是依据。
+  # ---------------------------------------------------------------------------
+  zizmor:
+    name: 工作流安全扫描
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 运行 zizmor
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # 挂载只读：扫描器没有理由改动被扫描的文件
+          docker run --rm -v "$PWD":/repo:ro \
+            ghcr.io/zizmorcore/zizmor:1.30.1 /repo --no-online-audits
+
+  # ---------------------------------------------------------------------------
+  # 提交信息规范。
+  #
+  # 校验两样东西：PR 标题（squash 合并后它就是提交信息）与 PR 区间内的每条提交。
+  # 不安装 npm 依赖：这个脚本只用 Node 标准库 + git。
+  #
+  # ⚠️ PR 标题是**攻击者可控字符串**（任何人都能改自己 PR 的标题）。
+  # 它必须经 env: 中转再进 shell —— 直接写进 run: 就是标准的表达式注入。
+  # ---------------------------------------------------------------------------
+  commit-messages:
+    name: 提交信息规范
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # 要校验区间内的提交，就必须有完整历史（默认 fetch-depth: 1 什么也取不到）
+          fetch-depth: 0
+
+      - name: 校验 PR 标题
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: node scripts/check-commit-msg.mjs --message "$PR_TITLE"
+
+      - name: 校验 PR 内的提交
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: node scripts/check-commit-msg.mjs --range "origin/${BASE_REF}..HEAD"
+
+      - name: 校验本次推送的提交
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.event.after }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # 新分支的第一次推送里 before 是全零，此时没有「区间」可言
+          if [[ "$BEFORE" =~ ^0+$ ]]; then
+            echo "新分支的首次推送，没有可比对的区间，跳过"
+            exit 0
+          fi
+          node scripts/check-commit-msg.mjs --range "${BEFORE}..${AFTER}"
+
+  # ---------------------------------------------------------------------------
+  # 汇总门禁（CI 总览）。
+  #
+  # 分支保护只盯这一个 check —— 增删检查项时不用回去改分支保护规则。
+  #
+  # 三个必须写对的地方：
+  #   ① `always()` 只保证这个 job **会运行**，不保证它会失败。
+  #      最容易犯的错是把各 job 的结果打印出来然后 exit 0 —— 门禁永远绿灯，
+  #      分支保护形同虚设。所以最后必须显式 exit 1。
+  #   ② `always()` 在被取消的运行上也为真，所以要并上 `!cancelled()`，
+  #      否则一次被取消的运行也能让门禁变绿。
+  #   ③ 不能用 `contains(needs.*.result, 'failure')` 这种模糊匹配：
+  #      被条件跳过的 job 是 `skipped`，而不同 job 的期望值并不相同。
+  #      对每个 job 写显式期望值，任一不符就失败。
+  # ---------------------------------------------------------------------------
+  ci-summary:
+    name: CI 总览
+    runs-on: ubuntu-latest
+    if: always() && !cancelled()
+    needs:
+      - static-checks
+      - unit-tests
+      - build
+      - gui-tests
+      - workflow-lint
+      - zizmor
+      - commit-messages
+    steps:
+      - name: 汇总各检查结果
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'JS'
+          const needs = JSON.parse(process.env.NEEDS);
+
+          // 每个 job 的期望结果。矩阵 job 的 result 是聚合值：
+          // 任一 leg 失败即为 failure，全部通过才是 success。
+          const expected = {
+            'static-checks': ['success'],
+            'unit-tests': ['success'],
+            'build': ['success'],
+            'gui-tests': ['success'],
+            'workflow-lint': ['success'],
+            'zizmor': ['success'],
+            'commit-messages': ['success'],
+          };
+
+          const labels = {
+            'static-checks': '静态检查',
+            'unit-tests': '单元测试',
+            'build': '构建',
+            'gui-tests': '端到端 GUI 测试',
+            'workflow-lint': '工作流静态检查',
+            'zizmor': '工作流安全扫描',
+            'commit-messages': '提交信息规范',
+          };
+
+          const lines = [];
+          const failures = [];
+
+          for (const [job, allowed] of Object.entries(expected)) {
+            const result = needs[job]?.result ?? 'missing';
+            const ok = allowed.includes(result);
+            const mark = ok ? '✅' : '❌';
+            lines.push(`| ${mark} | ${labels[job]} | \`${result}\` |`);
+            if (!ok) failures.push(`${labels[job]}：${result}（期望 ${allowed.join(' / ')}）`);
+          }
+
+          const summary = [
+            '## CI 总览',
+            '',
+            '| 结果 | 检查项 | 状态 |',
+            '| :---: | --- | --- |',
+            ...lines,
+            '',
+          ];
+
+          console.log(summary.join('\n'));
+
+          const fs = await import('node:fs');
+          if (process.env.GITHUB_STEP_SUMMARY) {
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join('\n'));
+          }
+
+          if (failures.length > 0) {
+            console.error('\n以下检查未通过：');
+            for (const failure of failures) console.error(`  ✗ ${failure}`);
+            process.exit(1);
+          }
+
+          console.log('全部检查通过。');
+          JS

@@ -88,7 +88,7 @@ export default [
 		},
 		rules: {
 			"no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
-			// `catch {}` 用���最佳努力的清理（如删除临时目录失败时忽略），
+			// `catch {}` 用于最佳努力的清理（如删除临时目录失败时忽略），
 			// 是刻意写法而非疏漏，不应报错。
 			"no-empty": ["error", { allowEmptyCatch: true }],
 		},

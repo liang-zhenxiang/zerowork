@@ -1,0 +1,45 @@
+# Prettier 排除清单
+#
+# 这个仓库**不强制**全仓格式化，原因是真实存在的、不是懒：
+#
+#   · `src/renderer/src/**` 与 `src/main/daemon/**` 是大块生成式模块（`app.js` 单个 6.8 万行），
+#     且是 2 空格缩进。`.prettierrc` 的 `useTabs: true` 会把它们整体重排 ——
+#     CONTRIBUTING.md 的「🚫 不要做的」第一条明确禁止这件事：巨型 diff 会淹没真实改动。
+#   · `tests/**` 与手写源码同理（2 空格缩进），一次性重排同样是上千行噪音。
+#   · `package.json` 由 npm 自己改写（2 空格），把它纳入检查 = 每次 `npm install <包>` 都会红。
+#
+# 因此 `npm run format:check` 的范围收敛为「工具链与工作流」——
+# 那是当前真正一致、且守住它有实际价值的部分：
+#
+#     *.mjs（根配置） / tools/**/*.mjs / .github/**/*.yml
+#
+# 其余文件仍然欢迎用编辑器按 `.prettierrc` 格式化，只是**不作为门禁**。
+
+# 构建产物
+out/
+dist/
+release/
+node_modules/
+artifacts/
+coverage/
+
+# 由 npm 管理格式，纳入检查会在每次安装依赖后误报
+package.json
+package-lock.json
+
+# 随包分发的第三方内容，不是本工程源码（与 eslint.config.mjs / vitest.config.mjs 的排除一致）
+resources/
+
+# 大块生成式模块：重排会产生淹没真实改动的巨型 diff
+src/renderer/src/
+src/main/daemon/
+
+# 手写但当前是 2 空格缩进，一次性重排是同量级噪音
+src/main/
+src/preload/
+src/shared/
+tests/
+
+# 文档的换行与表格由人工控制（中文全角标点与表格对齐对格式化很敏感）
+*.md
+docs/
