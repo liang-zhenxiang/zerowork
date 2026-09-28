@@ -8,7 +8,7 @@ body:
     attributes:
       value: |
         提功能请求之前，请先看一眼
-        [维护者手册的「项目定位与边界」](https://github.com/liangyuxiang/zerowork/blob/main/docs/MAINTAINER_GUIDE.md#项目定位与边界)
+        [维护者手册的「项目定位与边界」](https://github.com/liang-zhenxiang/zerowork/blob/main/docs/MAINTAINER_GUIDE.md#项目定位与边界)
         —— 那一节列出了这个项目**明确不做**的事以及原因。
         落在「不做」里的需求，我们会在 Issue 里说明理由并关闭，而不是让它悬着。
 

@@ -11,8 +11,8 @@ body:
 
         提交之前请先确认两件事，这能帮我们省下大量来回沟通的时间：
 
-        1. 搜索[已有 Issue](https://github.com/liangyuxiang/zerowork/issues)，避免重复
-        2. 查阅 [docs/TROUBLESHOOTING.md](https://github.com/liangyuxiang/zerowork/blob/main/docs/TROUBLESHOOTING.md)
+        1. 搜索[已有 Issue](https://github.com/liang-zhenxiang/zerowork/issues)，避免重复
+        2. 查阅 [docs/TROUBLESHOOTING.md](https://github.com/liang-zhenxiang/zerowork/blob/main/docs/TROUBLESHOOTING.md)
            —— 启动卡住、命令执行被拒、文档解析失败这些常见故障在那里都有现成答案
 
   - type: checkboxes

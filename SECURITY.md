@@ -34,7 +34,7 @@
 | 修复或缓解方案 | 视严重度而定，会在评估后告知预计时间 |
 
 修复发布后我们会在 Release 说明与
-[Security Advisories](https://github.com/liangyuxiang/zerowork/security/advisories) 中致谢
+[Security Advisories](https://github.com/liang-zhenxiang/zerowork/security/advisories) 中致谢
 （除非你希望匿名）。
 
 ### 严重度分级
@@ -115,7 +115,7 @@
 - **文档解析库存在未修复的漏洞。** `officeparser` 依赖的 `decompress` 有 Zip Slip 类公告，
   `xlsx` 有原型污染与 ReDoS 公告且 npm 上没有修复版本。这两条都在**运行时**路径上
   （它们正是用来读用户文件的）。跟踪在
-  [依赖安全 Issue](https://github.com/liangyuxiang/zerowork/issues/15)。
+  [依赖安全 Issue](https://github.com/liang-zhenxiang/zerowork/issues/15)。
 - **随包第三方内容的授权状态尚未完全确认。** 见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
   这不是技术漏洞，但它决定了「分发这个软件」这件事本身是否成立。
 - **命令沙箱是 Windows 专有的**（靠 `koffi` 调 `kernel32` / `advapi32`）。

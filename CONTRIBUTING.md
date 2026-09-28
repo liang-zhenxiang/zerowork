@@ -46,7 +46,7 @@
 
 | 类型 | 适合谁 | 怎么做 |
 | --- | --- | --- |
-| **报 Bug** | 任何人 | 用 [Bug 模板](https://github.com/liangyuxiang/zerowork/issues/new/choose) 提 Issue，附报错原文 |
+| **报 Bug** | 任何人 | 用 [Bug 模板](https://github.com/liang-zhenxiang/zerowork/issues/new/choose) 提 Issue，附报错原文 |
 | **改文档** | 任何人 | 文档与代码同等重要。发现文档与实现不一致，指明具体文件与行号即可 |
 | **补测试** | 熟悉项目的人 | 见[测试](#测试)一节：**每一层都写过「为什么这一层不可替代」**，还没被覆盖的地方是明确的 |
 | **修 `good first issue`** | 首次贡献者 | 这类 Issue 的正文里写明了「从哪个文件入手」 |
@@ -61,8 +61,8 @@
 
 ## 报告问题
 
-- **功能缺陷 / 崩溃**：使用 [Bug 模板](https://github.com/liangyuxiang/zerowork/issues/new/choose)
-- **使用疑问**：到 [Discussions](https://github.com/liangyuxiang/zerowork/discussions)，不必开 Issue
+- **功能缺陷 / 崩溃**：使用 [Bug 模板](https://github.com/liang-zhenxiang/zerowork/issues/new/choose)
+- **使用疑问**：到 [Discussions](https://github.com/liang-zhenxiang/zerowork/discussions)，不必开 Issue
 - **安全漏洞**：**不要**开公开 Issue，见 [SECURITY.md](SECURITY.md)
 - **文档与实现不一致**：请指出具体文件与行号
 

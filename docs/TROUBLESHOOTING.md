@@ -225,7 +225,7 @@ npm run test:gui:real
 
 项目依赖的文档解析库存在已知漏洞（`decompress` 的 Zip Slip 类问题、`xlsx` 的原型污染与
 ReDoS），**都没有在当前版本里修复**。它们正是用来读你打开的文件的。
-跟踪与处置见 [依赖安全 Issue](https://github.com/liangyuxiang/zerowork/issues/15)，
+跟踪与处置见 [依赖安全 Issue](https://github.com/liang-zhenxiang/zerowork/issues/15)，
 威胁模型见 [SECURITY.md](../SECURITY.md)。
 
 在修复之前：**只打开你信任来源的文档**。这是标准的「不要让不受信任的解析输入
@@ -284,7 +284,7 @@ MCP 客户端是**按会话桶**创建的，真正的连接发生在**会话构�
 按 [SUPPORT.md](../SUPPORT.md) 的分流走：
 
 1. 再搜一遍本页与现有 Issue（关键词用**报错原文**）
-2. 使用疑问 → [Discussions](https://github.com/liangyuxiang/zerowork/discussions)
-3. 确认是 Bug → [提 Issue](https://github.com/liangyuxiang/zerowork/issues/new/choose)，
+2. 使用疑问 → [Discussions](https://github.com/liang-zhenxiang/zerowork/discussions)
+3. 确认是 Bug → [提 Issue](https://github.com/liang-zhenxiang/zerowork/issues/new/choose)，
    附上报错原文、复现步骤、平台与版本
 4. 安全漏洞 → **不要开公开 Issue**，见 [SECURITY.md](../SECURITY.md)

@@ -13,7 +13,7 @@
 
 ### 安装
 
-从 [Releases](https://github.com/liangyuxiang/zerowork/releases) 下载对应平台的安装包。
+从 [Releases](https://github.com/liang-zhenxiang/zerowork/releases) 下载对应平台的安装包。
 
 > ⚠️ **当前安装包没有代码签名。** 这是没有代码签名证书时的必然结果，不是打包出错：
 >

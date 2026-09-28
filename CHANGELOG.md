@@ -81,7 +81,7 @@
 - `SECURITY.md` 补上**正式威胁模型**（资产、信任边界、对手假设）与已知的开放风险：
   文档解析库存在未修复漏洞（`decompress` 的 Zip Slip 类问题、`xlsx` 的原型污染与 ReDoS），
   而它们正是用来读用户文件的。跟踪见
-  [#15](https://github.com/liangyuxiang/zerowork/issues/15)
+  [#15](https://github.com/liang-zhenxiang/zerowork/issues/15)
 - **安装包没有代码签名**（没有证书，签名与公证都做不到）。
   用户会看到 macOS 的「已损坏 / 无法验证开发者」或 Windows 的 SmartScreen 提示 ——
   **这不是打包出错**。发布说明里会自动附上各平台的打开方式与原因，

@@ -7,17 +7,17 @@ blank_issues_enabled: false
 
 contact_links:
   - name: 🔒 报告安全漏洞
-    url: https://github.com/liangyuxiang/zerowork/security/advisories/new
+    url: https://github.com/liang-zhenxiang/zerowork/security/advisories/new
     about: 请勿通过公开 Issue 报告安全漏洞，使用这个私有渠道。威胁模型见 SECURITY.md。
 
   - name: 💬 提问与讨论
-    url: https://github.com/liangyuxiang/zerowork/discussions
+    url: https://github.com/liang-zhenxiang/zerowork/discussions
     about: 使用方式上的疑问、想法交流，欢迎到 Discussions，不必开 Issue。
 
   - name: 📚 排错文档
-    url: https://github.com/liangyuxiang/zerowork/blob/main/docs/TROUBLESHOOTING.md
+    url: https://github.com/liang-zhenxiang/zerowork/blob/main/docs/TROUBLESHOOTING.md
     about: 启动问题、命令执行被拒、文档解析异常等常见故障，先按报错原文在这里搜一遍。
 
   - name: 🧭 不知道走哪条？
-    url: https://github.com/liangyuxiang/zerowork/blob/main/SUPPORT.md
+    url: https://github.com/liang-zhenxiang/zerowork/blob/main/SUPPORT.md
     about: SUPPORT.md 把「文档 → Discussions → Bug → 安全报告」的分流写清楚了。

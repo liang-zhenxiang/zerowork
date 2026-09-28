@@ -14,7 +14,7 @@
 
 ## 2. 使用问题（怎么配、为什么没生效）
 
-到 [GitHub Discussions](https://github.com/liangyuxiang/zerowork/discussions) 提问。
+到 [GitHub Discussions](https://github.com/liang-zhenxiang/zerowork/discussions) 提问。
 
 提问时请附上：
 
@@ -28,7 +28,7 @@
 
 ## 3. 确认是 Bug
 
-请[提 Issue](https://github.com/liangyuxiang/zerowork/issues/new/choose)（选 Bug 模板），
+请[提 Issue](https://github.com/liang-zhenxiang/zerowork/issues/new/choose)（选 Bug 模板），
 附上与上面相同的要素。
 
 一个能被快速定位的 Bug 报告长这样：

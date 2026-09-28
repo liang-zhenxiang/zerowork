@@ -2,7 +2,7 @@
 /**
  * check-docs.mjs —— 文档有效性校验
  *
- * 检查两件事：
+ * 检查三件事：
  *
  *   ① **相对链接都能落到真实文件**。文档里写 `docs/USAGE.md`，那个文件就得在。
  *      链接腐烂是文档类仓库最常见的失效形式，而它恰好是机器能查的。
@@ -11,14 +11,21 @@
  *      代码里就必须真的有地方读它。这条防的是「文档描述了一个不存在的开关」——
  *      使用者照着配，配了没反应，比报错更难排查。
  *
+ *   ③ **指向本项目自身的链接用 canonical 仓库地址**（从 `package.json` 的
+ *      `repository.url` 读）。写错一个字母的 owner，链接就静默变成 404 ——
+ *      而下面的「不做的事」说明了为什么外链检查救不了它。**这条规则是踩出来的**：
+ *      曾经有 19 处链接写成了 `github.com/liangyuxiang/zerowork`，那个仓库并不存在。
+ *
  * 用法：
  *   node scripts/check-docs.mjs
  *
  * 退出码：0 全部有效，1 存在失效项。
  *
- * **不做**的事：不校验外链（http/https）是否可访问 —— 那要联网，
- * 会让一个静态检查变成网络依赖；也不校验 `#锚点` 是否存在，
- * 中文标题的锚点规则（大小写、标点、URL 编码）在各渲染器下并不一致。
+ * **不做**的事：不校验**外部**链接（指向别人的 http/https 地址）是否可访问 ——
+ * 那要联网，会让一个静态检查变成网络依赖，进而变成一个不稳定的门禁。
+ * 代价是外链腐烂只能靠人发现；第 ③ 条是对其中最高频那类（指向本项目自己）
+ * 的免联网补偿。也不校验 `#锚点` 是否存在 —— 中文标题的锚点规则
+ * （大小写、标点、URL 编码）在各渲染器下并不一致。
  */
 
 import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
@@ -45,6 +52,33 @@ const DOC_FILES = [
 /** 环境变量的扫描范围：文档里提到它，这里就得有地方读它。 */
 const ENV_SCAN_DIRS = ['src', 'tools', 'tests', 'resources', 'scripts'];
 const ENV_TOKEN = /\bZEROWORK_[A-Z0-9_]+\b/g;
+
+/**
+ * 「指向本项目自身的链接」的扫描范围。比 DOC_FILES 宽 ——
+ * Issue 模板、PR 模板、工作流里的欢迎语都会写死仓库地址。
+ * 只扫文本文件，不扫二进制。
+ */
+const SELF_LINK_FILES = [
+	...DOC_FILES,
+	'.github/ISSUE_TEMPLATE/bug_report.yml',
+	'.github/ISSUE_TEMPLATE/config.yml',
+	'.github/ISSUE_TEMPLATE/documentation.yml',
+	'.github/ISSUE_TEMPLATE/feature_request.yml',
+	'.github/PULL_REQUEST_TEMPLATE.md',
+	'.github/workflows/welcome.yml',
+];
+
+/** 从 package.json 的 repository.url 读出 canonical 仓库 slug（owner/repo）。 */
+function readCanonicalSlug() {
+	try {
+		const pkg = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
+		const url = pkg?.repository?.url ?? '';
+		const match = url.match(/github\.com[/:]([^/]+\/[^/.]+)/);
+		return match ? match[1] : null;
+	} catch {
+		return null;
+	}
+}
 
 const USE_COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, text) => (USE_COLOR ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -173,6 +207,36 @@ function main() {
 
 	const unknownEnv = [...declared].filter((token) => !sourceText.includes(token)).sort();
 
+	// ---- 指向本项目自身的链接必须用 canonical 仓库地址 ----
+	//
+	// 这条规则是**踩出来的**：`check-docs` 不校验外链（那要联网），于是 19 处
+	// `github.com/liangyuxiang/zerowork` 一路通过 —— 那个仓库**根本不存在**，
+	// 全是 404。owner 写错一个字母，链接就静默失效，而没有任何东西会告诉你。
+	//
+	// 判据不需要联网：canonical 仓库地址从 `package.json` 的 `repository.url` 读，
+	// 然后把文档里出现的 `github.com/<owner>/<repo>` 逐个比对 ——
+	// **仓库名相同但 owner 不同**就是写错了。
+	const canonicalSlug = readCanonicalSlug();
+	const wrongOwner = [];
+
+	if (canonicalSlug) {
+		const [canonicalOwner, canonicalRepo] = canonicalSlug.split('/');
+		// 扫描范围比 DOC_FILES 宽：Issue 模板与工作流里的欢迎语同样会写死仓库地址
+		for (const rel of SELF_LINK_FILES) {
+			const abs = path.join(ROOT, rel);
+			if (!existsSync(abs)) continue;
+			const text = readFileSync(abs, 'utf8');
+			text.split('\n').forEach((line, index) => {
+				for (const match of line.matchAll(/github\.com\/([^/\s)"'<]+)\/([^/\s)"'#?<]+)/g)) {
+					const [, owner, repo] = match;
+					if (repo === canonicalRepo && owner !== canonicalOwner) {
+						wrongOwner.push(`${rel}:${index + 1} 指向 ${owner}/${repo}，本项目是 ${canonicalSlug}`);
+					}
+				}
+			});
+		}
+	}
+
 	// ---- 报告 ----
 	process.stdout.write('\n文档校验\n');
 	process.stdout.write(
@@ -194,12 +258,26 @@ function main() {
 		for (const problem of problems) process.stdout.write(`  ✗ ${problem}\n`);
 	}
 
-	if (problems.length === 0 && unknownEnv.length === 0) {
-		process.stdout.write(`  ${green('✓')} 相对链接全部有效，环境变量全部有出处\n`);
+	if (wrongOwner.length > 0) {
+		process.stdout.write(`\n${red('指向本项目的链接用错了 owner（那些仓库不存在）：')}\n`);
+		for (const problem of wrongOwner) process.stdout.write(`  ✗ ${problem}\n`);
+		process.stdout.write(
+			dim(
+				'  canonical 地址取自 package.json 的 repository.url；外链是否可达要联网，这条规则不需要。\n',
+			),
+		);
+	}
+
+	const totalProblems = problems.length + unknownEnv.length + wrongOwner.length;
+
+	if (totalProblems === 0) {
+		process.stdout.write(
+			`  ${green('✓')} 相对链接全部有效，环境变量全部有出处，自引用链接都指向 ${canonicalSlug ?? '本项目'}\n`,
+		);
 		return 0;
 	}
 
-	process.stdout.write(`\n${red(`共 ${problems.length + unknownEnv.length} 处问题`)}\n`);
+	process.stdout.write(`\n${red(`共 ${totalProblems} 处问题`)}\n`);
 	return 1;
 }
 
