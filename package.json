@@ -1,7 +1,7 @@
 {
   "name": "zerowork",
   "productName": "ZeroWork",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "办公 AI Agent 桌面端（基于 pi agent harness）",
