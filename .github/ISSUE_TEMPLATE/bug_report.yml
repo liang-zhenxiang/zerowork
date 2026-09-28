@@ -1,0 +1,129 @@
+name: 🐛 Bug 报告
+description: 崩溃、报错，或行为与文档描述不符
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你花时间反馈问题！
+
+        提交之前请先确认两件事，这能帮我们省下大量来回沟通的时间：
+
+        1. 搜索[已有 Issue](https://github.com/liangyuxiang/zerowork/issues)，避免重复
+        2. 查阅 [docs/TROUBLESHOOTING.md](https://github.com/liangyuxiang/zerowork/blob/main/docs/TROUBLESHOOTING.md)
+           —— 启动卡住、命令执行被拒、文档解析失败这些常见故障在那里都有现成答案
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 Issue，确认没有重复
+          required: true
+        - label: 我已查阅排错文档
+          required: true
+        - label: 这不是安全漏洞（安全漏洞请走 SECURITY.md 中的私有渠道，不要提公开 Issue）
+          required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及的功能区域
+      description: 出问题的是哪一块？
+      options:
+        - 启动 / 界面渲染
+        - 模型对话 / Agent 循环
+        - 技能调用 / 专家
+        - MCP 连接器
+        - 文档解析（PDF / DOCX / XLSX / PPTX）
+        - 命令执行 / 沙箱与权限
+        - 自动化任务（定时）
+        - 会话管理 / 归档 / 审计
+        - 安装包 / 更新
+        - 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      description: 安装包文件名里的版本号，或「关于」页显示的版本
+      placeholder: 0.2.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      description: |
+        这一项很关键 —— 命令沙箱是 **Windows 专有**的。
+        在 macOS / Linux 上，默认权限档下命令会被**直接拒绝执行**，
+        这是有意的安全设计而不是缺陷（见 README 的平台支持说明）。
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望的行为
+      placeholder: 点开工作空间里的 xlsx 文件应当看到表格预览
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际的行为与完整报错
+      description: |
+        请直接粘贴**文本日志**而不是截图 —— 报错原文是可搜索的，截图不是。
+        界面类问题可以附截图，但日志请一并贴上。
+        ⚠️ 贴之前请确认里面**没有模型 API Key**。
+      render: shell
+      placeholder: |
+        Error: [某处] 渲染层捕获到未处理的异常
+            at ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现方式
+      description: 是必现还是偶发？有没有摸索出触发条件？
+      placeholder: |
+        必现。步骤：
+        1. 打开工作空间
+        2. 点开一个 .xlsx 文件
+        3. 整个面板变成「界面渲染出错」
+    validations:
+      required: true
+
+  - type: dropdown
+    id: config-dir
+    attributes:
+      label: 配置目录
+      description: 你有没有改过 `ZEROWORK_CONFIG_DIR`？有些问题只在特定配置目录下复现
+      options:
+        - 用的默认值（~/.zerowork）
+        - 自定义过（请在补充信息里说明路径）
+        - 不确定
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: |
+        任何你觉得有帮助的线索。例如「切到完全访问权限档后可以成功」这类观察非常有价值 ——
+        它直接把范围缩小到了权限判定。
+    validations:
+      required: false

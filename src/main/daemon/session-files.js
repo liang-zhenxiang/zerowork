@@ -1948,7 +1948,7 @@ function buildPermissionInfo(settings) {
      * **恒为 partial，不因沙箱生效而改成 full。**
      * WRITE_RESTRICTED 机制上只约束写：读与网络完全不受约束（已实测），
      * 且存在 Everyone 环境写 ACE 与 NTFS 硬链接两个已知缺口
-     * （见 docs/architecture.md §4.4b 的已知边界）。
+     * （见 docs/ARCHITECTURE.md §4.4b 的已知边界）。
      */
     enforcement: "partial",
     // 沙箱状态并进这段文案（设置页整段渲染）；机器可读的诊断在事件日志的
@@ -2649,7 +2649,7 @@ async function createHost(bucket, sessionManager) {
      *
      * 为什么必须让模型知道：它拿系统 Python 写脚本时，缺库的第一反应就是
      * `pip install` —— 而那在沙箱里**必定失败**（2026-09-17 现场，见
-     * docs/architecture.md 已知边界第 8 条）。给出真实路径，Python 任务才会
+     * docs/ARCHITECTURE.md 已知边界第 8 条）。给出真实路径，Python 任务才会
      * 落在我们受控且已备依赖的环境上。运行时清单还负责把「被用户禁用」
      * 与「未就绪」分开告知（不许静默降级成「找不到」）。
      *

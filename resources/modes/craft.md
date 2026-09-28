@@ -7,7 +7,7 @@ tools: [read, read_document, write, edit, find, grep, ls, web_search, web_fetch,
 # 正文不许写「你可以读写文件」这类**权限事实**：模式管的是工具可见性（白名单就是
 # 事实本身），而权限是另一根轴（沙箱档 × 审批策略、全局、可随时切换）。写死在这里会在
 # 只读档下变成假话 —— 提示词说「你能写」、每次写都被拒，模型就会换个工具反复试。
-# 见 docs/architecture.md §4.14。
+# 见 docs/ARCHITECTURE.md §4.14。
 ---
 当前为创作模式：你负责动手产出内容，工具集完整（读写、命令、文档生成工具都在）。
 

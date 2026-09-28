@@ -1,0 +1,97 @@
+# Dependabot 配置
+#
+# 文档：https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # ---------------------------------------------------------------------------
+  # GitHub Actions
+  #
+  # 工作流里的 `uses:` 全部 pin 到了 commit SHA（供应链基线，见 .github/zizmor.yml）。
+  # **pin 到 SHA 而不开 Dependabot 等于用供应链安全换永久不升级** ——
+  # 几个月后会攒下一堆没人敢动的孤儿 SHA。这两件事必须一起做。
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    # 冷却期：新版本发布后等 7 天才提 PR。
+    # Actions 的 tag 被改投恶意代码、或新版本本身有问题时，冷却期让问题先暴露出来。
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      # 生成的提交信息本身即符合约定式提交规范，CI 的 commit-messages 不会拦
+      prefix: "ci"
+      include: "scope"
+    # 把多个 Actions 的更新合并到一个 PR，避免 PR 数量爆炸（本项目 pin 了 8 个 Action）
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ---------------------------------------------------------------------------
+  # npm —— 只覆盖**仓库根**，刻意不覆盖 resources/**
+  #
+  # `resources/` 下是随包分发的第三方插件模板，它们自带 package.json / package-lock.json /
+  # yarn.lock。本项目对它们的约定是**原样分发**：
+  #   · 它们不参与本项目的 lint 与测试（eslint / vitest / prettier 三处整目录排除）
+  #   · 它们只在用户主动使用对应功能时才被安装，不随应用运行
+  #   · 改它们的 lockfile 会让我们的副本与上游不一致，且没有任何测试能覆盖
+  #
+  # 实测教训：只开启「自动安全修复」而不写这份配置时，Dependabot 会对着那些模板
+  # 连开 6 个 PR（#9–#14），全部只能关闭。所以这里显式把范围限定在 `/`。
+  #
+  # 那些模板的依赖告警，正确处置是登记在 THIRD_PARTY_NOTICES.md，不是逐个升级。
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Asia/Shanghai"
+    open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    # 分三组，避免一次开十几个 PR：
+    #   · 生产依赖的主版本更新单独一组 —— 它们需要实测，不能和别的混在一起
+    #   · 生产依赖的次/修订版本合并
+    #   · 开发依赖合并
+    groups:
+      npm-production-major:
+        dependency-type: "production"
+        update-types:
+          - "major"
+      npm-production:
+        dependency-type: "production"
+        update-types:
+          - "minor"
+          - "patch"
+      npm-development:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    # 这个项目的运行时依赖里有文档解析库（officeparser / xlsx），
+    # 它们直接处理用户不可信的文件输入 —— 更新它们要跑完整的端到端测试，
+    # 不适合作为「顺手合并」的 PR。这一组的问题是 #15。
+    #
+    # xlsx 单独排除：npm 上 0.18.5 之后没有新版本（SheetJS 已迁到自有分发渠道），
+    # 让它一直弹「无法修复」的告警只会造成告警疲劳。处置方式见 #15。
+    ignore:
+      - dependency-name: "xlsx"

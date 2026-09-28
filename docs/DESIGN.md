@@ -3,7 +3,7 @@
 渲染层 UI 的设计规范。**设计 Token 的单一真源是 `src/renderer/src/app.css` 的
 `:root`**；本文档规定的是这些 Token 怎么用、以及哪些做法被禁止。
 
-改本文档时，同步检查引用它的注释：`rg 'docs/design.md' src/`。
+改本文档时，同步检查引用它的注释：`rg 'docs/DESIGN.md' src/`。
 
 ---
 
