@@ -9,10 +9,25 @@
  * minify 显式关闭：保留原始标识符与注释，便于线上问题定位与堆栈对照。
  */
 import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import react from "@vitejs/plugin-react";
 
 const NO_MINIFY = false;
+
+/**
+ * 应用版本号的**单一真源**：package.json 的 `version`。
+ *
+ * 渲染层需要把版本显示给用户（侧栏品牌行、设置-关于），但它跑在 sandbox 渲染进程里，
+ * 读不到 package.json；主进程虽有 `app.getVersion()`，却只用在 `setAboutPanelOptions`
+ * （原生面板）上，没有通向渲染层的通道 —— 新开一条 IPC 意味着渲染层要**异步**取值，
+ * 而侧栏是同步渲染的，会多出一个 loading 态。
+ *
+ * 所以走 Vite 的构建期替换：`__APP_VERSION__` 在 dev 与 build 两种模式下都会被
+ * 替换成下面这行读到的字面量（不是只在 build 时），运行时零开销、保持同步。
+ * 守卫在 `scripts/check-renderer-assets.mjs`：产物里必须含这个版本号。
+ */
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8"));
 
 export default defineConfig({
 	main: {
@@ -48,6 +63,9 @@ export default defineConfig({
 	renderer: {
 		root: resolve("src/renderer"),
 		plugins: [react()],
+		// 构建期注入版本号（见文件上方 pkg 的说明）。渲染层源码里写的是
+		// `__APP_VERSION__`，替换发生在**构建期**，所以运行时它就是一个普通字符串。
+		define: { __APP_VERSION__: JSON.stringify(pkg.version) },
 		build: {
 			minify: NO_MINIFY,
 			rollupOptions: {

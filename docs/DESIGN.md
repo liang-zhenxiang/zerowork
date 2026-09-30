@@ -55,6 +55,30 @@
 图标按钮（小控件）active 叠 `scale(.96)`；次级按钮、常规按钮、chip、tab 胶囊、卡片
 active 叠 `scale(.98)`。
 
+### §3.2 缓动只有两条曲线，且**裸 `ease` 不许出现**
+
+| 用途 | 取值 |
+| --- | --- |
+| `transition`（变色 / 透明度 / 位移 / 旋转等一切纯视觉反馈） | `var(--ease-standard)`（= CSS `ease-out`） |
+| `animation` 入场 | `var(--ease-out)` |
+| 动画语义的曲线（逐字节奏、扫光、回弹） | 在 §10.3 单独登记 |
+
+**CSS 关键字 `ease`（`cubic-bezier(0.25, 0.1, 0.25, 1)`）不在允许之列** ——
+它与 `ease-out` 是两条不同的曲线，混用会让「同样的 150ms」在不同控件上手感不一致。
+2026-10-01 把全文 40 处过渡声明里的 49 个裸 `ease` 收口到 `--ease-standard`
+（含 `background` / `color` / `box-shadow` / `transform` / `opacity` /
+`border-color` / `scrollbar-color` / `stroke-dashoffset`，以及 §5.1 的
+`width` / `height` 两类布局属性例外）。
+守卫就是验收命令，命中数应为 0：
+
+```bash
+rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
+```
+
+> 注释里引用**第三方**取值（如 cr-input-container 的 `.15s ease`）不算违规 ——
+> 上面这条命令只认「同一行里 `transition:` 之后跟裸 `ease`」的形状，
+> 写注释时把 `transition:` 前缀去掉即可。
+
 ### §3.3 卡片级别
 
 内容容器走**卡片级别**，不新开组件级别：底用 `--bg`，边界由卡片自身的圆角与底色承担。
@@ -149,3 +173,52 @@ active 叠 `scale(.98)`。
 - **分类色板只有 6 槽** —— 超出的分类走比 system 更弱一档的中性灰，
   区分靠行名与数字，不靠色相
 - **空会话首条消息的入场时机** —— 只在空会话出第一条消息时播
+
+### §10.3.1 减弱动态效果（`prefers-reduced-motion: reduce`）
+
+**系统开启「减弱动态效果」时，`app.css` 里的动画必须全部停掉。** 规则块在
+`app.css` **文件末尾**（`@media (prefers-reduced-motion: reduce)`），分四组：
+打字机与光标、无限循环动效（转圈 / 呼吸点 / 扫光）、一次性入场动画、
+以及沿袭下来的 `.turn-nav` 过渡豁免。
+
+**位置是硬约束，不是排版偏好**：`@media` 不提高优先级，同级选择器靠源码顺序裁决；
+动画宿主的声明遍布全文（`.toast` / `.pop-menu` / `.questionnaire-card` …），
+规则块放在中段会被它们盖掉。新增动画时**去那里补一行**。
+
+> 已覆盖的入口（2026-10-01）：15 个 `@keyframes` 的全部宿主 —— `.home-title-char`、
+> `.home-title-caret`(±`::after`)、`.spinner`、`.text-shimmer`、`.tool-dot.running`
+> 以及 33 个入场动画宿主（`page-in` / `pop-layer-in` / `fold-in` / `backdrop-in` /
+> `toast-in` / `jump-to-bottom-in` / `stream-reveal` / `questionnaire-slide-up`）。
+> 此前只覆盖 `.turn-nav` 一处。
+
+**关动画 ≠ 回到「正常样子」。** `animation: none` 只是让元素回到**基础态**，
+而基础态不一定是它本该显示的样子。**每关一个动画都要问一句：关掉之后元素停在
+基础态，那个状态对吗？** 本案里三条都不是：
+
+| 元素 | 基础态 | 关掉动画后该给的终态 |
+| --- | --- | --- |
+| `.home-title-char` | `opacity: 0`（靠动画淡入、`both` 填充） | **`opacity: 1`** —— 少了它，首页标题永久不可见 |
+| `.home-title-caret`(±`::after`) | 无（恒亮） | **`opacity: 0`** —— 它的终态是「收笔后隐」，不是停成一支恒亮的光标 |
+| `.text-shimmer` | 背景定位 0%，文字被 `background-clip: text` 裁在 26% 的极浅色上 | **改回实色** `color: var(--shimmer-color)` —— 停在基础态等于这行字没写 |
+
+反过来说，一次性入场动画的基础态**就是**终态（它们的 keyframes 只管「从哪来」），
+所以那一组只写 `animation: none`；写多余的终态反而会掩盖真正的陷阱。
+
+这条有 e2e 防线：`tests/e2e/gui-smoke.mjs` 用 `emulateMedia({ reducedMotion: 'reduce' })`
+断言「标题文字非空且 `opacity` 为 1」「`.spinner` / `.text-shimmer` 的 `animation-name`
+为 `none`」，并先用未开启状态做反向对照；去掉终态那行，断言会红。
+
+### §10.3.2 档外色彩与阴影（**登记在案，不为了「统一」去动**）
+
+下列取值**刻意**不走 `--cat-*` 六槽或 `--shadow-*` 三档，各有语义，已登记：
+
+| 项 | 取值 | 为什么 |
+| --- | --- | --- |
+| 文件类型分色 | 9 个选择器、7 个色值：`.doc-file-pdf` `#c94f4f`、`.doc-file-word` / `.file-icon-code` `#4a7bc8`、`.doc-file-excel` / `.file-icon-markdown` `#4b9e6b`、`.doc-file-ppt` `#d98a3d`、`.file-icon-config` `#b7903d`、`.file-icon-image` `#8b6bc8`、`.file-icon-media` `#c85a8f` | 按**族**分色（族来自 `shared/doc-formats.ts` 的 `docBadgeOf`），**信息性**不是状态。`--cat-*` 只有 6 槽，塞不下；且这组色要能与各主题共存，塞进分类槽会挤掉真正的分类语义 |
+| 专家头像底 | 8 色（`EXPERT_AVATAR_COLORS`，`app.js`） | 由名字哈希取色、只为「同屏可区分」，**没有语义**。走 token 反而会暗示它有语义 |
+| 档外阴影（6 处声明） | `.capability-row` `0 12px 32px -8px rgba(0, 0, 0, .02)`；`.preview-panel.fullscreen` `-8px 0 24px rgb(0 0 0 / 6%)`；`.preview-menu` `0 8px 24px rgb(0 0 0 / 18%)`；`.preview-pdf-body .react-pdf__Page` 与 `.office-docx .docx-wrapper>section.docx` 的纸张阴影 `0 1px 4px rgb(0 0 0 / 15%)`（同值两处）；`.mcp-switch-thumb` / `.skill-switch-thumb` `0 1px 3px rgb(0 0 0 / 20%)` | 都是**场景值**：能力行的极淡抬升、全屏面板向左的投影、预览菜单、「纸」的抬升、开关滑块的贴边投影。归 `--shadow-sm/md` 会让轻的变重、重的变轻 —— 收编的代价大于收益 |
+
+> 这 6 处**没有暗色版**（暗色变量块只覆写 `--shadow-sm/md/lg/input`），
+> 它们是黑基阴影、落在自带亮底的元素上（纸、滑块、卡片），暗色下依然成立。
+> 若将来暗色主题真的接线（见本文件开头对暗色变量「无实测依据」的说明），
+> 这一行要重新审。
