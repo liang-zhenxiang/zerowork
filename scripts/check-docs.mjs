@@ -38,6 +38,8 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DOC_FILES = [
 	'README.md',
 	'README.en.md',
+	'AGENTS.md',
+	'CLAUDE.md',
 	'CONTRIBUTING.md',
 	'SECURITY.md',
 	'SUPPORT.md',

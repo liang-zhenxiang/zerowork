@@ -38,6 +38,11 @@ node_modules/
 .env
 .env.local
 
+# Claude Code 的个人项目级指令。**它会让 Claude Code 忽略 AGENTS.md**，
+# 而规则应当共享 —— 个人偏好请放到 ~/.claude/ 下的用户级文件里。
+# 详见 CLAUDE.md。
+CLAUDE.local.md
+
 # Python 字节码缓存（运行时自动重建，不入库）
 __pycache__/
 *.pyc

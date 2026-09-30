@@ -110,6 +110,7 @@ npm run dev
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **想改代码的人** —— 进程模型、模块划分、**以及为什么这样设计** |
 | [docs/DESIGN.md](docs/DESIGN.md) | **改界面的人** —— 设计 Token 的档位纪律与禁止清单 |
 | [docs/MAINTAINER_GUIDE.md](docs/MAINTAINER_GUIDE.md) | **维护者** —— 仓库配置、测试分层、发布流程、项目红线 |
+| [AGENTS.md](AGENTS.md) | **用 AI 助手改这个项目的人** —— 开发流程与规则的速查版（AI 工具会自动加载它） |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | **贡献者** —— 本地检查、提交规范、分支策略 |
 | [SUPPORT.md](SUPPORT.md) | **不知道去哪问的人** —— 分流到文档 / Discussions / Bug / 安全报告 |
 | [SECURITY.md](SECURITY.md) | **报告安全问题的人** —— 含威胁模型与已知的开放风险 |
