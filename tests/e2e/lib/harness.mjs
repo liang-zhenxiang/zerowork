@@ -92,6 +92,21 @@ export function createHarness(opts) {
 
 	const CONFIG_DIR = `/tmp/zerowork-e2e-${name}`;
 	const WORKSPACE_DIR = `/tmp/zerowork-ws-${name}`;
+	/**
+	 * Electron 自己的用户数据目录（cookies / Local Storage / 单实例锁）。
+	 *
+	 * **为什么必须每个用例一个**：主进程调了 `app.requestSingleInstanceLock()`，
+	 * 而这个锁落在 **userData 目录**里 —— 与 `ZEROWORK_CONFIG_DIR` 无关。
+	 * 不隔离的话，一个用例的实例会立刻 `app.quit()` 掉另一个用例的实例，
+	 * 表现为 playwright 报 `Target page, context or browser has been closed`。
+	 *
+	 * 症状有多像「随机 flake」：跑得慢的那个先起来，后面每个都立刻退出；
+	 * 单独跑又全过。真凶要到「同一时刻 ps 里有另一个 ZeroWork 进程」才看得见。
+	 *
+	 * 隔离之后 e2e 才可以并行跑。注意这**不只是**为了并行 ——
+	 * 一个用例写进 Local Storage 的东西也不该漏给下一个用例。
+	 */
+	const USER_DATA_DIR = `/tmp/zerowork-ud-${name}`;
 	const SHOT_DIR = resolve(ROOT, 'artifacts', name);
 
 	const results = [];
@@ -127,6 +142,7 @@ export function createHarness(opts) {
 	if (!opts.reuseConfig) {
 		rmSync(CONFIG_DIR, { recursive: true, force: true });
 		rmSync(WORKSPACE_DIR, { recursive: true, force: true });
+		rmSync(USER_DATA_DIR, { recursive: true, force: true });
 	}
 	mkdirSync(SHOT_DIR, { recursive: true });
 
@@ -162,8 +178,39 @@ export function createHarness(opts) {
 		 * `#root` 挂上了子节点、样式表加载了、daemon 报过启动。
 		 */
 		async launch() {
+			try {
+				return await this._launch();
+			} catch (error) {
+				// 启动阶段失败时给一份**可诊断**的报告，而不是抛一个裸栈出去 ——
+				// 裸栈只有 playwright 的 `Target page, context or browser has been closed`，
+				// 对定位毫无帮助（真凶可能是启动了几十秒后 daemon 才超时，
+				// 也可能是别的实例抢了单实例锁）。
+				process.stderr.write(`\n${red(`[启动失败] ${name}`)}\n  ${error?.message ?? error}\n`);
+				if (procLines.length > 0) {
+					process.stderr.write(`\n  进程日志（共 ${procLines.length} 行，尾部 20 行）：\n`);
+					for (const line of procLines.slice(-20)) process.stderr.write(`    ${line}\n`);
+				}
+				if (pageErrors.length > 0) {
+					process.stderr.write(`\n  渲染层异常：\n`);
+					for (const e of pageErrors) process.stderr.write(`    ${e}\n`);
+				}
+				process.stderr.write(
+					dim(
+						`\n  排查方向：① 是否已有另一个 ZeroWork 实例在跑（单实例锁是按 userData 目录生效的，\n` +
+							`  本 harness 已为每个用例指定独立的 --user-data-dir，若仍冲突说明有别处未隔离）；\n` +
+							`  ② out/ 构建产物是否过期（先 npm run build）；③ daemon 是否在超时内报启动。\n`,
+					),
+				);
+				results.push(['FAIL', '启动应用', String(error?.message ?? error)]);
+				// 走 finish() 收尾，保证退出码非零且报告里留下这一条
+				await h.finish();
+				throw error; // finish 已经 exit，这里只是让类型收窄
+			}
+		},
+
+		async _launch() {
 			app = await electron.launch({
-				args: [ROOT],
+				args: [ROOT, `--user-data-dir=${USER_DATA_DIR}`],
 				env: {
 					...process.env,
 					ZEROWORK_CONFIG_DIR: CONFIG_DIR,
