@@ -115,7 +115,13 @@ function memberSessionPath(sessionId) {
     index = { dir, builtAt: now, byId: buildSessionFileIndex(dir) };
     sessionFileIndex = index;
   }
-  return index.byId.get(sessionId);
+  const hit = index.byId.get(sessionId);
+  if (hit !== void 0) return hit;
+  // 负缓存会持续整个 TTL：索引可能是在「文件还没出现」时建的，
+  // 未命中就重建一次，而不是让这个空结论活满 1 秒。
+  const rebuilt = { dir, builtAt: Date.now(), byId: buildSessionFileIndex(dir) };
+  sessionFileIndex = rebuilt;
+  return rebuilt.byId.get(sessionId);
 }
 
 let sessionFileIndex;
