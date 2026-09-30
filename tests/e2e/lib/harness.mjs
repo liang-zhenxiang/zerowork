@@ -37,8 +37,9 @@
  */
 
 import { _electron as electron } from 'playwright';
-import { mkdirSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decodePng, downsample, imageStats, renderGrid, diffGrids } from './png.mjs';
 
@@ -81,7 +82,6 @@ export async function waitUntil(fn, { timeout = 30_000, interval = 250, desc = '
  * @param {number} [opts.bootTimeout]  等到界面就绪的上限
  * @param {number} [opts.fileTimeout]  整个文件的上限；超时会被强制终止并留下诊断
  * @param {object} [opts.env]          额外的环境变量
- * @param {boolean}[opts.reuseConfig]  复用配置目录（默认每个用例用干净的）
  */
 export function createHarness(opts) {
 	const name = opts.name;
@@ -90,23 +90,36 @@ export function createHarness(opts) {
 	const bootTimeout = opts.bootTimeout ?? 90_000;
 	const fileTimeout = opts.fileTimeout ?? 12 * 60_000;
 
-	const CONFIG_DIR = `/tmp/zerowork-e2e-${name}`;
-	const WORKSPACE_DIR = `/tmp/zerowork-ws-${name}`;
 	/**
-	 * Electron 自己的用户数据目录（cookies / Local Storage / 单实例锁）。
+	 * 每个用例三份独立目录：应用配置、工作区、Electron 的 userData。
+	 *
+	 * **用 `mkdtempSync` 而不是拼一个固定路径**，有两个理由：
+	 *
+	 * 1. **安全**。系统临时目录是全局可写的，固定路径意味着别的本地进程可以
+	 *    抢先创建一个同名符号链接，把我们的写入导向它选定的位置。
+	 *    `mkdtempSync` 生成随机后缀并以 `0700` 建目录，这条路走不通。
+	 *    （这条正是 CodeQL 的 `js/insecure-temporary-file` 报的 —— 它报得对。）
+	 * 2. **隔离**。固定路径在同一台机器上多用户/多进程会互相踩；
+	 *    随机后缀让并行跑天然安全。
+	 *
+	 * 名字里仍保留用例名作前缀，一是便于人工在 /tmp 里辨认，
+	 * 二是有些用例会断言「返回的路径里含某个特征串」。
+	 */
+	const freshTmpDir = (prefix) => mkdtempSync(join(tmpdir(), prefix));
+	const CONFIG_DIR = freshTmpDir(`zerowork-e2e-${name}-`);
+	const WORKSPACE_DIR = freshTmpDir(`zerowork-ws-${name}-`);
+	/**
+	 * userData（cookies / Local Storage / **单实例锁**）。
 	 *
 	 * **为什么必须每个用例一个**：主进程调了 `app.requestSingleInstanceLock()`，
-	 * 而这个锁落在 **userData 目录**里 —— 与 `ZEROWORK_CONFIG_DIR` 无关。
+	 * 而这个锁落在 userData 目录里 —— 与 `ZEROWORK_CONFIG_DIR` 无关。
 	 * 不隔离的话，一个用例的实例会立刻 `app.quit()` 掉另一个用例的实例，
 	 * 表现为 playwright 报 `Target page, context or browser has been closed`。
 	 *
 	 * 症状有多像「随机 flake」：跑得慢的那个先起来，后面每个都立刻退出；
 	 * 单独跑又全过。真凶要到「同一时刻 ps 里有另一个 ZeroWork 进程」才看得见。
-	 *
-	 * 隔离之后 e2e 才可以并行跑。注意这**不只是**为了并行 ——
-	 * 一个用例写进 Local Storage 的东西也不该漏给下一个用例。
 	 */
-	const USER_DATA_DIR = `/tmp/zerowork-ud-${name}`;
+	const USER_DATA_DIR = freshTmpDir(`zerowork-ud-${name}-`);
 	const SHOT_DIR = resolve(ROOT, 'artifacts', name);
 
 	const results = [];
@@ -139,11 +152,7 @@ export function createHarness(opts) {
 	watchdog.unref?.();
 
 	// ── 隔离目录 ───────────────────────────────────────────
-	if (!opts.reuseConfig) {
-		rmSync(CONFIG_DIR, { recursive: true, force: true });
-		rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-		rmSync(USER_DATA_DIR, { recursive: true, force: true });
-	}
+	// 目录由 mkdtempSync 现建，本来就是干净的 —— 不需要再删一遍。
 	mkdirSync(SHOT_DIR, { recursive: true });
 
 	const h = {
@@ -403,6 +412,23 @@ export function createHarness(opts) {
 				await app?.close();
 			} catch {
 				/* 已经关了 */
+			}
+
+			// 成功时清掉本用例的临时目录（目录名是随机的，留着只会堆满 /tmp）。
+			// **失败时保留** —— 那里面是现场：应用配置、工作区、会话记录，
+			// 排查问题时往往比截图更有用。路径会随报告一起打出来。
+			if (failed.length === 0) {
+				for (const dir of [CONFIG_DIR, WORKSPACE_DIR, USER_DATA_DIR]) {
+					try {
+						rmSync(dir, { recursive: true, force: true });
+					} catch {
+						/* 清理是尽力而为，清不掉不该让用例失败 */
+					}
+				}
+			} else {
+				process.stdout.write(
+					dim(`留作现场：\n  ${CONFIG_DIR}\n  ${WORKSPACE_DIR}\n  ${USER_DATA_DIR}\n`),
+				);
 			}
 
 			// 断言失败与「渲染层抛了未捕获异常」都要让退出码非零 ——
