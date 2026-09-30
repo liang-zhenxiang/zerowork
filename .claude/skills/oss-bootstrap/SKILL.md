@@ -24,8 +24,10 @@ description: 把一个新项目（或只有代码的裸仓库）落实为符合�
    - **Electron / 桌面应用** → 上面的基础上加 Playwright 驱动的端到端 GUI 测试
    - Go → golangci-lint + `go test`；Python → ruff + pytest；bash → shellcheck + `bash -n`
    - YAML（工作流）→ actionlint + yamllint；工作流安全 → zizmor
-2. **仓库现状**：`gh repo view`、已有文件清单、**是否 fork**（fork 需要先在网页端脱离
-   fork network 才能开部分功能，API 做不了）、已有 Secrets 与变量
+2. **仓库现状**：`gh repo view`、已有文件清单、**是否 fork**、已有 Secrets 与变量。
+   关于 fork：**维护者自己应当直接在主仓库里开发** —— 走 fork 会让 CI 需要逐次人工 approve、
+   仓库设置与 Secrets 要配两套、Release 与代码分家。只有**外部贡献者**才该走 fork。
+   如果接手的是一个 fork 且你打算长期维护它，先确认「它是不是该成为主仓库」
 3. **权限**：`gh auth status` 确认 scopes（`repo` / `workflow`）；操作 Projects 看板需要
    `project, read:project`，缺失时请用户执行 `gh auth refresh -s project,read:project`
 

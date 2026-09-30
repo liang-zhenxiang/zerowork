@@ -131,7 +131,7 @@ npm run test:all    # 本地全量：静态检查 + 单元测试 + 端到端 GUI
 
 ## 路线图
 
-路线图的单一事实来源是 **[Roadmap Issue #8](https://github.com/liang-zhenxiang/zerowork/issues/8)**，
+路线图的单一事实来源是 **[Roadmap Issue #21](https://github.com/liang-zhenxiang/zerowork/issues/21)**，
 README 不重复维护一份。当前方向：把项目打造成规范的开源项目（v0.2.0），
 随后处理随包第三方内容的授权与依赖安全等已知问题。
 

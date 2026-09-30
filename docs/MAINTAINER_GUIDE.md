@@ -102,17 +102,39 @@
 `ci` / `dependencies` / `automation` / `governance` / `stale` / `pinned` /
 `security` / `desktop` / `agent-core` / `ui` / `sandbox` / `resources` / `tests` / `release`
 
-### 仓库仍是 fork 时
+### 配置现状（2026-09-30 核对）
 
-本仓库（`nicholyx/zerowork`）是 `liang-zhenxiang/zerowork` 的 fork，开发在 fork 上进行，
-成果通过 PR 提交给上游。这带来两条注意事项：
+上面那份清单里已经配好的：Issues / Discussions / Wiki（已关）/ Projects /
+允许自动合并 / 合并后自动删分支 / Private vulnerability reporting / topics / 标签体系。
+仓库许可证已被 GitHub 识别为 **Apache-2.0**。
 
-- **fork 的仓库设置与上游是两套。** 上面这份清单需要**在上游也配一遍** ——
-  尤其是 Private vulnerability reporting 与 Issues/Discussions
-- **fork 的 Issues 默认是关闭的**，需要显式开启（本仓库已开）。
-  若换成别的 fork 且 API 拒绝开启，只能到网页端 `Settings → Features` 手动勾选
-- **不要轻易「Leave fork network」**。操作后仓库成为独立仓库、设置不再受限，
-  但**失去与上游的关联、无法再直接向上游提 PR**，且不可逆
+**还没配的是分支保护** —— 它需要 admin 权限。在配上之前，
+**`main` 上没有硬门禁**：CI 照常运行，但不会阻止直接合并。
+这是当前最该补的一项，配置内容见上一节。
+
+> Secret scanning / Push protection / Dependabot 安全更新这几项**需要 admin 权限才能读取状态**，
+> 维护者请在 `Settings → Code security` 里自行确认一遍。
+
+### 开发在本仓库内进行，不要走 fork
+
+**从 `main` 切分支 → 推分支 → 开 PR → 等 `CI 总览` 绿 → squash 合并。**
+全部在 `liang-zhenxiang/zerowork` 这一个仓库里完成。
+
+不要为了「隔离」而改走 fork：那会带来三件实打实的代价 ——
+fork 来的 PR 其工作流需要维护者**逐次人工 approve** 才会跑；
+仓库设置与 Secrets 要**配两套**；Release 与代码会**分家**（tag 打在哪一边都不对）。
+这些代价对「外部贡献者」是合理的，对主要维护者是纯粹的负担。
+
+**即使有 push 权限，也不要直接往 `main` 提交。** 三个理由：
+
+1. `CI 总览` 是**分支保护的门禁**，直接推就绕过了它 —— 那道门禁会变成摆设
+2. 提交信息规范与 CHANGELOG 需要一个**执行点**。squash 合并时 PR 标题会被 CI 校验，
+   直接提交没有这个环节
+3. 单人维护时「自己 review 自己」仍然有效：它强制你在合并前把 diff 完整看一遍，
+   而这是唯一能发现「顺手改坏了别处」的时刻
+
+> 外部贡献者仍然走 fork + PR（这是 GitHub 的标准协作方式）。
+> 上面说的只是**维护者自己**不要绕这一圈。
 
 ---
 
