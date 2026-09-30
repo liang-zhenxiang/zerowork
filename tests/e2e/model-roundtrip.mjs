@@ -16,61 +16,87 @@
  *     → 解析回会话状态
  *
  * 断言的是链路真的通了（mock 收到请求、回复落到会话），不是模型能力。
+ *
+ * 迁移说明（共享 harness）：骨架（清隔离目录、启动并等到就绪、check 收集器、
+ * 末尾报告与退出码）全部来自 `./lib/harness.mjs`。启动不再固定等 9 秒；
+ * 「发送后等 2.5 秒」改为等 **mock 真的收到 /chat/completions 请求**；
+ * 「给网络往返留 3 秒」改为等目标请求出现；页面里的 `for + sleep` 换成 `waitUntil`；
+ * 末尾那张固定路径的截图换成 harness 的 `h.shoot`（截图 + 像素断言）。
+ *
+ * ⚠️ 这里**刻意不用** `h.waitForSettled()`：断言全部发生在**模型回合进行中**，
+ * 而回合中界面有 500ms 级的计时器在刷新（时长显示、等待提示轮播），
+ * 永远达不到「800ms 静默」——用了只会等到超时。
  */
-import { _electron as electron } from "playwright";
-import { mkdirSync, rmSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { mkdirSync } from "node:fs";
+import { createHarness, waitUntil } from "./lib/harness.mjs";
 import { startMockModelServer } from "./mock-model-server.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-model";
-const WORKSPACE_DIR = "/tmp/zerowork-model-ws";
-
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
-
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 200)]);
-	}
-};
-
-// ── 启动 mock 模型服务 ─────────────────────────────────────
 const REPLY_TEXT = "MOCK_REPLY_已收到你的消息";
-const mock = await startMockModelServer({ reply: REPLY_TEXT });
-console.log(`mock 模型服务已启动: ${mock.baseUrl}`);
-
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
-
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+const USER_TEXT = "你好，请回复";
 
 const PROVIDER_ID = "e2e-mock";
 const MODEL_ID = "mock-model";
 const MODEL_KEY = `${PROVIDER_ID}/${MODEL_ID}`;
 
+const h = createHarness({ name: "roundtrip" });
+// harness 负责隔离与清空工作区根目录，目录本身要由用例建出来
+mkdirSync(h.WORKSPACE_DIR, { recursive: true });
+
+// ── 启动 mock 模型服务 ─────────────────────────────────────
+const mock = await startMockModelServer({ reply: REPLY_TEXT });
+console.log(`✓ mock 模型服务已就绪：${mock.baseUrl}`);
+
+await h.launch();
+const win = h.window();
+
+await h.snap("home");
+
+const findChatRequest = () => mock.requests.find((q) => q.url?.includes("/chat/completions"));
+
+/**
+ * 等 mock **真的**收到 chat/completions 请求。
+ *
+ * 「消息发出去了没有」不能靠固定等待来回答（那无法证伪）—— 等对端的可观察结果，
+ * 超时时把已收到的 URL 清单带进错误里。
+ */
+async function waitForChatRequest(why) {
+	try {
+		return await waitUntil(() => findChatRequest() ?? null, {
+			timeout: 40_000,
+			interval: 500,
+			desc: "mock 服务收到 /chat/completions 请求",
+		});
+	} catch (error) {
+		throw new Error(
+			`${why}。已收到 ${mock.requests.length} 条：${mock.requests.map((q) => q.url).join(", ")}（${error.message}）`,
+		);
+	}
+}
+
+/**
+ * 在页面里轮询探针，直到它报告 `found`。
+ *
+ * 取代原来「在页面里 for 循环 + sleep」的写法：截止时间交给 `waitUntil` 统一管，
+ * 慢机器不假失败、快机器不白等；超时时把**最后一次探针看到的样例**带进错误里。
+ */
+async function waitForFound(desc, probe, { arg, timeout = 30_000 } = {}) {
+	let last = null;
+	try {
+		return await waitUntil(
+			async () => {
+				last = await win.evaluate(probe, arg);
+				return last?.found ? last : null;
+			},
+			{ timeout, interval: 500, desc },
+		);
+	} catch (error) {
+		throw new Error(`${error.message}；样例：${String(last?.sample ?? "(未取到)").slice(0, 400)}`);
+	}
+}
+
 // ── 1. 注册自定义 provider 指向 mock 服务 ──────────────────
-await check("注册自定义 provider 指向 mock 服务", async () => {
+await h.check("注册自定义 provider 指向 mock 服务", async () => {
 	const r = await win.evaluate(
 		async ({ id, baseUrl, apiKey }) => {
 			const k = globalThis.kami;
@@ -104,7 +130,7 @@ await check("注册自定义 provider 指向 mock 服务", async () => {
 	assert.ok(r.ok, `注册失败: ${r.err}`);
 });
 
-await check("自定义 provider 出现在设置快照中", async () => {
+await h.check("自定义 provider 出现在设置快照中", async () => {
 	const r = await win.evaluate(async (id) => {
 		const s = await globalThis.kami.settingsSnapshot();
 		return { found: JSON.stringify(s).includes(id) };
@@ -112,20 +138,23 @@ await check("自定义 provider 出现在设置快照中", async () => {
 	assert.ok(r.found, "设置快照里找不到刚注册的 provider");
 });
 
-await check("设置 API Key", async () => {
-	const r = await win.evaluate(async ({ id, key }) => {
-		try {
-			await globalThis.kami.setApiKey(id, key);
-			return { ok: true };
-		} catch (e) {
-			return { ok: false, err: String(e?.message ?? e).slice(0, 160) };
-		}
-	}, { id: PROVIDER_ID, key: "sk-e2e-dummy" });
+await h.check("设置 API Key", async () => {
+	const r = await win.evaluate(
+		async ({ id, key }) => {
+			try {
+				await globalThis.kami.setApiKey(id, key);
+				return { ok: true };
+			} catch (e) {
+				return { ok: false, err: String(e?.message ?? e).slice(0, 160) };
+			}
+		},
+		{ id: PROVIDER_ID, key: "sk-e2e-dummy" },
+	);
 	assert.ok(r.ok, `设置 API Key 失败: ${r.err}`);
 });
 
 // ── 2. 选中该模型 ──────────────────────────────────────────
-await check("切换到 mock 模型", async () => {
+await h.check("切换到 mock 模型", async () => {
 	const r = await win.evaluate(async (key) => {
 		const k = globalThis.kami;
 		try {
@@ -148,51 +177,46 @@ await check("切换到 mock 模型", async () => {
 // 永远只能是假失败。
 //
 // 走 UI 路径之后，这条用例验的就是用户真正做的那件事。
-const USER_TEXT = "你好，请回复";
-
-await check("在输入框里输入并发送消息", async () => {
+await h.check("在输入框里输入并发送消息", async () => {
 	const box = win.locator('[aria-label="消息输入框"]');
 	await box.waitFor({ state: "visible", timeout: 30_000 });
 	await box.fill(USER_TEXT); // 受控组件：必须用 fill 触发 React 的 onChange
 	await box.press("Enter");
-	// 给「切视图 + 发请求」留一拍
-	await win.waitForTimeout(2500);
+	// 原来是固定等 2.5 秒。改成等 mock 真收到请求 —— 发送有没有走通，这是直接证据
+	await waitForChatRequest("消息没有发出去");
 });
 
-await check("mock 服务确实收到了 chat/completions 请求", async () => {
-	// 给网络往返留点时间
-	await new Promise((r) => setTimeout(r, 3000));
-	const hit = mock.requests.find((q) => q.url?.includes("/chat/completions"));
+await h.check("mock 服务确实收到了 chat/completions 请求", async () => {
+	const hit = findChatRequest();
 	assert.ok(hit, `mock 服务未收到请求。已收到 ${mock.requests.length} 条：${mock.requests.map((q) => q.url).join(", ")}`);
 });
 
-await check("请求体包含用户消息内容", async () => {
-	const hit = mock.requests.find((q) => q.url?.includes("/chat/completions"));
+await h.check("请求体包含用户消息内容", async () => {
+	const hit = findChatRequest();
 	assert.ok(hit, "没有请求可校验");
 	const body = JSON.stringify(hit.body ?? {});
 	assert.ok(body.includes("你好"), `请求体里没有用户消息内容: ${body.slice(0, 300)}`);
 });
 
-await check("请求携带了 Authorization 头", async () => {
-	const hit = mock.requests.find((q) => q.url?.includes("/chat/completions"));
+await h.check("请求携带了 Authorization 头", async () => {
+	const hit = findChatRequest();
 	assert.ok(hit, "没有请求可校验");
 	const auth = hit.headers?.authorization ?? hit.headers?.Authorization ?? "";
 	assert.ok(String(auth).length > 0, "请求未携带 Authorization 头");
 });
 
 // ── 4. 模型回复落到会话状态 ────────────────────────────────
-await check("模型回复出现在会话状态中", async () => {
-	const r = await win.evaluate(async (marker) => {
-		const k = globalThis.kami;
-		// 流式回复可能有延迟，轮询几次
-		for (let i = 0; i < 12; i++) {
-			const s = await k.snapshot();
-			if (JSON.stringify(s).includes(marker)) return { found: true, round: i };
-			await new Promise((res) => setTimeout(res, 1500));
-		}
-		const s = await k.snapshot();
-		return { found: false, sample: JSON.stringify(s).slice(0, 400) };
-	}, "MOCK_REPLY");
+await h.check("模型回复出现在会话状态中", async () => {
+	const r = await waitForFound(
+		"会话状态里出现模型回复（流式回包没落到会话？）",
+		async (marker) => {
+			const s = await globalThis.kami.snapshot();
+			return JSON.stringify(s).includes(marker)
+				? { found: true }
+				: { found: false, sample: JSON.stringify(s).slice(0, 400) };
+		},
+		{ arg: "MOCK_REPLY", timeout: 30_000 },
+	);
 	assert.ok(r.found, `会话状态里找不到模型回复。快照样例: ${r.sample}`);
 });
 
@@ -204,34 +228,27 @@ await check("模型回复出现在会话状态中", async () => {
 // 组件抛错被吞），而所有现有断言照过。
 //
 // 所以这里直接读 DOM：**用户眼睛能看到的文本**。
-await check("模型回复渲染到界面上（不只是落到会话状态）", async () => {
-	const r = await win.evaluate(async (marker) => {
-		for (let i = 0; i < 20; i++) {
+await h.check("模型回复渲染到界面上（不只是落到会话状态）", async () => {
+	const r = await waitForFound(
+		"界面文本里出现模型回复（回复进了状态却没渲染出来？）",
+		(marker) => {
 			const text = document.body.innerText || "";
-			if (text.includes(marker)) return { found: true, round: i, len: text.length };
-			await new Promise((res) => setTimeout(res, 1000));
-		}
-		return { found: false, sample: (document.body.innerText || "").slice(-300) };
-	}, "MOCK_REPLY");
+			return text.includes(marker) ? { found: true, len: text.length } : { found: false, sample: text.slice(-300) };
+		},
+		{ arg: "MOCK_REPLY", timeout: 30_000 },
+	);
+	// 先截图、后断言：回复在屏上时留现场；下面的断言一旦失败，图里就有那一屏。
+	// 截图自带像素断言 —— DOM 里有文本不等于它真的画出来了。
+	await h.shoot("final-reply");
 	assert.ok(r.found, `界面文本里找不到模型回复 —— 回复进了状态但没渲染出来？界面尾部: ${r.sample}`);
-	console.log(`      DOM 文本 ${r.len} 字符，第 ${r.round + 1} 轮命中`);
+	console.log(`      DOM 文本 ${r.len} 字符`);
 });
 
-// ── 6. 截图留档 ────────────────────────────────────────────
-await win.screenshot({ path: resolve(ROOT, "artifacts", "model-roundtrip.png") });
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
-
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 主链路端到端测试 ═══");
-let failed = 0;
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-	if (status === "FAIL") failed++;
-}
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-console.log(`mock 服务共收到 ${mock.requests.length} 条请求`);
-
-await app.close();
+// 先关应用再关 mock：应用一关，daemon 与 mock 之间的长连接才会断开，
+// server.close() 才不会一直等在那儿（原实现的顺序就是这样）。
+await h.app().close();
 await mock.close();
-process.exit(failed === 0 ? 0 : 1);
+console.log(`（mock 共收到 ${mock.requests.length} 条请求）`);
+await h.finish();

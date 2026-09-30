@@ -13,18 +13,27 @@
  *      这是独立子系统，此前一行都没测过。
  *
  * ⚠️ 凭据运行时从 ~/.claude/settings.json 读取，不进仓库、不打印。
+ *
+ * ── 迁移说明（共享 harness）────────────────────────────────
+ *
+ * 骨架（隔离目录、启动并等到就绪、check 收集器、末尾报告与退出码）全部来自
+ * `./lib/harness.mjs`。启动不再固定等 9 秒；页面里的 `for + sleep` 轮询换成
+ * `waitUntil`（并把原来的失败诊断搬进错误里）；末尾补一张带像素断言的截图。
+ *
+ * ⚠️ **依赖模型端点的用例，探不到端点时必须逐条 `h.skip()` 上报，不许静默跳过。**
+ * 这个文件在 CI 上是**零信号**的：CI 没有模型端点，此前那些 `if (endpoint) { … }`
+ * 分支整块不进报告 —— 报告里只有 4 条断言、全绿，看起来「跑了且都过」，
+ * 实际上一行模型链路都没验。静默 return 只是把谎言换个写法，所以这里用
+ * `h.skip(label, reason)`：报告里会出现「跳过 N」，与「通过 N」区分得清清楚楚。
  */
-import { _electron as electron } from "playwright";
-import { mkdirSync, rmSync, readFileSync, existsSync } from "node:fs";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
-import assert from "node:assert/strict";
+import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-skillmcp";
-const WORKSPACE_DIR = "/tmp/zerowork-skillmcp-ws";
 
 // 技能正文里的辨识标题（见 resources/skills/meeting-notes/SKILL.md）
 const SKILL_NAME = "meeting-notes";
@@ -55,41 +64,53 @@ if (endpoint) {
 	}).catch(() => undefined);
 	if (!probe || !probe.ok) endpoint = undefined;
 }
-console.log(endpoint ? "✓ 模型端点可用" : "⚠ 模型端点不可用 —— 依赖模型的部分将跳过");
+console.log(endpoint ? "✓ 模型端点可用" : "⚠ 模型端点不可用 —— 依赖模型的用例将逐条上报「跳过」");
 
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
+/**
+ * 探不到端点时，每一条依赖模型的用例都带着它上报 —— 报告里留痕，不伪装成全绿。
+ */
+const NO_ENDPOINT =
+	"本机 ~/.claude/settings.json 里没有可用的模型端点（需要 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / " +
+	"ANTHROPIC_MODEL，且 /v1/messages 探活通过）—— 这条要发真实模型请求";
 
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 240)]);
-	}
-};
-
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
+const h = createHarness({
+	name: "skillmcp",
+	// 本文件要真的调模型（单次 prompt 的内部超时就有 150s），12 分钟的默认上限太紧
+	fileTimeout: 20 * 60_000,
 });
+// harness 负责隔离与清空工作区根目录。MCP 配置写在**工作区级**（<cwd>/.mcp.json），
+// 目录本身要由用例建出来
+mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+await h.launch();
+const win = h.window();
+
+await h.shoot("home");
+
+/**
+ * 在页面里轮询探针，直到它报告 `found`。
+ *
+ * 取代原来「在页面里 for 循环 + sleep」的写法：截止时间交给 `waitUntil` 统一管，
+ * 慢机器不假失败、快机器不白等；超时时把**最后一次探针看到的回复尾部**带进错误里，
+ * 失败信息不能弱于原来的 `回复尾部: …`。
+ */
+async function waitForFound(desc, probe, { arg, timeout = 30_000, interval = 1_000 } = {}) {
+	let last = null;
+	try {
+		return await waitUntil(
+			async () => {
+				last = await win.evaluate(probe, arg);
+				return last?.found ? last : null;
+			},
+			{ timeout, interval, desc },
+		);
+	} catch (error) {
+		throw new Error(`${error.message}；回复尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`);
+	}
+}
 
 // ── ① 技能调用 ─────────────────────────────────────────────
-await check("技能清单里能找到目标技能", async () => {
+await h.check("技能清单里能找到目标技能", async () => {
 	const r = await win.evaluate(async (name) => {
 		const s = await globalThis.kami.skillsSnapshot();
 		const items = s?.skills ?? s?.items ?? [];
@@ -99,7 +120,7 @@ await check("技能清单里能找到目标技能", async () => {
 });
 
 if (endpoint) {
-	await check("配置真实模型", async () => {
+	await h.check("配置真实模型", async () => {
 		const r = await win.evaluate(
 			async ({ baseUrl, token, model, ws }) => {
 				const k = globalThis.kami;
@@ -122,16 +143,16 @@ if (endpoint) {
 					return { ok: false, err: String(e?.message ?? e).slice(0, 200) };
 				}
 			},
-			{ ...endpoint, ws: WORKSPACE_DIR },
+			{ ...endpoint, ws: h.WORKSPACE_DIR },
 		);
 		assert.ok(r.ok, `配置失败: ${r.err}`);
 	});
 
-	await check("技能调用：/skill: 展开并送达模型", async () => {
+	await h.check("技能调用：/skill: 展开并送达模型", async () => {
 		// 提示里要求回报技能正文的**第一个标题**。只有当技能内容真的被注入到
 		// 发给模型的文本里，模型才可能答得出来 —— 单条断言覆盖整条链路。
-		const r = await win.evaluate(
-			async ({ skill, expect }) => {
+		const timedOut = await win.evaluate(
+			async ({ skill }) => {
 				const k = globalThis.kami;
 				try {
 					await Promise.race([
@@ -139,24 +160,31 @@ if (endpoint) {
 						new Promise((_, rej) => setTimeout(() => rej(new Error("__TIMEOUT__")), 150_000)),
 					]);
 				} catch (e) {
-					if (String(e?.message ?? "").includes("__TIMEOUT__")) return { timedOut: true };
+					if (String(e?.message ?? "").includes("__TIMEOUT__")) return true;
 				}
-				for (let i = 0; i < 45; i++) {
-					const s = await k.snapshot();
+				return false;
+			},
+			{ skill: SKILL_NAME },
+		);
+		assert.ok(!timedOut, "技能调用挂起");
+
+		const r = await waitForFound(
+			`模型回报的技能正文第一个标题「${SKILL_HEADING}」（技能内容没被注入到发给模型的文本里？）`,
+			(expect) => {
+				return globalThis.kami.snapshot().then((s) => {
 					const a = (s?.entries ?? []).filter((x) => x?.role === "assistant" && String(x?.text ?? "").length > 0);
 					const text = a.map((x) => x.text).join("\n");
 					if (text.includes(expect)) return { found: true, text: text.slice(-200) };
-					await new Promise((r2) => setTimeout(r2, 2000));
-				}
-				const s = await k.snapshot();
-				const a = (s?.entries ?? []).filter((x) => x?.role === "assistant");
-				return { found: false, text: JSON.stringify(a).slice(-300) };
+					return { found: false, sample: JSON.stringify(a).slice(-300) };
+				});
 			},
-			{ skill: SKILL_NAME, expect: SKILL_HEADING },
+			{ arg: SKILL_HEADING, timeout: 90_000 },
 		);
-		assert.ok(!r.timedOut, "技能调用挂起");
-		assert.ok(r.found, `模型未回报技能标题「${SKILL_HEADING}」。回复尾部: ${r.text}`);
+		console.log(`      模型回报了技能标题，回复尾部：${r.text}`);
 	});
+} else {
+	h.skip("配置真实模型", NO_ENDPOINT);
+	h.skip("技能调用：/skill: 展开并送达模型", NO_ENDPOINT);
 }
 
 // ── 自动批准权限请求 ───────────────────────────────────────
@@ -183,7 +211,7 @@ await win.evaluate(() => {
 });
 
 // ── ② MCP 连接器 ───────────────────────────────────────────
-await check("MCP：注册 stdio server 并通过配置校验", async () => {
+await h.check("MCP：注册 stdio server 并通过配置校验", async () => {
 	const serverPath = resolve(__dirname, "mock-mcp-server.mjs");
 	const cfg = JSON.stringify({
 		mcpServers: { "zw-mock": { command: process.execPath, args: [serverPath] } },
@@ -201,7 +229,7 @@ await check("MCP：注册 stdio server 并通过配置校验", async () => {
 	assert.ok(r.has, "写回的配置里找不到 zw-mock");
 });
 
-await check("MCP：非法配置被拒绝（command 与 url 不能并存）", async () => {
+await h.check("MCP：非法配置被拒绝（command 与 url 不能并存）", async () => {
 	const bad = JSON.stringify({ mcpServers: { broken: { command: "node", url: "http://x" } } });
 	const r = await win.evaluate(async (configJson) => {
 		try {
@@ -215,64 +243,73 @@ await check("MCP：非法配置被拒绝（command 与 url 不能并存）", asy
 	assert.ok(/只能留一个|command|url/.test(r.err), `拒绝理由不明确：${r.err}`);
 });
 
-await check("MCP：连接器状态可读取（含 server 与工具信息）", async () => {
-	// ⚠️ 时序要点（踩过一次）：MCP 客户端是**按会话桶**建的，连接发生在
-	// **会话构造期** —— 扩展工厂在 resourceLoader.reload() 里被 await 跑完
-	// （session-host.js 的 createAgentSession 之前），连完才求值
-	// extraActiveTools()。所以桶里**还没建过会话**时，mcpConfigGet 取不到
-	// 活句柄，只能按配置**合成**一个 `connecting` 占位
-	// （session-files.js 的 mcpConfigGet 回退分支）——
-	// 那个 "connecting" 不是"正在连"，而是"还没开始连"，等到天亮也不会变。
-	//
-	// 所以这里先主动构造一次会话（发一句最短的提示），再等真状态。
-	const warm = await win.evaluate(async () => {
-		try {
-			await Promise.race([
-				globalThis.kami.prompt({ text: "只回复：OK" }),
-				new Promise((res) => setTimeout(res, 90_000)),
-			]);
-			return { ok: true };
-		} catch (e) {
-			return { ok: false, err: String(e?.message ?? e).slice(0, 160) };
-		}
-	});
-	assert.ok(warm.ok, `构造会话失败（MCP 连接依附于会话构造）: ${warm.err}`);
+if (endpoint) {
+	await h.check("MCP：连接器状态可读取（含 server 与工具信息）", async () => {
+		// ⚠️ 时序要点（踩过一次）：MCP 客户端是**按会话桶**建的，连接发生在
+		// **会话构造期** —— 扩展工厂在 resourceLoader.reload() 里被 await 跑完
+		// （session-host.js 的 createAgentSession 之前），连完才求值
+		// extraActiveTools()。所以桶里**还没建过会话**时，mcpConfigGet 取不到
+		// 活句柄，只能按配置**合成**一个 `connecting` 占位
+		// （session-files.js 的 mcpConfigGet 回退分支）——
+		// 那个 "connecting" 不是"正在连"，而是"还没开始连"，等到天亮也不会变。
+		//
+		// 所以这里先主动构造一次会话（发一句最短的提示），再等真状态。
+		const warm = await win.evaluate(async () => {
+			try {
+				await Promise.race([
+					globalThis.kami.prompt({ text: "只回复：OK" }),
+					new Promise((res) => setTimeout(res, 90_000)),
+				]);
+				return { ok: true };
+			} catch (e) {
+				return { ok: false, err: String(e?.message ?? e).slice(0, 160) };
+			}
+		});
+		assert.ok(warm.ok, `构造会话失败（MCP 连接依附于会话构造）: ${warm.err}`);
 
-	const r = await win.evaluate(async () => {
+		// 原来的失败信息里带「状态轨迹」与「现状」，这里照样留住：
+		// 轨迹在 Node 侧累积（探针会被序列化进页面，闭包变量进不去），现状每轮记一次。
 		const seen = [];
-		for (let i = 0; i < 20; i++) {
+		let lastRaw = "(未取到)";
+		let server;
+		try {
+			server = await waitUntil(
+				async () => {
+					const s = await win.evaluate(async () => await globalThis.kami.mcpConfigGet());
+					lastRaw = JSON.stringify(s).slice(0, 400);
+					const found = (s?.servers ?? []).find((x) => x.name === "zw-mock");
+					if (found !== undefined) seen.push(`${found.status}/${found.toolCount}`);
+					return found?.status === "connected" ? found : null;
+				},
+				{ timeout: 30_000, interval: 1_000, desc: "MCP server 进入 connected 终态" },
+			);
+		} catch (error) {
+			throw new Error(`MCP server 未进入终态。状态轨迹: ${seen.join(" → ")}；现状: ${lastRaw}（${error.message}）`);
+		}
+		console.log(`      server 状态: ${JSON.stringify(server)?.slice(0, 160)}`);
+	});
+
+	await h.check("MCP：server 提供的工具被识别", async () => {
+		// 注意：mcpConfigGet 的快照只暴露 toolCount，**不含工具名** ——
+		// 工具名在注册进会话时才由 sanitizeToolName 拼出（`mcp__<server>__<tool>`）。
+		// 所以这里断言 toolCount，而不是去快照里找工具名。
+		const r = await win.evaluate(async () => {
 			const s = await globalThis.kami.mcpConfigGet();
 			const server = (s?.servers ?? []).find((x) => x.name === "zw-mock");
-			if (server !== undefined) {
-				seen.push(`${server.status}/${server.toolCount}`);
-				if (server.status === "connected") return { ready: true, server };
-			}
-			await new Promise((res) => setTimeout(res, 1000));
-		}
-		const s = await globalThis.kami.mcpConfigGet();
-		return { ready: false, raw: JSON.stringify(s).slice(0, 400), seen };
+			return { toolCount: server?.toolCount, status: server?.status };
+		});
+		assert.equal(r.status, "connected", `server 未连接：${r.status}`);
+		assert.equal(r.toolCount, 1, `mock server 应暴露 1 个工具，实际 ${r.toolCount}`);
 	});
-	assert.ok(r.ready, `MCP server 未进入终态。状态轨迹: ${r.seen?.join(" → ")}；现状: ${r.raw}`);
-	console.log(`      server 状态: ${JSON.stringify(r.server)?.slice(0, 160)}`);
-});
-
-await check("MCP：server 提供的工具被识别", async () => {
-	// 注意：mcpConfigGet 的快照只暴露 toolCount，**不含工具名** ——
-	// 工具名在注册进会话时才由 sanitizeToolName 拼出（`mcp__<server>__<tool>`）。
-	// 所以这里断言 toolCount，而不是去快照里找工具名。
-	const r = await win.evaluate(async () => {
-		const s = await globalThis.kami.mcpConfigGet();
-		const server = (s?.servers ?? []).find((x) => x.name === "zw-mock");
-		return { toolCount: server?.toolCount, status: server?.status };
-	});
-	assert.equal(r.status, "connected", `server 未连接：${r.status}`);
-	assert.equal(r.toolCount, 1, `mock server 应暴露 1 个工具，实际 ${r.toolCount}`);
-});
+} else {
+	h.skip("MCP：连接器状态可读取（含 server 与工具信息）", `${NO_ENDPOINT}。MCP 连接依附于会话构造，构造会话要先发一次模型请求`);
+	h.skip("MCP：server 提供的工具被识别", `${NO_ENDPOINT}。连接状态与工具计数只有会话构造完才可见`);
+}
 
 if (endpoint) {
-	await check("MCP：模型可调用该工具并拿到结果", async () => {
-		const r = await win.evaluate(
-			async ({ mark, ws }) => {
+	await h.check("MCP：模型可调用该工具并拿到结果", async () => {
+		const timedOut = await win.evaluate(
+			async ({ ws }) => {
 				const k = globalThis.kami;
 				try {
 					// 关键：MCP 工具名是在**会话构造时**进工具白名单的
@@ -304,31 +341,39 @@ if (endpoint) {
 						new Promise((_, rej) => setTimeout(() => rej(new Error("__TIMEOUT__")), 150_000)),
 					]);
 				} catch (e) {
-					if (String(e?.message ?? "").includes("__TIMEOUT__")) return { timedOut: true };
+					if (String(e?.message ?? "").includes("__TIMEOUT__")) return true;
 				}
-				for (let i = 0; i < 45; i++) {
-					const s = await k.snapshot();
-					const a = (s?.entries ?? []).filter((x) => x?.role === "assistant" && String(x?.text ?? "").length > 0);
-					const text = a.map((x) => x.text).join("\n");
-					if (text.includes(mark)) return { found: true, text: text.slice(-200) };
-					await new Promise((r2) => setTimeout(r2, 2000));
-				}
-				const s = await k.snapshot();
-				const a = (s?.entries ?? []).filter((x) => x?.role === "assistant");
-				const snap = await k.mcpConfigGet();
-				return {
-					found: false,
-					text: JSON.stringify(a).slice(-300),
-					servers: JSON.stringify((snap?.servers ?? []).slice(0, 3)).slice(0, 200),
-				};
+				return false;
 			},
-			{ mark: MCP_TOOL_MARK, ws: WORKSPACE_DIR },
+			{ ws: h.WORKSPACE_DIR },
 		);
-		assert.ok(!r.timedOut, "MCP 工具调用挂起");
-		assert.ok(r.found, `未拿到工具返回的标记 ${MCP_TOOL_MARK}。回复尾部: ${r.text}；server: ${r.servers}`);
+		assert.ok(!timedOut, "MCP 工具调用挂起");
+
+		let r;
+		try {
+			r = await waitForFound(
+				`模型回复里出现工具返回的标记 ${MCP_TOOL_MARK}（工具没被调用，或结果没回传？）`,
+				(mark) => {
+					return globalThis.kami.snapshot().then((s) => {
+						const a = (s?.entries ?? []).filter((x) => x?.role === "assistant" && String(x?.text ?? "").length > 0);
+						const text = a.map((x) => x.text).join("\n");
+						if (text.includes(mark)) return { found: true, text: text.slice(-200) };
+						return { found: false, sample: JSON.stringify(a).slice(-300) };
+					});
+				},
+				{ arg: MCP_TOOL_MARK, timeout: 90_000 },
+			);
+		} catch (error) {
+			// 原来的失败信息里还有一份 server 快照 —— 这里补上，诊断不弱于原来
+			const snap = await win
+				.evaluate(async () => JSON.stringify((await globalThis.kami.mcpConfigGet())?.servers ?? []))
+				.catch(() => "(取不到)");
+			throw new Error(`${error.message}；server: ${String(snap).slice(0, 200)}`);
+		}
+		console.log(`      工具回执：${r.text}`);
 	});
 
-	await check("MCP：工具调用触发了权限请求并被批准", async () => {
+	await h.check("MCP：工具调用触发了权限请求并被批准", async () => {
 		// MCP 工具的权限判定是 ask（同于「执行用户配置的任意命令」），
 		// 因此调用前必有权限请求。这里断言请求确实发出来了、且带上了工具名 ——
 		// 若为 0 条，说明审批链路被绕过了，那是个安全问题。
@@ -338,17 +383,11 @@ if (endpoint) {
 		assert.ok(mcpReq, `权限请求里没有 MCP 工具。收到的：${JSON.stringify(r.log).slice(0, 200)}`);
 		console.log(`      权限请求: ${JSON.stringify(mcpReq)}`);
 	});
+} else {
+	h.skip("MCP：模型可调用该工具并拿到结果", NO_ENDPOINT);
+	h.skip("MCP：工具调用触发了权限请求并被批准", `${NO_ENDPOINT}。没有模型发起工具调用，就不会有 MCP 工具的权限请求`);
 }
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 技能调用与 MCP 连接器测试 ═══");
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-}
-const failed = results.filter(([s]) => s === "FAIL").length;
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-
-await app.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();

@@ -11,22 +11,20 @@
  *   第 2 轮：收到工具执行结果后，返回最终文本
  * 断言 mock 服务**收到了第 2 轮请求且请求体里带工具执行结果** ——
  * 这就证明 agent 循环真的转起来了，而不是模型自说自话。
+ *
+ * 迁移说明（共享 harness）：骨架（清隔离目录、启动并等到就绪、check 收集器、
+ * 末尾报告与退出码）全部来自 `./lib/harness.mjs`。启动不再固定等 9 秒；
+ * 「等循环转起来」不再固定轮询 20×1.5 秒，改为等 **mock 真的收到第 2 轮请求**；
+ * 页面里的 `for + sleep` 轮询换成 `waitUntil`。
+ *
+ * ⚠️ 这里**刻意不用** `h.waitForSettled()`：断言全部发生在**模型回合进行中**，
+ * 而回合中界面有 500ms 级的计时器在刷新（时长显示、等待提示轮播），
+ * 永远达不到「800ms 静默」——用了只会等到超时。
  */
-import { _electron as electron } from "playwright";
-import { mkdirSync, rmSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-toolloop";
-const WORKSPACE_DIR = "/tmp/zerowork-toolloop-ws";
-
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
+import { mkdirSync } from "node:fs";
+import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 const FINAL_TEXT = "TOOL_LOOP_DONE_已完成";
 
@@ -34,6 +32,9 @@ const FINAL_TEXT = "TOOL_LOOP_DONE_已完成";
  * 两轮 mock 服务：
  *   第 1 次请求 → 返回 tool_calls（要求 ls）
  *   第 2 次及以后 → 返回最终文本
+ *
+ * 注：这段内联的 mock 服务是各用例里重复的，**统一抽取是后续独立的一步**，
+ * 本文件迁移时原样保留，不动它。
  */
 function startTwoTurnServer() {
 	const requests = [];
@@ -98,37 +99,54 @@ function startTwoTurnServer() {
 	});
 }
 
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 200)]);
-	}
-};
+const h = createHarness({ name: "toolloop" });
+// harness 负责隔离与清空工作区根目录，目录本身要由用例建出来
+mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
 const mock = await startTwoTurnServer();
-console.log(`两轮 mock 服务已启动: ${mock.baseUrl}`);
+console.log(`✓ 两轮 mock 服务已就绪：${mock.baseUrl}`);
 
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
+await h.launch();
+const win = h.window();
 
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+await h.snap("home");
 
-await check("注册 provider 并选中模型", async () => {
+/** 等 mock 收到第 n 轮请求 —— 「模型真的被调到了」是比固定等待可靠的信号。 */
+async function waitForRounds(n, why) {
+	try {
+		await waitUntil(() => mock.requests.length >= n, {
+			timeout: 40_000,
+			interval: 500,
+			desc: `mock 收到第 ${n} 轮请求`,
+		});
+	} catch (error) {
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+	}
+}
+
+/**
+ * 在页面里轮询探针，直到它报告 `found`。
+ *
+ * 取代原来「在页面里 for 循环 + sleep」的写法：截止时间交给 `waitUntil` 统一管，
+ * 慢机器不假失败、快机器不白等；超时时把**最后一次探针看到的样例**带进错误里，
+ * 失败信息才能看出会话状态里到底有什么。
+ */
+async function waitForFound(desc, probe, { arg, timeout = 30_000 } = {}) {
+	let last = null;
+	try {
+		return await waitUntil(
+			async () => {
+				last = await win.evaluate(probe, arg);
+				return last?.found ? last : null;
+			},
+			{ timeout, interval: 500, desc },
+		);
+	} catch (error) {
+		throw new Error(`${error.message}；样例：${String(last?.sample ?? "(未取到)").slice(0, 400)}`);
+	}
+}
+
+await h.check("注册 provider 并选中模型", async () => {
 	const r = await win.evaluate(
 		async ({ baseUrl }) => {
 			const k = globalThis.kami;
@@ -163,7 +181,7 @@ await check("注册 provider 并选中模型", async () => {
 	assert.ok(r.ok, `配置失败: ${r.err}`);
 });
 
-await check("发送消息触发工具调用循环", async () => {
+await h.check("发送消息触发工具调用循环", async () => {
 	try {
 		await win.evaluate(async () => {
 			await Promise.race([
@@ -178,11 +196,9 @@ await check("发送消息触发工具调用循环", async () => {
 	}
 });
 
-await check("mock 服务收到至少两轮请求（证明循环转起来了）", async () => {
-	// 工具执行 + 二次请求需要时间
-	for (let i = 0; i < 20 && mock.requests.length < 2; i++) {
-		await new Promise((r) => setTimeout(r, 1500));
-	}
+await h.check("mock 服务收到至少两轮请求（证明循环转起来了）", async () => {
+	// 工具执行 + 二次请求需要时间：等 mock 真的收到第 2 轮，而不是固定轮询 20×1.5 秒
+	await waitForRounds(2, "agent 循环未转起来 —— 若只收到 1 轮，说明工具调用没有被执行并回传");
 	assert.ok(
 		mock.requests.length >= 2,
 		`只收到 ${mock.requests.length} 轮请求。agent 循环未转起来 —— ` +
@@ -190,42 +206,38 @@ await check("mock 服务收到至少两轮请求（证明循环转起来了）",
 	);
 });
 
-await check("第二轮请求带回了工具执行结果", async () => {
+await h.check("第二轮请求带回了工具执行结果", async () => {
 	const second = mock.requests[1];
 	assert.ok(second, "没有第二轮请求");
 	const msgs = second.body?.messages ?? [];
 	const toolMsgs = msgs.filter((m) => m.role === "tool");
 	assert.ok(
 		toolMsgs.length > 0,
-		`第二轮请求里没有 role:"tool" 的消息，说明工具结果未回传。` +
-			`消息角色：${msgs.map((m) => m.role).join(", ")}`,
+		`第二轮请求里没有 role:"tool" 的消息，说明工具结果未回传。` + `消息角色：${msgs.map((m) => m.role).join(", ")}`,
 	);
 });
 
-await check("最终回复落到会话状态", async () => {
-	const r = await win.evaluate(async () => {
-		for (let i = 0; i < 12; i++) {
+await h.check("最终回复落到会话状态", async () => {
+	const r = await waitForFound(
+		"会话状态里出现最终回复（工具结果回传了，但收尾没落进会话？）",
+		async (mark) => {
 			const s = await globalThis.kami.snapshot();
-			if (JSON.stringify(s).includes("TOOL_LOOP_DONE")) return { found: true };
-			await new Promise((res) => setTimeout(res, 1500));
-		}
-		return { found: false, sample: JSON.stringify(await globalThis.kami.snapshot()).slice(0, 400) };
-	});
+			return JSON.stringify(s).includes(mark)
+				? { found: true }
+				: { found: false, sample: JSON.stringify(s).slice(0, 400) };
+		},
+		{ arg: "TOOL_LOOP_DONE", timeout: 30_000 },
+	);
+	// 先截图、后断言：循环跑完这一屏先留现场
+	await h.shoot("after-tool-loop");
 	assert.ok(r.found, `会话状态里找不到最终回复。样例: ${r.sample}`);
 });
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ Agent 工具调用循环测试 ═══");
-let failed = 0;
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-	if (status === "FAIL") failed++;
-}
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-console.log(`mock 服务共收到 ${mock.requests.length} 轮请求`);
-
-await app.close();
+// 先关应用再关 mock：应用一关，daemon 与 mock 之间的长连接才会断开，
+// server.close() 才不会一直等在那儿（原实现的顺序就是这样）。
+await h.app().close();
 await mock.close();
-process.exit(failed === 0 ? 0 : 1);
+console.log(`（mock 共收到 ${mock.requests.length} 轮请求）`);
+await h.finish();
