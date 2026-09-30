@@ -17,6 +17,13 @@ export default [
 			"artifacts/**",
 			"coverage/**",
 
+			// electron-builder 的输出目录。
+			// **这一条是踩出来的**：`release/` 里是被打包进安装包的**整份 resources/**
+			// （含第三方模板里几千条 `no-undef`），而 eslint **不读 .gitignore** ——
+			// 只跑一次 `npm run dist:dir`，`npm run lint` 就会从「无报错」变成
+			// 12958 个问题。`.gitignore` 里的 `/release/` 挡不住它。
+			"release/**",
+
 			// resources/ 是随包分发的内容资源，不是本工程源码。
 			// 其中的专家技能脚本、插件市场代码来自第三方（如 stock、
 			// teams_marketplace），有自己的风格与运行环境，
@@ -41,6 +48,28 @@ export default [
 				console: "readonly",
 				URL: "readonly",
 				Buffer: "readonly",
+			},
+		},
+		rules: {
+			"no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+			"no-console": "off",
+		},
+	},
+	{
+		// CommonJS 脚本。必须是 .cjs —— electron-builder 用 require() 加载它的钩子，
+		// 而本仓库是 "type": "module"，`.js` 会被当成 ESM 而加载失败。
+		files: ["scripts/**/*.cjs"],
+		languageOptions: {
+			ecmaVersion: "latest",
+			sourceType: "commonjs",
+			globals: {
+				require: "readonly",
+				module: "readonly",
+				exports: "readonly",
+				process: "readonly",
+				console: "readonly",
+				__dirname: "readonly",
+				__filename: "readonly",
 			},
 		},
 		rules: {
@@ -88,7 +117,7 @@ export default [
 		},
 		rules: {
 			"no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
-			// `catch {}` 用���最佳努力的清理（如删除临时目录失败时忽略），
+			// `catch {}` 用于最佳努力的清理（如删除临时目录失败时忽略），
 			// 是刻意写法而非疏漏，不应报错。
 			"no-empty": ["error", { allowEmptyCatch: true }],
 		},

@@ -1,0 +1,56 @@
+name: 📖 文档问题
+description: 文档写错了、过时了，或者看不懂
+title: "[Docs] "
+labels:
+  - documentation
+body:
+  - type: markdown
+    attributes:
+      value: |
+        文档与代码同等重要 —— **文档说错了，等于代码错了**。
+
+        我们对文档的要求是：改行为必须改文档。所以任何「文档与实现不一致」
+        都是真问题，欢迎直接指出文件与行号。
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: 问题类型
+      options:
+        - 与实现不一致（文档说 A，实际是 B）
+        - 内容过时（提到的功能/参数已经不在了）
+        - 链接失效或指向错误的位置
+        - 看不懂（描述太含糊、缺少示例）
+        - 缺失（应该有但没有）
+    validations:
+      required: true
+
+  - type: input
+    id: location
+    attributes:
+      label: 涉及的文件
+      description: 具体到文件路径；如果知道行号更好
+      placeholder: docs/USAGE.md 第 120 行附近
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题是什么
+      description: 请把文档里的**原文**贴出来，再说它哪里不对
+      placeholder: |
+        文档写的是：
+        > 设置 ZEROWORK_CONFIG_DIR 可以改变配置目录
+
+        实际行为是：……（说明差异，最好附上你是从哪里看出来的）
+    validations:
+      required: true
+
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: 你建议怎么改
+      description: 有具体措辞更好；没有也没关系，指出问题本身已经很有价值
+    validations:
+      required: false

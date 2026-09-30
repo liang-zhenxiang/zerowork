@@ -1,0 +1,39 @@
+# 工作流名称
+name: Dependency Review
+# 工作流运行时显示名称
+run-name: "审查 PR #${{ github.event.number }} 引入的依赖变更"
+
+# 怎样触发工作流
+on:
+  pull_request:
+
+# 只读即可：这个 Action 读 PR 的依赖 diff，不需要写任何东西
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: 依赖变更审查
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 这个项目的运行时依赖里有文档解析库，它们直接处理**用户不可信的文件输入**
+      # （见 SECURITY.md 的威胁模型）。所以「引入一个带已知漏洞的新依赖」这件事
+      # 在这里比其他项目更值得拦一下。
+      #
+      # 注意：这个 Action 依赖仓库的**依赖图**（Dependency graph）已开启，
+      # 它对新引入的依赖生效，不会去管历史遗留问题 ——
+      # 历史遗留的那几条跟踪在 Issue #15。
+      - name: 检查新引入的依赖是否带已知漏洞
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          # 有漏洞就失败（默认行为），并在 PR 上留一条评论说明
+          comment-summary-in-pr: on-failure
+          # 许可证只做提示不拦截：本项目的许可证合规由 THIRD_PARTY_NOTICES.md
+          # 人工把关，机器判断不了「这个许可证与我们的分发方式是否相容」
+          fail-on-severity: high

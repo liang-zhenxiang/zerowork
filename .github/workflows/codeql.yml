@@ -1,0 +1,69 @@
+# 工作流名称
+name: CodeQL
+# 工作流运行时显示名称
+run-name: CodeQL 静态安全分析
+
+# 怎样触发工作流
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # 每周二凌晨（UTC）。刻意避开整点：GitHub 的定时任务在整点前后极其拥挤。
+    # 定时跑的意义是**在没有代码改动时**也能发现新出现的规则命中
+    # （CodeQL 的查询集本身会更新）。
+    - cron: "27 4 * * 2"
+
+# 默认只读；写权限按 job 声明
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 静态安全分析
+  #
+  # 为什么单独一个工作流、且**不并入 `CI 总览` 门禁**：
+  #   · 它比静态检查慢一个量级（要构建 CodeQL 数据库），放进门禁会拖慢每个 PR
+  #   · 它的产出形态是「往 Security 页面写 SARIF」，不是「通过/失败」——
+  #     CodeQL 默认**不会因为发现告警而让步骤失败**，把它接进门禁只会得到一个
+  #     永远为绿、却让人以为「有门禁」的假象
+  #
+  # 它的价值在于**发现**而不是**拦截**：结果在仓库的 Security → Code scanning
+  # 里逐条可查，也和 Scorecard 的 SAST 检查项直接相关。
+  # ---------------------------------------------------------------------------
+  analyze:
+    name: 静态安全分析
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      # 上传 SARIF 到 code scanning 需要写安全事件
+      security-events: write
+      contents: read
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 初始化 CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          # 本项目的应用代码是 JavaScript（JS + JSDoc），
+          # resources/ 下的第三方内容是随包分发的，不属于本工程的源码
+          languages: javascript-typescript
+          # `security-extended` 比默认查询集多覆盖一批安全规则。
+          # 代价是告警更多 —— 但这里的目标就是「发现」，宁可多看几条。
+          queries: security-extended
+          config: |
+            paths-ignore:
+              # 随包分发的第三方内容（与 eslint / vitest / prettier 的整目录排除一致）
+              - resources
+              # 大块生成式模块：它们是构建产物的还原形态，不是本工程手写的源码
+              - src/renderer/src
+              - src/main/daemon
+
+      - name: 执行分析并上传结果
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4.38.0
+        with:
+          category: "/language:javascript-typescript"

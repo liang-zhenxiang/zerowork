@@ -500,15 +500,15 @@
  */
 
 /**
- * ZeroWork 设计 Token 单一真源（对应 docs/design.md §2）。
+ * ZeroWork 设计 Token 单一真源（对应 docs/DESIGN.md §2）。
  *
  * 下面这个 `:root` 是唯一生效定义。
  * 删掉那份重复定义不只是去重：同名不同值（如 `--text-secondary` 的 .7 与 .5）
  * 会让 `var()` 结果取决于 import 顺序，是极难排查的隐性 bug。
  *
- * 档位纪律（docs/design.md §2 的硬约束，违者 CR 打回）：
+ * 档位纪律（docs/DESIGN.md §2 的硬约束，违者 CR 打回）：
  *   间距 7 档 / 字号 5 档 / 文字色 3 级 / 圆角 4 档 / 阴影 3 级 / 时长 3 档。
- *   不够用时先改 docs/design.md 并说明理由，不许在组件里加第 8 档。
+ *   不够用时先改 docs/DESIGN.md 并说明理由，不许在组件里加第 8 档。
  *
  * 主题：`:root` 为亮色（当前唯一生效主题，浅色）。
  * `[data-theme="dark"]` 为暗色预留——应用侧尚无暗色开关与持久化，
@@ -582,7 +582,7 @@
 	                                     .attachment-remove(55%/78%) / .image-preview-overlay(72%)，
 	                                     现 32% 与 40% 已收编到此；后两者是「控件 scrim」与
 	                                     「全屏看图沉浸遮罩」，语义不是模态背板，保留原值并在
-	                                     入口样式表里的注释（见 docs/design.md）。 */
+	                                     入口样式表里的注释（见 docs/DESIGN.md）。 */
 
 	/* ── 分类调色板（6 色，跨三处共用）─────────────────────────────────
 	   收编对象：提示词分段（.seg-*，原 --seg 六色）／上下文用量成分条（.comp-*，原 5 色）／
@@ -691,7 +691,7 @@
 
 /* ── 暗色主题（预留，未接线）──────────────────────────────────────────
    取值原则：保持亮色的「层次方向」不变（侧栏比主背景更深、抬升面更亮），
-   状态色在暗底上提亮保对比度。首次启用暗色时须对照 docs/design.md §2 复核一遍，
+   状态色在暗底上提亮保对比度。首次启用暗色时须对照 docs/DESIGN.md §2 复核一遍，
    并逐区实测校验——本块目前没有实测依据，只是合理的初值。 */
 [data-theme="dark"] {
 	color-scheme: dark;
@@ -967,7 +967,7 @@ textarea:focus-visible {
 	   （折叠时还会留在 x=0）。 */
 	/* 滚动职责移交给 .sidebar-scroll（任务+空间区），导航项固定不动。 */
 	overflow: hidden;
-	/* 折叠过渡：`flex-basis` 是 docs/design.md §5.1 的**第二条 width 受控例外**（理由见下条规则）。
+	/* 折叠过渡：`flex-basis` 是 docs/DESIGN.md §5.1 的**第二条 width 受控例外**（理由见下条规则）。
 	   元素常驻 DOM（App.tsx 的 data-sidebar 状态，不再条件挂载）才有「起始态→终态」可跑 ——
 	   条件挂载的元素挂载即终态，transition 不触发（第 2 期弹层踩过同一个坑）。
 	   visibility 只服务 a11y：它参与过渡时，折叠过程中保持 visible 到动画结束（离散属性
@@ -980,7 +980,7 @@ textarea:focus-visible {
    只能做浮层覆盖，而侧栏是推开内容的常驻栏）。
    padding-inline / border-right-width 在 t=0 就归零、不参与过渡：border-box 下 flex-basis
    会被内边距与边框顶住（只归零 flex-basis 时，理论值 25px = --space-4×2 + 1px 边框，
-   实测渲染盒 24.8px，而不是 0 —— 口径与 docs/design.md §5 受控例外 ④ 一致），
+   实测渲染盒 24.8px，而不是 0 —— 口径与 docs/DESIGN.md §5 受控例外 ④ 一致），
    而 artifact-panel 的 maxPanelWidth 正是量这个盒子 —— 归零才能保住「收起时量到 0」的既有契约。
    visibility: hidden 把侧栏移出 Tab 序与 a11y 树（条件挂载时代这件事由卸载承担）。
    代价：折叠期间侧栏内容随宽度重排（约 12 帧布局），已知并接受。 */
@@ -1117,9 +1117,9 @@ textarea:focus-visible {
 /* ── 共享状态组件（state-views.tsx）─────────────────────────────────────────
  * 空 / 加载 / 错误三态与转圈的唯一样式来源。此前空态有 13 种类名、转圈有 5 套
  * 各自一份 CSS（含各自的 reduced-motion 局部 patch），同一语义写了多遍，
- * 观感不一致且改一处要改十几处（docs/design.md §4 / §6）。
+ * 观感不一致且改一处要改十几处（docs/DESIGN.md §4 / §6）。
  * 使用范围按 spec §B 分级：数据驱动视图与异步控件；无异步的控件不套。
- * 加载与空必须分开：数据 undefined = 加载中，[] = 真空（docs/design.md §6）。
+ * 加载与空必须分开：数据 undefined = 加载中，[] = 真空（docs/DESIGN.md §6）。
  */
 .state-empty {
 	display: flex;
@@ -1179,9 +1179,9 @@ textarea:focus-visible {
 	overflow-wrap: anywhere;
 }
 
-/* 转圈只有这一个 class：直径由 <Spinner size> 内联给出（直径不在 docs/design.md §2
+/* 转圈只有这一个 class：直径由 <Spinner size> 内联给出（直径不在 docs/DESIGN.md §2
    的任何档位表里，是各容器既有的排版尺寸）。轨道 --border、弧 --text-secondary：
-   不借状态色 —— 转圈只表「进行中」，语义由相邻文字承担（docs/design.md §7.6）。 */
+   不借状态色 —— 转圈只表「进行中」，语义由相邻文字承担（docs/DESIGN.md §7.6）。 */
 .spinner {
 	display: inline-block;
 	flex: 0 0 auto;
@@ -1290,7 +1290,7 @@ textarea:focus-visible {
 	font-variant-numeric: tabular-nums;
 	/* 交叉淡化的一半（另一半在 .task-item-ops）：基类写"淡回"用 --dur-fast、
 	   hover/focus 态写"淡出"用 --dur-base，与 .entry-toolbar 的既有出入场口径一致
-	   （docs/design.md §5.8 进出场不对称——用户已决定离开时收得快，两处 hover 浮起元素同规矩）。 */
+	   （docs/DESIGN.md §5.8 进出场不对称——用户已决定离开时收得快，两处 hover 浮起元素同规矩）。 */
 	transition: opacity var(--dur-fast) var(--ease-standard);
 }
 
@@ -1373,7 +1373,7 @@ textarea:focus-visible {
 }
 
 .task-rename-input:focus {
-	/* 焦点指示用 --text-secondary，与全局焦点环同色（docs/design.md §7.1 的
+	/* 焦点指示用 --text-secondary，与全局焦点环同色（docs/DESIGN.md §7.1 的
 	   `2px --text-secondary + 2px offset`）。这不是「描边用文字档」的误用，
 	   而是把边框兼作焦点环（input 自身 outline:none）——改成 --accent 会让
 	   键盘焦点出现第三种颜色语言，故保留。 */
@@ -1490,7 +1490,7 @@ textarea:focus-visible {
 
 /* 组级操作（+ 与 ⋯）：与任务行同款的 hover 浮现模式。
    过渡与 .task-item-ops 逐条对齐（含进出场不对称：淡回用 --dur-fast、浮现用
-   --dur-base，docs/design.md §5.8）—— 两处是同一个交互，此前这里是硬闪、那边是渐变。 */
+   --dur-base，docs/DESIGN.md §5.8）—— 两处是同一个交互，此前这里是硬闪、那边是渐变。 */
 .space-group-actions {
 	display: flex;
 	gap: 2px;
@@ -1552,7 +1552,7 @@ textarea:focus-visible {
 
 /* 分支会话标记：压在标题之前（同未读点/转圈的位置约定——行尾会被省略号裁掉）。
    色取 --text-secondary：它是「来源说明」性质的次级标记，不抢标题与状态点的注意力，
-   也不借用状态色（分支不是状态，docs/design.md §2.4）。
+   也不借用状态色（分支不是状态，docs/DESIGN.md §2.4）。
    内联 SVG 默认坐在基线上会整体偏上，故下沉 0.18em——量与手法同 .clickable-path-icon
    （相对字号的量，不引入新的间距/尺寸档位）。 */
 .task-branch-mark {
@@ -1648,7 +1648,7 @@ textarea:focus-visible {
 	font-weight: 600;
 	color: var(--primary);
 	letter-spacing: 0;
-	/* 打字机逐字节奏（动画语义，不占 §2.8 的三档交互动效时长；登记见 docs/design.md §10.3）。
+	/* 打字机逐字节奏（动画语义，不占 §2.8 的三档交互动效时长；登记见 docs/DESIGN.md §10.3）。
 	   60ms ≈ 16 字/秒：「ZeroWork，开工吧」11 字 0.75s 打完 —— 再快就看不出「逐个」，
 	   再慢就变成等它。 */
 	--title-stagger: 60ms;
@@ -1684,7 +1684,7 @@ textarea:focus-visible {
    不和下方输入框的光标抢注意力。 */
 .home-title-caret {
 	/* 闪烁周期：循环动画周期是动画语义、不入时长档（与 spin 的 0.8s、shimmer 的 2.2s 同族，
-	   见 docs/design.md §10.3）。这里定义成变量是因为它同时决定「停留多久再收笔」。 */
+	   见 docs/DESIGN.md §10.3）。这里定义成变量是因为它同时决定「停留多久再收笔」。 */
 	--caret-blink: 1.1s;
 	/* 出场时刻 = 末字索引 × 逐字节奏 + 一个字淡入完的时长（--char-index 是字数，
 	   减 1 即末字索引）—— 与末字同时落定，而不是抢在它前面出现。 */
@@ -1910,7 +1910,7 @@ textarea:focus-visible {
 
 /*
  * 首页「还不能开始对话」引导条（spec: 首页引导）。
- * 走 docs/design.md §3.3 的**卡片级别**（不是新开一个组件级别）：底 --bg、
+ * 走 docs/DESIGN.md §3.3 的**卡片级别**（不是新开一个组件级别）：底 --bg、
  * 1px --border、圆角 --radius-md、内边距 --space-4，内部文字按「卡片标题
  * --text-body + 600 / meta --text-meta + --text-secondary」两档。
  * 常驻在输入卡上方，不遮不挡（判据不成立时组件返回 null，元素不存在）。
@@ -1952,7 +1952,7 @@ textarea:focus-visible {
    该槽位。后果是输入卡周围那圈灰带
    比 深一档 —— 输入卡是首页视觉焦点，这层灰直接影响整页的"轻重"。
    现按 token 原值改回 #f0f0f0；仍不入 token 档（它是 场景原值，
-   docs/design.md §2.7 已登记同类例外）。 */
+   docs/DESIGN.md §2.7 已登记同类例外）。 */
 .composer-slot {
 	background: linear-gradient(180deg, #f0f0f0 0%, #f5f5f5 100%);
 	border-radius: 24px;
@@ -2270,12 +2270,12 @@ textarea:focus-visible {
 /* 分类条的色相（全局 --cat-* 板），条段与图例圆点共用。
    system / tool-defs 都是**请求的固定前缀**（每轮都付、不随对话增长），
    共用 --text-secondary 灰、在图例里相邻 —— 条上两段连成一块正是它们的关系，
-   区分靠行名与数字，不靠色相。不占分类槽的理由见 docs/design.md §10.3 与 docs/architecture.md。
+   区分靠行名与数字，不靠色相。不占分类槽的理由见 docs/DESIGN.md §10.3 与 docs/ARCHITECTURE.md。
    skills/tools 与诊断页成分条同名同类同色（--cat-3 / --cat-5）；
    conversation 与成分条的 assistant 同义（对话内容），共用 --cat-4 青
    —— 两处都刻意不借红/绿语义色。
    other 是**残差不是分类**（实际读数 − 分类合计），所以同样不占分类槽
-   （docs/design.md §10.3 分类色板只有 6 槽），走比 system 更弱一档的中性灰：
+   （docs/DESIGN.md §10.3 分类色板只有 6 槽），走比 system 更弱一档的中性灰：
    「已知的固定前缀」与「不知道归属的余量」在视觉上必须能分开。 */
 .cu-seg-system,
 .cu-swatch-system,
@@ -2557,7 +2557,7 @@ textarea:focus-visible {
 /* 删除钮收在缩略图右上角：strip 有 overflow-x 裁切，钮若凸出到 thumb 外会被剪掉。
    底色是缩略图上的小 scrim（55% / hover 78%），语义不是模态背板，故不并入
    --overlay(40%)——归 40% 后白 × 在亮图上会不够清，且 hover 档会与常态撞成同色。
-   登记为 token 例外（见 docs/design.md）。 */
+   登记为 token 例外（见 docs/DESIGN.md）。 */
 .attachment-remove {
 	position: absolute;
 	top: 2px;
@@ -2698,7 +2698,7 @@ textarea:focus-visible {
    取它而不是输入卡的 .context-chip（32 高），是因为「比正文行高」：用户气泡正文
    是 15px/1.6（行高 24），23 高的胶囊贴齐正文行；32 那档是 composer-bar 里跟按钮
    并排的控件高度，放进消息流会顶出一行。
-   两处差异（有意，见 docs/design.md §3.6）：① 写 font-weight 500，本站字重只有
+   两处差异（有意，见 docs/DESIGN.md §3.6）：① 写 font-weight 500，本站字重只有
    400/600 两档语义（§2.6），胶囊取常规不加粗；② 删除钮仍是独立按钮（是 hover
    时与左侧图标原位互换），保住 aria-label 与键盘可达。
    底色的分档见 --bg-chip（§2.2）：白底上是 #f2f2f2，用户气泡（--bg-raised）
@@ -2765,7 +2765,7 @@ textarea:focus-visible {
    `.cr-input-footer-item__label` 是 font-size 13px（同文件 :19124），
    不是 14。我们按 --text-body(14) 写了一年，比 大 1px。
    hover 口径仍偏离 一处（有意）：它 hover「加深字色 + 字重 500」，字重过渡每帧
-   触发布局与文字重排（docs/design.md §5.1 禁止过渡布局属性），且 500↔400 的字宽变化会
+   触发布局与文字重排（docs/DESIGN.md §5.1 禁止过渡布局属性），且 500↔400 的字宽变化会
    推挤同排的相邻 chip。改成只过渡 color：--text-secondary(.5) → --text(纯黑)。 */
 .context-chip {
 	display: flex;
@@ -2973,7 +2973,7 @@ textarea:focus-visible {
  * 完成态一律回归静态灰字 —— 多种动效并存会让用户分不清什么还在跑。
  * 文字基色走 --shimmer-color（默认三级灰），套用方按需覆盖变量。
  *
- * 保持 background-position、不改为伪元素扫光（Task 3 评估结论，登记为 docs/design.md §5
+ * 保持 background-position、不改为伪元素扫光（Task 3 评估结论，登记为 docs/DESIGN.md §5
  * 受控例外）：① 伪元素拿不到文字内容，而「文字明暗流动」必须以文字形状为裁剪源
  * （background-clip: text）；② 即便用 content: attr(data-text) 复制文字，仍需 mask-position
  * 移动遮罩 —— 与 background-position 同类，都不是合成属性；③ 本类用在 8 处行内 <span>，
@@ -3089,13 +3089,13 @@ textarea:focus-visible {
 	   会先以 opacity:1 画一帧、再跳回 0 重播，肉眼闪一下。
 	   2026-09-20 恢复（用户要求「切任务就播，含返回已有历史的对话页」）：2026-09 的
 	   polish-interaction-smoothness 曾把它收成 `.stream[data-reveal="true"]`
-	   「只在空会话出第一条消息时播」，理由见 docs/design.md §7
+	   「只在空会话出第一条消息时播」，理由见 docs/DESIGN.md §7
 	   「返回对话页整列上滑」（该条已标**被取代**）。代价（每次换任务一次整列
 	   opacity+translateY，动画期整棵子树一个合成层）已知并接受。
 	   fill-mode 用 backwards 而非 both：both 会让终帧 translateY(0) 常驻，常驻 transform
 	   使 .stream 成为 fixed 后代的包含块，图片放大预览（.image-preview-overlay，position:fixed）
 	   就被压回消息流盒内；backwards 只补起始帧，动画结束元素回归无 transform。
-	   时长归档为 --dur-slow(280ms)；缓动是带回弹的第三档缓动（docs/design.md §2.8 只列
+	   时长归档为 --dur-slow(280ms)；缓动是带回弹的第三档缓动（docs/DESIGN.md §2.8 只列
 	   两个），去掉回弹会变成普通淡入，故保留原曲线、登记为 token 例外。 */
 	animation: stream-reveal var(--dur-slow) cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
 }
@@ -3200,7 +3200,7 @@ textarea:focus-visible {
 	width: 28px;
 	height: min(var(--turn-nav-natural, 0px), calc(100% - 64px), 420px);
 	transform: translateY(-50%);
-	/* 轨道高度**不过渡**（dsh 在这里做了 220ms 的高度动画）：docs/design.md §5.1 禁止
+	/* 轨道高度**不过渡**（dsh 在这里做了 220ms 的高度动画）：docs/DESIGN.md §5.1 禁止
 	   过渡 height，而这里能换来的只是「新开一轮时 10px 的微动」—— 收益不抵一条
 	   受控例外，直接瞬时到位。 */
 }
@@ -3272,7 +3272,7 @@ textarea:focus-visible {
 /*
  * 横杠本体：右对齐，长度随状态变（dsh 的 mark::before 同款）。
  *
- * 长度用 **scaleX** 而不是过渡 width：docs/design.md §5.1 把 width 列在禁止过渡的
+ * 长度用 **scaleX** 而不是过渡 width：docs/DESIGN.md §5.1 把 width 列在禁止过渡的
  * 属性里。右端对齐的横杠从右端伸缩，视觉与改宽度等价，且是合成属性。
  * 基准宽取最长的那档（20px），各样式的长度差异全部由 scaleX 表达。
  * transform-origin 必须钉右端：默认的中心原点是两头一起长，和 dsh 的
@@ -3466,7 +3466,7 @@ textarea:focus-visible {
    表头」而不是「发言者身份行 + 一行小字附注」。.name 与 .avatar-fold-status
    都是 15px/line-height 1.75（status 走三级灰）—— 我们取同字号同色（--text-emphasis
    / --text-secondary，值都对得上），但不采用 1.75 的行高：行高无 token，
-   docs/design.md §2.6 的正文基准是 1.6，为一行表头引入档外值不划算。 */
+   docs/DESIGN.md §2.6 的正文基准是 1.6，为一行表头引入档外值不划算。 */
 .turn-agent {
 	font-size: var(--text-emphasis);
 	font-weight: 600;
@@ -4726,7 +4726,7 @@ textarea:focus-visible {
 	border: none;
 	background: transparent;
 	/* 高度由 TSX 内联 style 驱动（RO 上报 + clamp + 防抖），过渡让微增长平滑。
-	   `height` 是 docs/design.md §5.1 明文禁止过渡的布局属性，本条为**受控例外 ⑤**
+	   `height` 是 docs/DESIGN.md §5.1 明文禁止过渡的布局属性，本条为**受控例外 ⑤**
 	   （2026-09-19 登记，理由见该处）：跨文档的 iframe 只能由宿主改盒子高度，
 	   transform: scale 会缩放内容并错位 iframe 内的点击/滚动坐标；
 	   而 RO 上报是离散值（防抖后），无过渡即逐跳变。 */
@@ -5106,7 +5106,7 @@ textarea:focus-visible {
  * 结构：`.panel-slot`（常驻、宽度 0 ↔ panelWidth + 外壳留白）> 三选一的 .preview-panel（条件挂载）。
  * 2026-09-19 加这一层，起因是用户实测反馈「右侧边栏没有动画」：面板本体是条件挂载的，
  * 挂载即终态 —— transition 没有起点可跑，于是开合只能是「消息列瞬跳 + 面板闪现」。
- * 左侧栏早有 flex-basis 过渡（docs/design.md §5 受控例外 ④），右侧在此补齐，同一手法、
+ * 左侧栏早有 flex-basis 过渡（docs/DESIGN.md §5 受控例外 ④），右侧在此补齐，同一手法、
  * 同一语义：面板**不是浮层**，它是占布局宽度的让位栏，`transform` 表达不了让位
  * （transform 不改变布局宽度，只能做浮层覆盖），所以这里动 `width`。
  *
@@ -5144,7 +5144,7 @@ textarea:focus-visible {
 
 /* 收起态：只降可见性，宽度由 TSX 的内联 style 给 0（它是运行时状态，不是静态档位）。
    内边距必须跟着归零：border-box 下它会把宽度顶住，收起后仍占一截
-   （左侧栏折叠踩过同一个坑，见 docs/design.md §5 受控例外 ④）。 */
+   （左侧栏折叠踩过同一个坑，见 docs/DESIGN.md §5 受控例外 ④）。 */
 .panel-slot[data-collapsed="true"] {
 	visibility: hidden;
 	padding: 0;
@@ -5180,7 +5180,7 @@ textarea:focus-visible {
 	flex-shrink: 0;
 	/*
 	 * 圆角白卡（2026-09-20 用户要求「右侧栏的边也用上圆角」）：与内容卡同一套
-	 * 几何（docs/design.md §3.7 内容卡）—— 圆角 --radius-md + 底色 --bg，边界由卡片
+	 * 几何（docs/DESIGN.md §3.7 内容卡）—— 圆角 --radius-md + 底色 --bg，边界由卡片
 	 * 自身与灰底的对比给出。原先靠一条 1px `border-left` 划界，圆角化后不再需要
 	 * （内容卡也没有边框，两条边界两套语言才是真的不一致）。
 	 *
@@ -5255,7 +5255,7 @@ textarea:focus-visible {
  * 让位量 = 菜单条带子 + 外壳留白（`.panel-slot` 的 padding-top，同一处几何）+ 头部自身的
  * `--space-3` ⇒ 与停靠态**逐像素对齐**：全屏切换时头部一行不跳，也不与窗口控件同行。
  * 带子高度取 `env(titlebar-area-height, 30px)`，与 `.titlebar` / `.app` 的让位**同一个来源**
- * （主进程 `titleBarOverlay.height`，docs/design.md §3.7 的「菜单条高」行），渲染层不另记那个数。
+ * （主进程 `titleBarOverlay.height`，docs/DESIGN.md §3.7 的「菜单条高」行），渲染层不另记那个数。
  *
  * 否决方案：把全屏的 `top` 改成 30px（让面板只铺内容区）—— 那会推翻「全屏盖满整个窗口、
  * 含左侧栏」这条已登记语义（spec: fix-panel-fullscreen-motion 的覆盖范围），且左侧栏折叠
@@ -6571,7 +6571,7 @@ textarea:focus-visible {
 
 /* 一行一条的留痕：列表容器/行/工具栏/标签全部复用既有档位
    （.provider-list / .provider-row / .provider-main / .provider-tag / .provider-meta，
-   见服务商列表那一段与 docs/design.md §3.4），这里只补「详情」一档 ——
+   见服务商列表那一段与 docs/DESIGN.md §3.4），这里只补「详情」一档 ——
    它是这一行的主文、可被截断（完整内容在行的 title 里），不新造任何视觉值。 */
 .audit-detail {
 	flex: 1 1 auto;
@@ -6862,7 +6862,7 @@ textarea:focus-visible {
 /* ── 设置页「内置运行时」（spec: add-managed-runtimes Task 3.1）────────── */
 
 /* 总开关关闭：子项整行压暗、开关不可点（交互同 RuntimeToolsCard）。
-   只改透明度不置灰背景（docs/design.md §3.4 禁用行口径）。 */
+   只改透明度不置灰背景（docs/DESIGN.md §3.4 禁用行口径）。 */
 .runtime-row-off .provider-main,
 .runtime-row-off .runtime-meta {
 	opacity: 0.5;
@@ -7369,7 +7369,7 @@ textarea:focus-visible {
  * 用在哪：`{open && …}` 挂载、内容在文档流里、挂在某个可点的头下方的那些块
  * （思考块正文 / 定时任务运行记录 / 团队状态栏与成员列表 / 任务诊断的折叠体 /
  * 审批详情）。条件挂载的元素**挂载即终态**，transition 没有起点可跑，只能走
- * animation（docs/design.md §5 规则 7：这类元素不做退场动画，入场照做）。
+ * animation（docs/DESIGN.md §5 规则 7：这类元素不做退场动画，入场照做）。
  */
 @keyframes fold-in {
 	from {
@@ -7722,7 +7722,7 @@ textarea:focus-visible {
  */
 
 /* 会话选择器改走共享 SelectField（2026-09-19）：原 `.ledger-select` 是原生 <select>
-   的自定义外观，docs/design.md §6 禁止清单要求一律用 settings/select-field.tsx 的
+   的自定义外观，docs/DESIGN.md §6 禁止清单要求一律用 settings/select-field.tsx 的
    SelectField —— 换掉后本规则无引用，删除（不做「留着以后可能用」的保留）。 */
 
 .timeline-run {
@@ -8406,7 +8406,7 @@ textarea:focus-visible {
 	overflow: hidden;
 }
 
-/* 元数据行（版本 / 来源 / 导入时间）：沿用 docs/design.md §3.3 的卡片 meta 行口径
+/* 元数据行（版本 / 来源 / 导入时间）：沿用 docs/DESIGN.md §3.3 的卡片 meta 行口径
    （--text-meta + --text-secondary）。单行省略号收尾 —— 来源路径已在 JSX 里截短，
    完整路径挂在 title 上；不新造视觉值。 */
 .skill-card-meta {
@@ -8428,9 +8428,9 @@ textarea:focus-visible {
 	white-space: nowrap;
 }
 
-/* 停用态：名称与描述降一档灰度（docs/design.md §2.1 的三级文字色）。
+/* 停用态：名称与描述降一档灰度（docs/DESIGN.md §2.1 的三级文字色）。
    只改字色、不动底与边框 —— §3.4「禁用行不置灰背景」，背景一变会与 hover/选中态撞色。
-   状态不只靠颜色：右侧开关的位置本身就是可读的开关态（docs/design.md §7.6）。 */
+   状态不只靠颜色：右侧开关的位置本身就是可读的开关态（docs/DESIGN.md §7.6）。 */
 .skill-card-off .skill-card-name {
 	color: var(--text-secondary);
 }
@@ -9248,7 +9248,7 @@ textarea:focus-visible {
 /* 启停开关：原生 checkbox 透明铺满 label（点击区 = 轨道），
    轨道与滑块是纯展示层（pointer-events: none，点击落在 input 上）。
    `.skill-switch` 是第二个消费方（技能页卡片）—— 同一组声明、逐个选择器并进列表，
-   不复制视觉值。抽共享 Switch 组件是 docs/design.md §6 的待办（「新造类名」同性质），
+   不复制视觉值。抽共享 Switch 组件是 docs/DESIGN.md §6 的待办（「新造类名」同性质），
    抽的时候这两处一起收。 */
 .mcp-switch,
 .skill-switch {
@@ -9362,7 +9362,7 @@ textarea:focus-visible {
 	flex-direction: column;
 	background: var(--bg);
 	border: 1px solid var(--border);
-	/* 圆角按语义归档到 --radius-lg(16)：docs/design.md §2.7「模态、问卷卡、案例封面」。
+	/* 圆角按语义归档到 --radius-lg(16)：docs/DESIGN.md §2.7「模态、问卷卡、案例封面」。
 	   原 24px 取自 questionFloating 原值，但本卡是内联浮层卡片、不是输入卡/槽体系，
 	   语义表已明确归 lg，故不再列 原值例外。 */
 	border-radius: var(--radius-lg);
@@ -10121,7 +10121,7 @@ textarea:focus-visible {
 /* ── 按下态（:active）──────────────────────────────────────────────────────
  * 只动 transform 与 background-color —— 两者都不触发布局，时长走 --dur-fast。
  * 分两类，理由不同：
- *   按钮 / chip / 卡片 → scale。docs/design.md §3.1：图标按钮 .96、次级按钮 .98；
+ *   按钮 / chip / 卡片 → scale。docs/DESIGN.md §3.1：图标按钮 .96、次级按钮 .98；
  *     §3.3：可点卡片 .98。
  *   整行可点区域（列表行、菜单项、下拉 trigger）→ 底色加深一档，不缩放。
  *     整行缩放会把行内绝对定位的操作钮、右对齐的时间一起缩，观感是「整行在抖」；
@@ -10142,7 +10142,7 @@ textarea:focus-visible {
  *     onMouseDown，按下的下一帧菜单就关了，按下态根本看不见。
  */
 
-/* 图标按钮（小控件，docs/design.md §3.1：active 叠 scale(.96)）。
+/* 图标按钮（小控件，docs/DESIGN.md §3.1：active 叠 scale(.96)）。
    【2026-09-19 补齐】名单按「命中区 ≤20-32px 且只装一个图标」的口径逐个核对后扩张：
    关掉浮层/删除附件/移除 chip 的那些 ×（.cu-close / .attachment-remove /
    .document-ref-remove / .skill-chip-remove / .pending-tip-close / .preview-tab-close /
@@ -10187,7 +10187,7 @@ textarea:focus-visible {
 	transform: scale(0.93);
 }
 
-/* 常规按钮与 chip / tab 胶囊 / 卡片（docs/design.md §3.1 / §3.3：active 叠 scale(.98)）。
+/* 常规按钮与 chip / tab 胶囊 / 卡片（docs/DESIGN.md §3.1 / §3.3：active 叠 scale(.98)）。
    【2026-09-19 补齐】这些此前连 hover 都是硬切、更没有按下态。分类口径：
    有文字或成块的控件 → .98（与 .primary-btn / .capability-chip 同语言）；
    .artifact-card / .case-card 是整卡可点（§3.3 可点卡片 .98）；
@@ -10225,7 +10225,7 @@ textarea:focus-visible {
 	transform: scale(0.98);
 }
 
-/* 可点卡片（docs/design.md §3.3：active scale(.98)）。
+/* 可点卡片（docs/DESIGN.md §3.3：active scale(.98)）。
    .model-card 的 :not(.unavailable) 与它的 hover 守卫同口径——未配 Key 的卡
    cursor 已是 default、点击无动作（见 4363 行注释），不该有按下反馈。
    同理不含 .skill-card：它是纯展示卡（无 onClick / 无 role=button），
@@ -10290,7 +10290,7 @@ textarea:focus-visible {
 }
 
 /* 有状态变化的交互类统一在这里声明过渡 —— 形变、变色、填底否则都是「啪」地跳
-   （--dur-fast，docs/design.md §3：四态过渡统一走 --dur-fast，变色类用 --ease-standard）。
+   （--dur-fast，docs/DESIGN.md §3：四态过渡统一走 --dur-fast，变色类用 --ease-standard）。
 
    【2026-09-19 扩名单 + 推翻一条旧决策】用户反馈「交互动画还有一些有了、不少没有」，
    逐类核对后补的是两类缺口：
@@ -10299,7 +10299,7 @@ textarea:focus-visible {
       硬切，唯一原因是没进这张名单（.queued-chip-btn 的定义处自己都写着「与侧栏行内
       操作同一档」）。
    2) **列表行 / 菜单项的 hover 底**：本文件此前明写「走底色加深的那批不加过渡，
-      按下叠 150ms 会显得迟钝」。**该结论被推翻**：docs/design.md §3 要求四态都走
+      按下叠 150ms 会显得迟钝」。**该结论被推翻**：docs/DESIGN.md §3 要求四态都走
       --dur-fast；自己的侧栏行就是带过渡的（`.cb-sidebar-nav__item`
       `transition: all .2s ease`）；而 150ms
       的渐变作用在「按下加深 5%→8%」这种 3% 差值上，并不构成可感的迟钝。
@@ -10444,7 +10444,7 @@ textarea:focus-visible {
 /* ── 嵌套滚动容器的滚动链 ──────────────────────────────────────────────────
  * 这些容器嵌在可滚动的父容器里（消息流 / 侧栏 / 面板 / 弹层）。不加 contain 的话，
  * 滚到它们两端后链动会继续滚动父容器 —— 最糟的表现是「菜单滚到底，背后的消息流
- * 跟着滚」（docs/design.md §7.8）。
+ * 跟着滚」（docs/DESIGN.md §7.8）。
  *
  * 逐个判断（spec 要求写清「不加」的理由）：
  *   加 contain：.thinking-body（思考块，父=消息流）/ .tool-detail-box.open（工具输出，
@@ -10721,7 +10721,7 @@ button.agent-row {
 }
 
 .agent-row-name {
-	/* 列表正文档（docs/design.md §3.4：主文字 --text-list，副行 --text-meta）。 */
+	/* 列表正文档（docs/DESIGN.md §3.4：主文字 --text-list，副行 --text-meta）。 */
 	font-size: var(--text-list);
 	color: var(--text);
 	white-space: nowrap;
@@ -10808,7 +10808,7 @@ button.agent-row {
 }
 
 /* 第二行（运行中的动作行）；终态时同一类放进展开区显示终态文本。
-   副行走 docs/design.md §3.4 的 --text-meta（主文字是 --text-list）。 */
+   副行走 docs/DESIGN.md §3.4 的 --text-meta（主文字是 --text-list）。 */
 .agent-row-subline {
 	color: var(--text-secondary);
 	font-size: var(--text-meta);

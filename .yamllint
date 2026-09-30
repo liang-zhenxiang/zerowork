@@ -1,0 +1,28 @@
+---
+# yamllint 配置 —— CI 里的「YAML 风格检查」job 以此文件为准
+#
+# 只保留有价值的规则，逐条说明为什么这么调 —— 一条「不知道为什么存在」的
+# lint 规则，维护者迟早会把它关掉，而且关掉时不知道自己失去了什么。
+#
+# 文档：https://yamllint.readthedocs.io/en/stable/configuration.html
+
+extends: default
+
+rules:
+  # 工作流里的注释是中文，且常常需要写完整的因果（这个项目靠注释承载设计理由）。
+  # 默认 80 列会把这些行全部报出来，噪音远大于收益。
+  line-length: disable
+
+  # `on:` 是 GitHub Actions 的必需字段，但 YAML 1.1 把裸 `on` 解析成布尔真，
+  # 于是默认规则会报「truthy value should be one of [false, true]」。
+  # 这是 YAML 的历史包袱，不是错误 —— 官方给的解法就是不对键名做检查。
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+
+  # 工作流文件不作为独立 YAML 文档分发，文档起始标记没有意义。
+  document-start: disable
+
+  # 保留这一条：`#注释` 与 `# 注释` 混用会让整份文件读起来很随意。
+  comments:
+    min-spaces-from-content: 1

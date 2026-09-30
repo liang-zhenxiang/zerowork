@@ -5,7 +5,110 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-> 版本号沿用产品线（`package.json` 的 `version`）。本仓库的变更自 `0.1.4` 起记录。
+**分类固定为六类，不自创**：新增 / 变更 / 弃用 / 移除 / 修复 / 安全。
+每个用户可感知的改动都要记进来；修复类条目要写清「此前错在哪、有什么后果」。
+
+## 关于 `0.1.4-restore.N` / `0.1.4-zerowork.N`
+
+这些是**开源前的内部迭代记录**（N 是内部构建序号），编号体系与之后的语义化版本不同：
+按 semver 的排序规则，`0.1.4-zerowork.23` **小于** `0.1.4`。
+
+公开发布自 **`0.2.0`** 起。内部记录原样保留在下方，不改写 —— 它们是这段历史的如实记录，
+但**不要**把它们当作已发布版本。
+
+---
+
+## [Unreleased]
+
+<!--
+下一个版本的内容写在这里。分类固定为六类、不自创：
+新增 / 变更 / 弃用 / 移除 / 修复 / 安全。
+每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
+-->
+
+---
+
+## [0.2.0] - 2026-09-29
+
+> **首次开源发布。** 把项目落实为规范的开源项目：CI 门禁（含单一汇总 check 与三平台测试）、
+> 治理文件与模板、仓库自动化、中英双语文档体系、维护流程 skill 全部就位；
+> 同时修掉了一份**被逐段截断的 Apache-2.0**（GitHub 原把它识别为 NOASSERTION），
+> 并让 Release 开始附带 Windows / macOS 安装包。
+
+### 新增
+
+- **CI 门禁**（[#1](https://github.com/liang-zhenxiang/zerowork/issues/1)）：静态检查、
+  三平台单元测试、构建、端到端 GUI 测试、工作流静态检查与安全扫描、提交信息规范，
+  结果汇总为单一 check **`CI 总览`**，分支保护只需要盯它一个
+- **本地统一检查入口** `npm run lint:all`：一条命令跑完 CI 里本地能跑的那些，
+  缺失的工具会**跳过并单独列出**（跳过不等于通过）
+- **七个校验脚本**：提交信息规范、文档有效性（链接 + 环境变量有出处）、随包内容完整性
+  （存在**且被 git 跟踪**）、行尾一致性、渲染层产物契约、发布版本号一致性
+- **治理文件**：`CODE_OF_CONDUCT.md`、`SUPPORT.md`，以及 Issue / PR 模板、`CODEOWNERS`
+- **文档体系**：中英双语 README；`docs/` 补齐使用指南、排错手册、维护者手册，
+  并把架构文档的命名统一为大写
+- **维护流程 skill**：`.claude/skills/` 下的 `oss-bootstrap` 与 `maintain-loop`，随仓库分发
+- **仓库自动化**：自动打标签、首次贡献者欢迎、过期 Issue 清理、依赖更新、
+  OSSF Scorecard 供应链评分、依赖审查、可选 AI 代码审查
+- **CodeQL 静态安全分析**：每周定时 + main 推送 + PR 触发，查询集用 `security-extended`，
+  结果写进 Security → Code scanning。它**不进 `CI 总览` 门禁** ——
+  慢一个量级，而且它的产出是「发现」不是「通过/失败」（CodeQL 默认不会因告警而失败，
+  接进门禁只会得到一个人以为有门禁、实际永远为绿的假象）
+- **构建溯源证明（SLSA provenance）**：安装包没有代码签名，
+  用户无法判断它是不是由这段代码构建的 —— 溯源证明补上了可验证的那一半：
+  由 CI 用 OIDC 身份签发，记录「哪个仓库、哪个 commit、哪个工作流」产出了该摘要的文件。
+  用户可验证：`gh attestation verify <文件> --repo liang-zhenxiang/zerowork`
+- **安装包**：Release 附带 Windows（NSIS）与 macOS（dmg，arm64 + x64）安装包，
+  由 `release.yml` 在同一次运行内构建并附上。**不签名**，
+  发布说明里会自动附上各平台的打开方式（详见下方「安全」一节）
+
+### 变更
+
+- **LICENSE 换成完整的 Apache-2.0 全文**。此前仓库里那份是**被逐段截断**的残本
+  （130 行 / 6548 字节，官方全文是 202 行 / 11358 字节），缺了 Derivative Works 定义的
+  后半段、Contribution 定义的提交渠道说明、以及**专利诉讼终止条款整段**。
+  后果是 GitHub 把许可证识别为 NOASSERTION —— 对外等于「许可证不明」，
+  比没有许可证更糟，因为它看起来像是有。版权署名保持 `Copyright 2026 ZeroWork` 不变
+- `package-lock.json` 的下载源改回官方 registry（929 条 `resolved` 里原有 765 条指向
+  第三方镜像）。锁文件里的地址决定了每个人从哪拿包，而 CI 跑在境外。
+  版本与 integrity 一字未改
+- 显式声明两个此前**靠传递依赖提升**才能用的依赖：`espree`（daemon 模块图检查用）
+  与 `@types/node`（`tsconfig.json` 声明了它却没写进 package.json）——
+  任何一次依赖精简都会让它们突然 `MODULE_NOT_FOUND`
+- `npm run format:check` 的范围收敛为「工具链与工作流」（根 `*.mjs`、`tools/**`、
+  `.github/**/*.yml`）。全仓其余部分是 2 空格缩进而 `.prettierrc` 要求 tab，
+  纳入检查等于要求一次性重排上千行 —— 排除理由逐条写在 `.prettierignore` 里
+
+### 修复
+
+- **端到端测试里一条依赖宿主环境的断言**（`ipc-functional` 的 worktree 分支列表）。
+  它拿本仓库根目录去验「能列出分支」，而 CI 上仓库是 `actions/checkout` 拉出来的
+  detached HEAD + 浅克隆，**一个本地分支都没有** —— 同一断言在开发机与 CI 上结论相反。
+  改为**自建一个已知形状的仓库**做夹具，顺便真的验证了「能枚举多个分支」
+- `eslint.config.mjs` 与 `src/main/index.js` 的注释里混入了替换字符（U+FFFD），读起来是乱码
+- `CONTRIBUTING.md` 引用了「Issue 模板中的 Bug 报告」，但仓库里根本没有 Issue 模板（悬空引用）
+- **`release/` 不在 eslint 与 vitest 的排除范围内**。`npm run dist` 会把
+  **整份 `resources/**`**（含第三方模板里几千条 `no-undef`）复制进 `release/`，
+  而 eslint **不读 `.gitignore`** —— 只跑一次打包，`npm run lint` 就会从「无报错」
+  变成 12958 个问题。`.gitignore` 里的 `/release/` 挡不住它
+
+### 安全
+
+- 供应链基线：工作流里所有 `uses:` **pin 到 commit SHA**（tag 可移动，SHA 不可）、
+  所有 checkout 加 `persist-credentials: false`、每个工作流显式最小 `permissions`；
+  新增 **zizmor** 安全扫描 job，基线 0 findings，豁免集中在 `.github/zizmor.yml`
+  且每条写明可验证的安全依据
+- 启用 Secret scanning + Push protection、Dependabot 告警与安全更新、
+  Private vulnerability reporting（`SECURITY.md` 与 Issue 模板里的安全报告渠道
+  指向 `security/advisories/new`，**不开这个功能那个入口就是死的**）
+- `SECURITY.md` 补上**正式威胁模型**（资产、信任边界、对手假设）与已知的开放风险：
+  文档解析库存在未修复漏洞（`decompress` 的 Zip Slip 类问题、`xlsx` 的原型污染与 ReDoS），
+  而它们正是用来读用户文件的。跟踪见
+  [#15](https://github.com/liang-zhenxiang/zerowork/issues/15)
+- **安装包没有代码签名**（没有证书，签名与公证都做不到）。
+  用户会看到 macOS 的「已损坏 / 无法验证开发者」或 Windows 的 SmartScreen 提示 ——
+  **这不是打包出错**。发布说明里会自动附上各平台的打开方式与原因，
+  避免用户把安全拦截误读成「下到了恶意软件」。拿到证书后应补上签名与公证
 
 ---
 

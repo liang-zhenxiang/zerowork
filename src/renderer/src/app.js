@@ -13691,7 +13691,7 @@ function Sidebar({
               （连接没恢复时立即失败），也是恢复后唯一的重新拉取入口。 */
           /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: "连接已断开，未能读取历史任务", onRetry: onReloadTasks })
         ) : tasks === void 0 ? (
-          /* 结构已知的等待用骨架（docs/design.md §4「加载」一列）。行结构与真行同一批
+          /* 结构已知的等待用骨架（docs/DESIGN.md §4「加载」一列）。行结构与真行同一批
              类名、同尺寸（见 TASK_SKELETON_*），所以列表到达时是「同一片区域被填上」，
              而不是整块内容被换掉。role="status" 承担骨架条自身 aria-hidden 掉的
              「在读取」语义（此前由 LoadingState 的「正在读取…」文字承担）。 */
@@ -16214,7 +16214,7 @@ function ContextUsageRing({
       }
     ),
     open && /*
-    * 外点即关、不阻断页面 → 非模态浮层：不声明 dialog（声明了按 docs/design.md §7.3
+    * 外点即关、不阻断页面 → 非模态浮层：不声明 dialog（声明了按 docs/DESIGN.md §7.3
     * 就得配焦点陷阱 + 焦点归还），用 group 只承载「这是一组带名字的内容」。
     */
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "cu-popover", role: "group", "aria-label": "上下文用量", children: [
@@ -60355,12 +60355,12 @@ function WorkspaceView({
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "preview-view", children: cwd2 === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "工作区尚未就绪" }) : treeError !== void 0 ? (
     /* 错误分支必须排在加载分支之前：失败时 tree 也是 undefined，
-       排在后面就会被「正在读取…」盖住（三态互斥，docs/design.md §4）。 */
+       排在后面就会被「正在读取…」盖住（三态互斥，docs/DESIGN.md §4）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: treeError, onRetry: () => setTreeAttempt((n) => n + 1) })
   ) : tree === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : tree.fullTree.length === 0 ? (
     /* 扫描成功但工作空间确实没有可索引文件（空目录、或只有 node_modules/.git
        这类被跳过的目录）：原来渲染没有任何条目的空 .file-tree —— 与「扫描
-       还没回来」在视觉上无从区分（docs/design.md §4）。 */
+       还没回来」在视觉上无从区分（docs/DESIGN.md §4）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "工作区里没有可预览的文件" })
   ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "file-tree", children: flattenTree(tree.fullTree, visibleCollapsed(tree)).map(
     ({ node: node2, depth }) => node2.kind === "folder" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -65324,7 +65324,7 @@ function SkillsView({ onClose, onTodo, onToast, experts, expertsError, onRetryEx
        * 三态互斥：失败 → 就地错误卡 + 重试（调 load）；未就绪 → 加载态；
        * 数据回来且为空 → 空态。原来 error 条与「正在读取…」并存 ——
        * 拉取失败时 snapshot 永远停在 undefined，页面永久卡在「正在读取」，
-       * 且没有任何重试出口（docs/design.md §4：失败就地呈现 + 重试动作）。
+       * 且没有任何重试出口（docs/DESIGN.md §4：失败就地呈现 + 重试动作）。
        */
       error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : snapshot === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : snapshot.skills.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         EmptyState,
@@ -66065,7 +66065,7 @@ function DiagnosticsView({
           /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "会话时间线" }),
             ledger !== void 0 && ledger.sessions.length > 0 && /*
-            * 原生 select 是 docs/design.md §6 禁止项，换 SelectField。
+            * 原生 select 是 docs/DESIGN.md §6 禁止项，换 SelectField。
             * 选中项可能不在列表里（请求的会话还没记台账、或 daemon 回退目标
             * 不在 mtime 列表内）——补一个选项，别让它回落成占位文案。
             */

@@ -20,7 +20,7 @@
 		"types": ["node"]
 	},
 
-	// checkJs 暂时关闭，原因见 docs/architecture.md「类型检查」一节：
+	// checkJs 暂时关闭，原因见 docs/ARCHITECTURE.md「类型检查」一节：
 	// 应用主体以 JS 提供，没有编译期类型信息。
 	// 直接开 checkJs 会产生数以万计的 noImplicitAny 报错，
 	// 这些报错反映的是"类型还没补"，不是"代码有问题"，开着只会淹没真实问题。
