@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收标准：反向验证、不得用 sleep 绕过"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "检查改动是否违反 daemon 层规范"}
