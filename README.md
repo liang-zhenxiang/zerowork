@@ -145,6 +145,16 @@ README 不重复维护一份。当前方向：把项目打造成规范的开源�
 
 参与即表示同意遵守 [行为准则](CODE_OF_CONDUCT.md)。
 
+### 维护者
+
+| 维护者 | GitHub | 邮箱 |
+| --- | --- | --- |
+| liang-zhenxiang | [@liang-zhenxiang](https://github.com/liang-zhenxiang) | 116311683@qq.com |
+| nicholyx | [@nicholyx](https://github.com/nicholyx) | nicholyx@163.com |
+
+两人都是全权维护者。有问题也可以在 Issue / PR 里直接 @ 我们 ——
+**如果是安全问题，请走 [SECURITY.md](SECURITY.md) 的私有渠道，不要开公开 Issue。**
+
 ## 外部请求与发布前核对
 
 - **[EXTERNAL_REQUESTS.md](EXTERNAL_REQUESTS.md)** —— 运行时向外部发起的请求：到哪个地址、

@@ -18,6 +18,17 @@
 [Private vulnerability reporting](https://docs.github.com/zh/code-security/security-advisories/guidance-on-reporting-and-writing-information-about-vulnerabilities/privately-reporting-a-security-vulnerability)
 提交（仓库的 **Security** 标签页 → **Report a vulnerability**）。
 
+这是**首选渠道**：它会把报告只发给维护者，且全程留痕。如果因为某些原因用不了它，
+也可以直接给任一维护者发邮件：
+
+| 维护者 | GitHub | 邮箱 |
+| --- | --- | --- |
+| liang-zhenxiang | [@liang-zhenxiang](https://github.com/liang-zhenxiang) | 116311683@qq.com |
+| nicholyx | [@nicholyx](https://github.com/nicholyx) | nicholyx@163.com |
+
+> 邮件渠道没有加密保证。**如果漏洞涉及凭证或用户数据，请优先用 Private vulnerability reporting；
+> 实在要用邮件，也请只描述问题、不要附真实的凭证或用户数据。**
+
 请在报告中包含：
 
 - 受影响的版本

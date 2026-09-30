@@ -26,6 +26,34 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+### 变更
+
+- **安装包的标识改为 `io.github.liang-zhenxiang.zerowork`**（原 `com.zerowork.app`）。
+  反向域名形式，与仓库地址对得上，换 owner 时一眼能看出要改哪里。
+
+  > ⚠️ **这是一次应用的「身份」变更，不只是改名。** 操作系统按包标识区分应用，
+  > 所以从 `v0.2.1` 升级到下一个版本时，macOS / Windows 可能把它**装成两个应用**
+  > 而不是覆盖升级。0.x 阶段影响可控，但请在升级说明里提一句
+  > （用户数据在 `~/.zerowork`，不受包标识影响，不会丢）
+
+  **一处改动覆盖全部安装目标** —— electron-builder 的身份由 `appId` 单点派生：
+  macOS 的 `CFBundleIdentifier`、6 个 helper 的 bundle id、Windows 的 AUMID、
+  NSIS 升级用的 GUID，全部跟着变（已核对 electron-builder 的 schema）。
+
+  同时补上了**运行时的另一半**：此前应用从不调用 `app.setAppUserModelId()`，
+  而安装器会把快捷方式的 AUMID 设成 `appId` —— 两者对不上时 Windows 的任务栏固定项
+  与通知分组会不一致（非 Windows 上是 no-op）。新增的 `npm run check:app-id`
+  守住这条一致性：不一致时**只在 Windows 上出问题**，而开发机多半是 macOS，
+  所以必须由机器来守
+
+- **纳入两位维护者的信息**：`package.json` 的 `author` / `contributors`（含邮箱）、
+  `.github/CODEOWNERS`、`CODE_OF_CONDUCT.md` 与 `SECURITY.md` 的联系渠道、
+  `docs/MAINTAINER_GUIDE.md` 的「维护者」一节、README。
+  此前只有 `package.json` 里一句 `"author": "ZeroWork"`，
+  Windows 安装包显示的「发布者」也因此是个项目名而不是人
+
+  **版权署名（`LICENSE` 与安装包的 `copyright`）保持不变**（`Copyright 2026 ZeroWork`）——
+  那是权利归属声明，与「找谁」是两件事，改动它属于权利人的决定
 ### 修复
 
 - **发布流水线跑不起来**（`startup_failure`，0 个 job）。推上 `v0.2.1` 的 tag 之后

@@ -38,7 +38,16 @@
 
 如遇滥用、骚扰或其他不可接受的行为，可通过以下渠道向负责执行的维护者报告：
 
-- 在仓库中**私下**联系维护者（[@nicholyx](https://github.com/nicholyx)）；
+- **私下**联系任一维护者 —— 两位都可以受理：
+
+  | 维护者 | GitHub | 邮箱 |
+  | --- | --- | --- |
+  | liang-zhenxiang | [@liang-zhenxiang](https://github.com/liang-zhenxiang) | 116311683@qq.com |
+  | nicholyx | [@nicholyx](https://github.com/nicholyx) | nicholyx@163.com |
+
+  **不要**用公开 Issue 报告这类事件。如果被投诉的对象是其中一位维护者，
+  请直接联系另一位。
+
 - 涉及安全性质的报告，请走 [SECURITY.md](SECURITY.md) 中的私有渠道，不要开公开 Issue。
 
 所有投诉都会被及时、公正地审查和调查。

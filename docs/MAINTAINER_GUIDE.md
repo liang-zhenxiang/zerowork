@@ -6,6 +6,7 @@
 
 ## 目录
 
+- [维护者](#维护者)
 - [项目定位与边界](#项目定位与边界)
 - [仓库配置清单](#仓库配置清单)
 - [自动化设施一览](#自动化设施一览)
@@ -19,6 +20,32 @@
 - [附：常用命令速查](#附常用命令速查)
 
 ---
+
+## 维护者
+
+| 维护者 | GitHub | 邮箱 | 关注面 |
+| --- | --- | --- | --- |
+| liang-zhenxiang | [@liang-zhenxiang](https://github.com/liang-zhenxiang) | 116311683@qq.com | 仓库整体、发布 |
+| nicholyx | [@nicholyx](https://github.com/nicholyx) | nicholyx@163.com | 仓库整体、发布 |
+
+**两人都是全权维护者**，权限与职责相同：都可以合并 PR、发布版本、处理安全问题。
+代码所有者（`.github/CODEOWNERS`）指定的也是这两位。
+
+分工上的两条约定：
+
+- **敏感改动互相过目**：`src/main/daemon/permission-rules.js`、`src/main/sandbox/`、
+  `.github/workflows/` 这些安全敏感路径的改动，尽量由**另一位**看一眼再合并
+  （分支保护不强制审批 —— 单人维护时那会把自己锁在门外；这条靠约定，不靠机器）
+- **一个人休假或失联时，另一个人有全部权限接手**，不存在「只有某人能发布」的环节。
+  这也是为什么 Secrets 与仓库设置不绑定个人账号
+
+**联系方式用于**：安全报告（首选 [Private vulnerability reporting](https://github.com/liang-zhenxiang/zerowork/security/advisories/new)，
+见 `SECURITY.md`）、行为准则的执行（见 `CODE_OF_CONDUCT.md`）。
+这两处的联系人也都是以上两位。
+
+> 版权署名（`LICENSE` 附录与安装包的 `copyright` 字段）与此处的维护者名单是**两回事** ——
+> 前者是权利归属声明，后者是「找谁」。当前署名是 `Copyright 2026 ZeroWork`。
+
 
 ## 项目定位与边界
 
