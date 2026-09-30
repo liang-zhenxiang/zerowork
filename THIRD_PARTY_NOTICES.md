@@ -40,6 +40,8 @@
 | `resources/experts/visual-storytelling-expert/skills/content-factory/README.md` | **付费第三方技能**（标价 $9、作者署名 Carson Jarvis） | 个人作者 |
 | `resources/experts/market-researcher/skills/stock/scripts/{data,tool}-vendor.js`（内嵌注释） | 打包进来的开源库各自声明：axios、URI.js、OpenJS Foundation、Express 系等 | 各自作者 |
 | `resources/bin/UV-NOTICE.md` | `uv` 二进制来源与 sha256 校验记录 | astral-sh |
+| `src/renderer/src/app.css`（内嵌 pdf.js viewer 的文本层 / 注释层样式，文件头两处带 Apache-2.0 声明） | Apache-2.0 | Mozilla Foundation |
+| `resources/fonts/README.md`（MiSans 字体来源与许可条款；**字体二进制未入库**） | 小米《MiSans 字体知识产权许可协议》—— 全球免费商用，但**嵌入式使用须「在软件中特别注明使用了 MiSans 字体」** | 小米科技有限责任公司 |
 
 **发布前需要权利人逐项处置**（三选一）：
 
@@ -50,6 +52,10 @@
 - [ ] 各 MIT 资产 —— **可以随包分发**，但必须保留其 LICENSE 与归属声明
       （已保留，勿删）
 - [ ] 其余（UmaDev 归属注释、vendored 库声明、uv 来源）—— 保留即可
+- [ ] **MiSans 的「应用内注明」义务 —— 目前未履行**。许可条款要求「在软件中
+      特别注明使用了 MiSans 字体」，而应用内注明位置取决于「关于」页，**当前没有关于页**，
+      所以这条义务处于未完成状态。`resources/fonts/README.md` 是仓库内的注明，
+      **不等于软件内的注明**。发布前须补上「关于」页或改用其他方式随应用呈现该声明
 
 ### 关于其余 `resources/` 内容
 
@@ -77,7 +83,8 @@ npx license-checker --summary
 
 ## 4. 许可证与版权主体
 
-- 当前 `LICENSE` 为 **Apache-2.0**（见文件内注释中给出的选型理由）
+- 当前 `LICENSE` 为 **Apache-2.0**（选型理由见 [README.md 的「许可」一节](README.md#许可)；
+  `LICENSE` 本身是 license 原文，不含任何注释块）
 - `LICENSE` 末尾版权署名为 `Copyright 2026 ZeroWork`
 
 - [ ] 确认 Apache-2.0 符合预期（如需更换，替换 `LICENSE` 与
@@ -101,6 +108,8 @@ npx license-checker --summary
 
 - [ ] **第 2 节带许可声明的资产**：`pdf`（Anthropic 专有）与 `content-factory`
       （付费第三方技能）已取得授权 / 替换 / 移除；MIT 资产的许可声明已保留
+- [ ] **MiSans 的应用内注明义务已履行**（补「关于」页或等效呈现）——
+      这是唯一一条「资产已合规、但义务尚未执行」的条目
 - [ ] 第 2 节其余内容：随包内容的授权状态已由权利人确认
 - [ ] 第 1 节：`EXTERNAL_REQUESTS.md` 已过目，无开关的请求已决定保留 / 替换 / 移除
 - [ ] 第 3 节：依赖条款已核对并与所选许可证兼容
