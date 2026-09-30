@@ -307,25 +307,31 @@ jobs:
   installers:
     name: 构建安装包
     needs: [notes]
-    # 用 `./` 而不是 `$/`。
-    #
-    # `$/`（2026-07 引入的自仓库引用语法）看起来更优：无歧义、解析到当前运行的 commit。
-    # **但它会让这个工作流在 tag 触发时直接 `startup_failure`** —— 实测：
-    # v0.2.1 的 tag 推上去之后 run 0 个 job 就结束了，连「准备发布说明」都没起来。
-    # 同一个 commit 上 CI / CodeQL / Scorecard 都跑得通，说明不是仓库的 Actions 策略问题，
-    # 差别就在这一行。
-    #
-    # 当初 actionlint 已经报过它：`uses` 的格式不在它认识的两种之内
-    # （`owner/repo/path@ref` 与 `./path`）。我当时把它当成「工具版本落后」而加了一条忽略 ——
-    # **那是错的判断**：actionlint 建模的就是 GitHub 实际的 schema，它说不对就该先怀疑自己。
-    # 现在改回 `./`，并把那条忽略撤掉。
-    #
-    # zizmor 的 self-repository 审计会因此报一条 low —— 那是「用 `./` 有歧义」的通用建议，
-    # 在本仓库不成立（仓库名不含 `/`，不存在把第一个路径段误认为 owner 的可能）。
+    # 用 `./` 而不是 `$/`：两者都可用，选 `./` 是因为 **actionlint 能校验它**
+    # （`$/` 不在它认识的 `uses` 格式之内），而本地与 CI 的工作流检查都以 actionlint 为准。
+    # `./` 唯一的「缺点」是 zizmor 的 self-repository 审计会建议换成 `$/` ——
+    # 那条建议针对的是「第一个路径段可能被误认成 owner」的歧义，本仓库名不含 `/`，不成立。
     # 豁免理由写在 .github/zizmor.yml。
+    #
+    # **别把这里的 `./` 当成「`$/` 有问题」的证据。** v0.2.1 第一次发布确实
+    # `startup_failure` 了，我当时误判成是这一行 —— 真因是下面 `permissions` 的授权不足。
+    # 完整的排查经过写在 docs/MAINTAINER_GUIDE.md 的「发布流水线起不来」一节。
     uses: ./.github/workflows/build-installers.yml
+    # ⚠️ 调用方的 `permissions` 是**被调工作流的上限**，不是「只声明我自己要用的」。
+    # build-installers.yml 里的两个 job 要 `id-token: write` + `attestations: write`
+    # （用于生成构建溯源证明），这里不授予的话整个工作流会在**启动阶段**被拒：
+    #
+    #   Invalid workflow file: .github/workflows/release.yml
+    #   The job is requesting 'attestations: write, id-token: write',
+    #   but is only allowed 'attestations: none, id-token: none'
+    #
+    # 这个错误的形态很阴：run 以 `startup_failure` 结束、**0 个 job**，
+    # 从日志里看不出跟权限有关（日志根本不存在）。而它只在「tag 触发 + 走这条调用路径」
+    # 时才暴露 —— 加溯源证明那次改动之后没有发布过，所以一直没被跑到。
     permissions:
       contents: read
+      id-token: write
+      attestations: write
 
   # ---------------------------------------------------------------------------
   # ⑦ 创建 Release 并附上安装包
