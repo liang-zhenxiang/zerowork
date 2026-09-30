@@ -135,16 +135,29 @@
 
 ### 配置现状（2026-09-30 核对）
 
-上面那份清单里已经配好的：Issues / Discussions / Wiki（已关）/ Projects /
-允许自动合并 / 合并后自动删分支 / Private vulnerability reporting / topics / 标签体系。
+清单上的仓库级设置**已全部就位**：
+
+| 项 | 状态 |
+| --- | --- |
+| Issues / Discussions | 已开启；Wiki 已关 |
+| Projects（[ZeroWork 路线图](https://github.com/users/liang-zhenxiang/projects/1)） | 已建并链接到本仓库 |
+| 允许自动合并 / 合并后自动删分支 | 已开启 |
+| Private vulnerability reporting | 已开启 |
+| Secret scanning + Push protection | 已开启 |
+| Dependabot 告警 + 安全更新 | 已开启 |
+| topics / 标签体系 | 已配好，标签与 `.github/labeler.yml` 一致 |
+| **分支保护 `main`** | **已配置**，内容与上一节一致：只要求 `CI 总览`、要求解决所有对话、禁止强推与删除、approvals 为 0 |
+
 仓库许可证已被 GitHub 识别为 **Apache-2.0**。
 
-**还没配的是分支保护** —— 它需要 admin 权限。在配上之前，
-**`main` 上没有硬门禁**：CI 照常运行，但不会阻止直接合并。
-这是当前最该补的一项，配置内容见上一节。
-
-> Secret scanning / Push protection / Dependabot 安全更新这几项**需要 admin 权限才能读取状态**，
-> 维护者请在 `Settings → Code security` 里自行确认一遍。
+> ⚠️ **核对分支保护时的一个坑**：这个接口要求 **admin** 权限，而**非管理员**访问
+> `GET /repos/{owner}/{repo}/branches/main/protection` 会拿到 **404** ——
+> 配好的分支保护**同样返回 404**。所以「404 = 未配置」这个推断不成立，
+> 用协作者账号核对时会得到相反的错误结论。
+>
+> 换用这些不依赖 admin 的手段：尝试直接推 `main`（会被 protected branch 拒绝）、
+> 合并一个 PR 后看远端分支是否自动消失（即 `delete_branch_on_merge`）、
+> 或看 PR 的 `mergeStateStatus` 是否因必需的 check 未完成而变成 `BLOCKED`。
 
 ### 开发在本仓库内进行，不要走 fork
 
