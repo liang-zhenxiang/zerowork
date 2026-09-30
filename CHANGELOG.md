@@ -26,14 +26,38 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+---
+
+## [0.2.1] - 2026-09-30
+
+> 本次发布修掉一个**让 Office 文档解析整体失效**的缺陷（且此前的报错是误导性的），
+> 并把随包第三方内容的登记补齐到可核对的水平。
+
 ### 变更
 
 - **开发流程改为直接在本仓库进行**：从 `main` 切分支 → PR → 等 `CI 总览` 绿 → squash 合并。
   不再经由 fork —— 那会让 CI 需要逐次人工 approve、仓库设置与 Secrets 要配两套、
   Release 与代码分家。维护者手册与 `maintain-loop` skill 已同步改掉旧的 fork 假设
+- **随包第三方内容的登记补全**：两位权利人在仓库里存在却没有进登记表 ——
+  `src/renderer/src/app.css` 里内嵌的 pdf.js viewer 样式（**Mozilla Foundation**，Apache-2.0）
+  与 `resources/fonts/` 的 **小米 MiSans 字体**。后者的许可条款要求
+  「在软件中特别注明使用了 MiSans 字体」，这条义务目前**仍未履行**（应用内没有「关于」页），
+  已登记为待办
+- 依赖升级：`electron` 44.4.4、`typescript` 7.0.2、`@types/node` 26.6.2，
+  以及工作流里引用的 Actions（由 Dependabot 提出）
 
 ### 修复
 
+- **Office 文档解析整体失效**（严重）。`officeparser` 4.x → 8.x 有**三处破坏性变更**
+  同时命中现有用法：`parseOfficeAsync` 导出被移除、`tempFilesLocation` 配置项被移除、
+  返回值从字符串变成了需要 `(await ast.to("text")).value` 取的 AST。
+  其中第一处直接致命 —— 调用抛 `TypeError`，而错误分类会把它归成
+  **「文档可能已损坏」**：用户看到一个误导性的报错，实际是整个功能坏了。
+  已迁移到 8.x 并补上不依赖模型的单元测试（`tests/unit/doc-extract-office.test.mjs`）。
+  顺带把 critical 级的 `decompress`（Zip Slip 类）告警一并消除
+- **两处 Markdown 围栏损坏**（`resources/**/minimax-docx/references/openxml_encyclopedia_part3.md`）：
+  代码围栏与中文残句粘在同一行，导致**围栏奇偶失配** —— 从该行到文件末尾全部被渲染进
+  一个代码块，包括其后的「Quick Reference」整节。正文没丢，是结构坏了
 - **一批指向错误 Issue 的链接**。仓库开源化改造时沿用了 fork 上的 Issue 编号，
   而**编号在两个仓库里指向完全不同的东西**：`issues/8`（原「路线图」）在上游是一个
   已合并的 Dependabot PR；`issues/15`（原「依赖安全」）是一个已合并的功能 PR。
