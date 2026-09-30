@@ -26,6 +26,21 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+### 变更
+
+- **开发流程改为直接在本仓库进行**：从 `main` 切分支 → PR → 等 `CI 总览` 绿 → squash 合并。
+  不再经由 fork —— 那会让 CI 需要逐次人工 approve、仓库设置与 Secrets 要配两套、
+  Release 与代码分家。维护者手册与 `maintain-loop` skill 已同步改掉旧的 fork 假设
+
+### 修复
+
+- **一批指向错误 Issue 的链接**。仓库开源化改造时沿用了 fork 上的 Issue 编号，
+  而**编号在两个仓库里指向完全不同的东西**：`issues/8`（原「路线图」）在上游是一个
+  已合并的 Dependabot PR；`issues/15`（原「依赖安全」）是一个已合并的功能 PR。
+  读者点进去会看到毫不相关的内容 —— 比 404 更容易误导。
+  已改为上游的实际编号（路线图 #21、依赖安全 #17），`CONTRIBUTING.md` 里
+  「`main` 受保护」这一句也改为只陈述规则（分支保护当前尚未配置，不实）
+
 ---
 
 ## [0.2.0] - 2026-09-29
@@ -37,7 +52,7 @@
 
 ### 新增
 
-- **CI 门禁**（[#1](https://github.com/liang-zhenxiang/zerowork/issues/1)）：静态检查、
+- **CI 门禁**（[#1](https://github.com/liang-zhenxiang/zerowork/pull/1)）：静态检查、
   三平台单元测试、构建、端到端 GUI 测试、工作流静态检查与安全扫描、提交信息规范，
   结果汇总为单一 check **`CI 总览`**，分支保护只需要盯它一个
 - **本地统一检查入口** `npm run lint:all`：一条命令跑完 CI 里本地能跑的那些，
@@ -104,7 +119,7 @@
 - `SECURITY.md` 补上**正式威胁模型**（资产、信任边界、对手假设）与已知的开放风险：
   文档解析库存在未修复漏洞（`decompress` 的 Zip Slip 类问题、`xlsx` 的原型污染与 ReDoS），
   而它们正是用来读用户文件的。跟踪见
-  [#15](https://github.com/liang-zhenxiang/zerowork/issues/15)
+  [#17](https://github.com/liang-zhenxiang/zerowork/issues/17)
 - **安装包没有代码签名**（没有证书，签名与公证都做不到）。
   用户会看到 macOS 的「已损坏 / 无法验证开发者」或 Windows 的 SmartScreen 提示 ——
   **这不是打包出错**。发布说明里会自动附上各平台的打开方式与原因，

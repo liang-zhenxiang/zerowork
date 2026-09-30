@@ -130,7 +130,7 @@ npm run test:all    # static checks + unit tests + end-to-end GUI tests
 ## Roadmap
 
 The single source of truth for the roadmap is
-**[Roadmap Issue #8](https://github.com/liang-zhenxiang/zerowork/issues/8)**.
+**[Roadmap Issue #21](https://github.com/liang-zhenxiang/zerowork/issues/21)**.
 
 ## Contributing
 

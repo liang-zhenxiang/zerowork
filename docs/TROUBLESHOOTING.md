@@ -225,7 +225,7 @@ npm run test:gui:real
 
 项目依赖的文档解析库存在已知漏洞（`decompress` 的 Zip Slip 类问题、`xlsx` 的原型污染与
 ReDoS），**都没有在当前版本里修复**。它们正是用来读你打开的文件的。
-跟踪与处置见 [依赖安全 Issue](https://github.com/liang-zhenxiang/zerowork/issues/15)，
+跟踪与处置见 [依赖安全 Issue](https://github.com/liang-zhenxiang/zerowork/issues/17)，
 威胁模型见 [SECURITY.md](../SECURITY.md)。
 
 在修复之前：**只打开你信任来源的文档**。这是标准的「不要让不受信任的解析输入
