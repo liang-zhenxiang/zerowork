@@ -307,11 +307,23 @@ jobs:
   installers:
     name: 构建安装包
     needs: [notes]
-    # `$/` 是 GitHub 2026-07 引入的**自仓库引用**语法：无歧义，且解析到**当前运行的 commit**
-    # （`./` 需要先 checkout，硬编码 `owner/repo@ref` 又会与运行中的 commit 漂移）。
-    # zizmor 的 self-repository 审计要求用它；actionlint 1.7.12 尚不认识这个前缀，
-    # 因此在 ci.yml 里为它加了一条极窄的忽略 —— 理由写在那里，升级工具后应回头复核。
-    uses: $/.github/workflows/build-installers.yml
+    # 用 `./` 而不是 `$/`。
+    #
+    # `$/`（2026-07 引入的自仓库引用语法）看起来更优：无歧义、解析到当前运行的 commit。
+    # **但它会让这个工作流在 tag 触发时直接 `startup_failure`** —— 实测：
+    # v0.2.1 的 tag 推上去之后 run 0 个 job 就结束了，连「准备发布说明」都没起来。
+    # 同一个 commit 上 CI / CodeQL / Scorecard 都跑得通，说明不是仓库的 Actions 策略问题，
+    # 差别就在这一行。
+    #
+    # 当初 actionlint 已经报过它：`uses` 的格式不在它认识的两种之内
+    # （`owner/repo/path@ref` 与 `./path`）。我当时把它当成「工具版本落后」而加了一条忽略 ——
+    # **那是错的判断**：actionlint 建模的就是 GitHub 实际的 schema，它说不对就该先怀疑自己。
+    # 现在改回 `./`，并把那条忽略撤掉。
+    #
+    # zizmor 的 self-repository 审计会因此报一条 low —— 那是「用 `./` 有歧义」的通用建议，
+    # 在本仓库不成立（仓库名不含 `/`，不存在把第一个路径段误认为 owner 的可能）。
+    # 豁免理由写在 .github/zizmor.yml。
+    uses: ./.github/workflows/build-installers.yml
     permissions:
       contents: read
 
