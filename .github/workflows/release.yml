@@ -27,8 +27,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
-      # 只需要读代码；gh api 生成变更清单也用同一个只读 token
-      contents: read
+      # ⚠️ 必须是 write，不能只给 read —— 这一点**踩过**。
+      #
+      # 本 job 用 `gh api .../releases/generate-notes` 生成 PR 清单，而那是
+      # 一个 **POST** 接口，需要 `contents: write`。只给 read 时会 403：
+      #
+      #     gh: Resource not accessible by integration (HTTP 403)
+      #     ##[warning]变更清单生成失败，发布说明将不含 PR 列表
+      #
+      # 当时工作流里写着「gh api 生成变更清单也用同一个只读 token」——
+      # **那个假设是错的**。
+      #
+      # 失败路径刻意设计成不阻断（发布不该因为一段文案而失败），代价是它会
+      # **静静地退化成两段**。v0.2.1 是首个 Release、没有「上一版本」可比，
+      # 压根走不到这段逻辑；v0.3.0 才是第一次真正执行到这里 —— 于是才发现。
+      #
+      # 这正是不验证就永远不知道的那类问题：动过本文件之后**一定要打一个 tag 验证**。
+      contents: write
     outputs:
       has-changelog: ${{ steps.changelog.outputs.found }}
       prev-tag: ${{ steps.prs.outputs.prev_tag }}
