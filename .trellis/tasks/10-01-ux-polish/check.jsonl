@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收标准：反向验证怎么做、断言不得削弱、先截图后断言"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "检查改动是否违反渲染层规范（token 档位、产物契约）"}

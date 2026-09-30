@@ -19,10 +19,16 @@
  * 这条检查就是那个修法的**守卫** —— 它比端到端测试快两个数量级，
  * 而且顺带覆盖 JS 项（现有 e2e 只断言了 3 个 css 文件存在）。
  *
+ * 它同时还守着第二条**同样只有构建之后才能验证**的渲染层契约：**版本号注入**。
+ * 界面显示的版本号来自 `electron.vite.config.mjs` 的 `renderer.define(__APP_VERSION__)`，
+ * 单一真源是 `package.json` 的 `version`。若有人在渲染层源码里又写死一个版本字符串，
+ * 界面就会向用户展示一个**不存在的版本**（真实缺陷：界面显示 `0.1.4`、package.json 是
+ * `0.2.1`）。产物是判据：源码写死旧版本 → 产物里出现旧版本、找不到当前版本。
+ *
  * 用法：
  *   npm run build && node scripts/check-renderer-assets.mjs
  *
- * 退出码：0 契约成立，1 有断链；**尚未构建时返回 0 并明确说明「已跳过」**
+ * 退出码：0 契约成立，1 有断链或版本号没注入；**尚未构建时返回 0 并明确说明「已跳过」**
  * （本地没构建就跑 lint 不该失败，但也不会被算作通过 —— 报告里会写明）。
  */
 
@@ -34,6 +40,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_DIR = path.join(ROOT, 'src/renderer/src');
 const OUT_DIR = path.join(ROOT, 'out/renderer');
 const ASSETS_DIR = path.join(OUT_DIR, 'assets');
+const PKG_VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 
 const USE_COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, text) => (USE_COLOR ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -75,6 +82,23 @@ function hashedVariantOf(assetNames, chunkName) {
 	return assetNames.find((name) => name.startsWith(`${stem}-`) && name !== chunkName) ?? null;
 }
 
+/**
+ * 版本号有没有真的注入到产物里。
+ *
+ * 判据是**带引号**的字面量：注入的是 `JSON.stringify(pkg.version)`，
+ * 落进产物就该是一个字符串字面量 `"0.2.1"`。不带引号的 `0.2.1` 可能是某个依赖
+ * 自带的版本文本，用它当判据会误判为「注入成功」。
+ *
+ * 返回 null 表示没问题，否则返回一句可诊断的说明。
+ */
+function versionProblem() {
+	const appJs = path.join(ASSETS_DIR, 'app.js');
+	if (!existsSync(appJs)) return '产物里没有 app.js —— 版本号注入的落点不见了';
+	const built = readFileSync(appJs, 'utf8');
+	if (built.includes(`"${PKG_VERSION}"`)) return null;
+	return `out/renderer/assets/app.js 里找不到版本号 "${PKG_VERSION}"`;
+}
+
 function main() {
 	if (!existsSync(ASSETS_DIR)) {
 		process.stdout.write(`\n${yellow('渲染层产物契约检查：已跳过')}\n`);
@@ -97,6 +121,7 @@ function main() {
 
 	const missingDeps = [];
 	const renamed = [];
+	const badVersion = versionProblem();
 	let total = 0;
 
 	for (const chunk of chunks) {
@@ -146,8 +171,21 @@ function main() {
 		process.stdout.write(
 			`  ${green('✓')} ${chunks.length} 个 chunk 全部同名产出，依赖表 ${total} 项全部命中\n`,
 		);
-		return 0;
 	}
+
+	if (badVersion === null) {
+		process.stdout.write(`  ${green('✓')} 产物含当前版本号 "${PKG_VERSION}"（package.json 的 version）\n`);
+	} else {
+		process.stdout.write(`\n${red('版本号没注入到产物里：')}\n  ✗ ${badVersion}\n`);
+		process.stdout.write(
+			dim(
+				'  渲染层显示给用户的版本号由 electron.vite.config.mjs 的 renderer.define(__APP_VERSION__) 注入，\n' +
+					'  单一真源是 package.json 的 version。在渲染层源码里写死版本号会让界面展示一个不存在的版本。\n',
+			),
+		);
+	}
+
+	if (missingDeps.length === 0 && renamed.length === 0 && badVersion === null) return 0;
 
 	return 1;
 }

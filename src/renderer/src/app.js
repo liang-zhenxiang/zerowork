@@ -13635,7 +13635,7 @@ function Sidebar({
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "brand-name", children: "ZeroWork" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "brand-version", children: [
         "V",
-        "0.1.4"
+        __APP_VERSION__
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "new-task", onClick: onNewTask, children: [
@@ -64389,7 +64389,7 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "ZeroWork" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
         "版本 ",
-        "0.1.4"
+        __APP_VERSION__
       ] })
     ] }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
