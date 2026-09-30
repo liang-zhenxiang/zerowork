@@ -26,6 +26,24 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+### 变更
+
+- **安装包的标识改为 `io.github.liang-zhenxiang.zerowork`**（原 `com.zerowork.app`）。
+  反向域名形式，与仓库地址对得上，换 owner 时一眼能看出要改哪里。
+
+  > ⚠️ **这是一次应用的「身份」变更，不只是改名。** 操作系统按包标识区分应用，
+  > 所以从 `v0.2.1` 升级到下一个版本时，macOS / Windows 可能把它**装成两个应用**
+  > 而不是覆盖升级。0.x 阶段影响可控，但请在升级说明里提一句
+  > （用户数据在 `~/.zerowork`，不受包标识影响，不会丢）
+
+- **纳入两位维护者的信息**：`package.json` 的 `author` / `contributors`（含邮箱）、
+  `.github/CODEOWNERS`、`CODE_OF_CONDUCT.md` 与 `SECURITY.md` 的联系渠道、
+  `docs/MAINTAINER_GUIDE.md` 的「维护者」一节、README。
+  此前只有 `package.json` 里一句 `"author": "ZeroWork"`，
+  Windows 安装包显示的「发布者」也因此是个项目名而不是人
+
+  **版权署名（`LICENSE` 与安装包的 `copyright`）保持不变**（`Copyright 2026 ZeroWork`）——
+  那是权利归属声明，与「找谁」是两件事，改动它属于权利人的决定
 ### 修复
 
 - **发布流水线跑不起来**（`startup_failure`，0 个 job）。推上 `v0.2.1` 的 tag 之后

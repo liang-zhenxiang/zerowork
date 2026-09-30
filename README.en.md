@@ -141,6 +141,16 @@ labels; those issues state which file to start from.
 
 Participation implies agreement with the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+### Maintainers
+
+| Maintainer | GitHub | Email |
+| --- | --- | --- |
+| liang-zhenxiang | [@liang-zhenxiang](https://github.com/liang-zhenxiang) | 116311683@qq.com |
+| nicholyx | [@nicholyx](https://github.com/nicholyx) | nicholyx@163.com |
+
+Both are full maintainers. Feel free to @ either of us in an issue or PR —
+but **for security issues, please use the private channel in [SECURITY.md](SECURITY.md)**.
+
 ## License
 
 **Apache License 2.0**, see [LICENSE](LICENSE).

@@ -5,7 +5,23 @@
   "private": true,
   "type": "module",
   "description": "办公 AI Agent 桌面端（基于 pi agent harness）",
-  "author": "ZeroWork",
+  "author": {
+    "name": "liang-zhenxiang",
+    "email": "116311683@qq.com",
+    "url": "https://github.com/liang-zhenxiang"
+  },
+  "contributors": [
+    {
+      "name": "liang-zhenxiang",
+      "email": "116311683@qq.com",
+      "url": "https://github.com/liang-zhenxiang"
+    },
+    {
+      "name": "nicholyx",
+      "email": "nicholyx@163.com",
+      "url": "https://github.com/nicholyx"
+    }
+  ],
   "license": "Apache-2.0",
   "homepage": "https://github.com/liang-zhenxiang/zerowork",
   "repository": {

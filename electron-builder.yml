@@ -6,8 +6,12 @@
 #
 # 文档：https://www.electron.build/configuration/configuration
 
-appId: com.zerowork.app
+# 反向域名形式：io.github.<owner>.<repo>。
+# 换个 owner 时这里要跟着改 —— 它是**安装包的身份**，不是展示名。
+appId: io.github.liang-zhenxiang.zerowork
 productName: ZeroWork
+# 版权署名与 LICENSE 附录保持一致（**归属声明**，不是维护者名单）；
+# 维护者是另外两位，写在 package.json 的 author / contributors 与 docs/MAINTAINER_GUIDE.md
 copyright: Copyright 2026 ZeroWork
 
 directories:

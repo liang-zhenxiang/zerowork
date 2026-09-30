@@ -3,45 +3,50 @@
 # 语法说明：https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 # 每一行的所有者会在对应文件被改动时自动收到 review 请求。
 #
-# 单人维护时这份文件的意义不在「要求审批」（分支保护里 approval 数设为 0，
-# 否则维护者没法合并自己的 PR），而在于**改动高风险区域时一定会被通知到**。
+# 这份文件的意义不在「要求审批」（分支保护里 approval 数设为 0 —— 两位维护者
+# 都可能需要合并自己的 PR），而在于**改动高风险区域时一定会被通知到**。
+#
+# 两位维护者：
+#   @liang-zhenxiang  116311683@qq.com
+#   @nicholyx         nicholyx@163.com
+# 名单与角色分工见 docs/MAINTAINER_GUIDE.md。
 
 # 兜底规则：所有文件的默认所有者
-*                       @nicholyx
+*                       @liang-zhenxiang @nicholyx
 
 # ---------------------------------------------------------------------------
 # 安全敏感区域：这些路径的改动等于改动安全边界，必须维护者亲自过目
 # ---------------------------------------------------------------------------
 
 # 权限判定与沙箱 —— 放宽这里的默认值就是放宽整个应用的约束
-/src/main/daemon/permission-rules.js    @nicholyx
-/src/main/sandbox/                      @nicholyx
-/SECURITY.md                            @nicholyx
+/src/main/daemon/permission-rules.js    @liang-zhenxiang @nicholyx
+/src/main/sandbox/                      @liang-zhenxiang @nicholyx
+/SECURITY.md                            @liang-zhenxiang @nicholyx
 
 # 工作流直接持有 GITHUB_TOKEN 与仓库设置权限，任何改动都需要维护者过目
-/.github/workflows/                     @nicholyx
-/.github/CODEOWNERS                     @nicholyx
-/.github/dependabot.yml                 @nicholyx
-/.github/zizmor.yml                     @nicholyx
+/.github/workflows/                     @liang-zhenxiang @nicholyx
+/.github/CODEOWNERS                     @liang-zhenxiang @nicholyx
+/.github/dependabot.yml                 @liang-zhenxiang @nicholyx
+/.github/zizmor.yml                     @liang-zhenxiang @nicholyx
 
 # 许可证与第三方授权清单属于法律文件
-/LICENSE                                @nicholyx
-/THIRD_PARTY_NOTICES.md                 @nicholyx
-/EXTERNAL_REQUESTS.md                   @nicholyx
+/LICENSE                                @liang-zhenxiang @nicholyx
+/THIRD_PARTY_NOTICES.md                 @liang-zhenxiang @nicholyx
+/EXTERNAL_REQUESTS.md                   @liang-zhenxiang @nicholyx
 
 # 随包分发的第三方内容：改动它们涉及再分发授权，不只是技术判断
-/resources/                             @nicholyx
+/resources/                             @liang-zhenxiang @nicholyx
 
 # ---------------------------------------------------------------------------
 # 门面与流程：改这些等于改项目对外的承诺
 # ---------------------------------------------------------------------------
 
-/README.md                              @nicholyx
-/README.en.md                           @nicholyx
-/CONTRIBUTING.md                        @nicholyx
-/CODE_OF_CONDUCT.md                     @nicholyx
-/docs/                                  @nicholyx
+/README.md                              @liang-zhenxiang @nicholyx
+/README.en.md                           @liang-zhenxiang @nicholyx
+/CONTRIBUTING.md                        @liang-zhenxiang @nicholyx
+/CODE_OF_CONDUCT.md                     @liang-zhenxiang @nicholyx
+/docs/                                  @liang-zhenxiang @nicholyx
 
 # 构建产物契约：产物命名一改，渲染层懒加载就会断（真实事故，见 CHANGELOG）
-/electron.vite.config.mjs               @nicholyx
-/scripts/check-renderer-assets.mjs      @nicholyx
+/electron.vite.config.mjs               @liang-zhenxiang @nicholyx
+/scripts/check-renderer-assets.mjs      @liang-zhenxiang @nicholyx
