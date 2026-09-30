@@ -197,7 +197,7 @@ jobs:
   gui-tests:
     name: 端到端 GUI 测试
     runs-on: macos-latest
-    # 12 个脚本串行执行（package.json 里是 && 链），且其中若干有固定的等待，
+    # 13 个脚本串行执行（package.json 里是 && 链），且其中若干有固定的等待，
     # 30 分钟是合理预期。GitHub 的默认超时是 360 分钟，卡住时会计费很久。
     timeout-minutes: 45
     steps:
@@ -227,7 +227,7 @@ jobs:
       - name: 构建
         run: npm run build
 
-      - name: 端到端测试（启动健康度 / 分区域 / 设置页 / IPC 功能 / 桥接面 / 本地状态 / 对话框 / 预览渲染）
+      - name: 端到端测试（启动健康度 / 分区域 / 首次运行引导 / 设置页 / IPC 功能 / 桥接面 / 本地状态 / 对话框 / 预览渲染）
         run: npm run test:gui
 
       - name: 主链路测试（mock 模型服务，无需凭据）
