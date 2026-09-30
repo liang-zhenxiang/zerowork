@@ -14,7 +14,7 @@
 | narration.md | 过程叙述：「一批工具前一句、做完后一句」+ 失败要说人话 | 三段机制共同支撑这条纪律：① 界面把工具与思考折叠起来，用户能读到的过程只有正文（`src/renderer/src/app.js` 的折叠渲染）；② 主提示词把「里程碑处写进展」写成正面条款（`cli/product.json` 的 `tool-todowrite-description`：Mid-Session Checkpoints「每 3-5 项小结一次 / 说明还剩几项」是 CRITICAL 级硬条款）；③ CLI 的 `# Tone and style` 段明确承认「工具调用前那句话」的存在（"text like \"Let me read the file:\" followed by a read tool call"）。中文句式示例为本仓库自写 |
 | windows-notes.md | Windows 差异条款 | 只留 Windows 差异：绝对路径、破坏性命令的目标校验与失败不重试、.ps1/.bat 非 ASCII 编码坑、时间戳用 PowerShell 现取；删 cmd /c 套壳条（本仓库只有一种 shell） |
 | regional-conventions.md | 地域约定 | 默认中国用户、A 股红涨绿跌、¥ 默认 |
-| python-env.md | 托管 Python 运行时的落点引导 | **零槽位**：解释器绝对路径随机器变，不进系统提示词（spec: stabilize-prompt-prefix —— 进去就是「重建 venv / 换机器 / 换安装位置即断前缀」），改由 daemon 现取（`src/main/daemon/runtimes.js` 的 `venvPython`）注入 hidden context 的 `python_env` 段，本片段只留恒定的纪律文字并指向那一段。**为什么必须写**：模型缺库的第一反应是 `pip install`，而它在沙箱里必失败（`docs/architecture.md` 已知边界第 8 条），所以要把 Python 的落点引导到托管 venv。两条不许改：① 不得写成「去跑 pip」（那里只有解释器可用）；② 必须留着「不要用 tempfile」那条 |
+| python-env.md | 托管 Python 运行时的落点引导 | **零槽位**：解释器绝对路径随机器变，不进系统提示词（spec: stabilize-prompt-prefix —— 进去就是「重建 venv / 换机器 / 换安装位置即断前缀」），改由 daemon 现取（`src/main/daemon/runtimes.js` 的 `venvPython`）注入 hidden context 的 `python_env` 段，本片段只留恒定的纪律文字并指向那一段。**为什么必须写**：模型缺库的第一反应是 `pip install`，而它在沙箱里必失败（`docs/ARCHITECTURE.md` 已知边界第 8 条），所以要把 Python 的落点引导到托管 venv。两条不许改：① 不得写成「去跑 pip」（那里只有解释器可用）；② 必须留着「不要用 tempfile」那条 |
 
 身份与边界**不单独成片段**：写在 `resources/scenes/work/prompt.md` 的
 「你是ZeroWork…」与「能力与边界」段里 —— 身份与能力边界与本产品的场景骨架

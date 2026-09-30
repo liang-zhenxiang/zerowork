@@ -1,0 +1,52 @@
+---
+# zizmor 配置 —— GitHub Actions 的静态安全扫描
+#
+# CI 里的「工作流安全扫描」job 以此文件为准。基线是 **0 findings**。
+#
+# 豁免必须有**可验证的**理由，写清楚「为什么不构成威胁」。
+# 「暂时关掉」「误报」不是理由 —— 那是把扫描器的价值归零的说法。
+# 每条豁免都应当能被一个第三方照着复核。
+#
+# 文档：https://docs.zizmor.sh/configuration/
+
+rules:
+  # ---------------------------------------------------------------------------
+  # labeler.yml 与 welcome.yml 使用 pull_request_target。
+  #
+  # 为什么必须用它：来自 fork 的 PR 在 pull_request 事件下只能拿到只读的
+  # GITHUB_TOKEN，而这两个工作流要给 PR 打标签、发欢迎评论，都需要写权限。
+  # pull_request_target 运行在**目标分支**的上下文中，因此有写权限。
+  #
+  # 为什么这里不构成威胁：pull_request_target 的危险点是
+  # **「以可写 token 运行 PR 里的代码」**（pwn request）。而这两个工作流：
+  #   · 没有 actions/checkout，一行都没有
+  #   · 没有把 PR 标题、Issue 正文等**攻击者可控字符串**写进 run:
+  #     （welcome.yml 的文案是硬编码的；labeler.yml 只把事件交给官方 Action）
+  #   · 只调用 GitHub 官方 Action，且都 pin 到了 commit SHA
+  # 也就是说：**根本没有 PR 内容被取回、更没有被执行**。
+  #
+  # 复核方式（两条都能一眼验证）：
+  #   grep -n 'checkout' .github/workflows/labeler.yml .github/workflows/welcome.yml   # 应当无输出
+  #   grep -n 'github.event' .github/workflows/labeler.yml .github/workflows/welcome.yml
+  #
+  # **若将来任何一个工作流要 checkout PR 的 head 分支**，必须改用 pull_request
+  # 并放弃写权限，**而不是在这里加一条新的豁免**。
+  # ---------------------------------------------------------------------------
+  dangerous-triggers:
+    ignore:
+      - labeler.yml
+      - welcome.yml
+
+  # ---------------------------------------------------------------------------
+  # ci.yml 里的 actionlint 采用「固定版本 + 官方 release 直下 + sha256 校验」，
+  # 没有走包管理器，因此被归为 adhoc-packages。
+  #
+  # 为什么这里不构成威胁：版本已固定（可复现），下载源是 rhysd/actionlint 的
+  # 官方 release，并且**校验了发行包的 sha256** —— 即使 release 资产被替换，
+  # 这一步也会失败。这已经比大多数直接用 curl | bash 的做法更严。
+  #
+  # 复核方式：见 ci.yml 中「安装 actionlint」步骤里的 `sha256sum -c -`
+  # ---------------------------------------------------------------------------
+  adhoc-packages:
+    ignore:
+      - ci.yml

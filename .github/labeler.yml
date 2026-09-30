@@ -1,0 +1,101 @@
+# PR 自动打标签规则
+#
+# 由 .github/workflows/labeler.yml 驱动（actions/labeler）。
+# 规则基于改动到的文件路径，不依赖人工操作。
+#
+# 文档：https://github.com/actions/labeler
+#
+# 命名与 .github/ISSUE_TEMPLATE 里的「涉及的功能区域」下拉项保持一致 ——
+# 同一个概念在两处叫不同的名字，会让人以为它们是不同的东西。
+
+# Agent 内核
+agent-core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/main/daemon/**"
+
+# 桌面端外壳
+desktop:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/main/index.js"
+          - "src/preload/**"
+          - "src/shared/**"
+
+# 沙箱与权限（安全敏感，改动会被 CODEOWNERS 通知维护者）
+sandbox:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/main/sandbox/**"
+          - "src/main/daemon/permission-rules.js"
+
+# 界面
+ui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "src/renderer/**"
+
+# 随包内容资源
+resources:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "resources/**"
+
+# 测试
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "vitest.config.mjs"
+
+# CI / 工作流基础设施
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/labeler.yml"
+          - ".github/dependabot.yml"
+          - ".github/zizmor.yml"
+
+# 工具链与本地检查入口
+automation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "scripts/**"
+          - "tools/**"
+          - ".prettierignore"
+          - ".yamllint"
+          - "eslint.config.mjs"
+          - ".prettierrc"
+          - ".editorconfig"
+
+# 文档
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - "docs/**"
+          - "README.md"
+          - "README.en.md"
+
+# 仓库治理配置
+governance:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/ISSUE_TEMPLATE/**"
+          - ".github/PULL_REQUEST_TEMPLATE.md"
+          - ".github/CODEOWNERS"
+          - "CODE_OF_CONDUCT.md"
+          - "SECURITY.md"
+          - "SUPPORT.md"
+          - "CONTRIBUTING.md"
+          - "LICENSE"
+          - "THIRD_PARTY_NOTICES.md"
+
+# 依赖更新（Dependabot 用）
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/dependabot.yml"
+          - "package.json"
+          - "package-lock.json"

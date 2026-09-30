@@ -16,6 +16,7 @@
  * 所有修改都会复原，不触碰真实配置。
  */
 import { _electron as electron } from "playwright";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -542,10 +543,31 @@ await check("路径 stat 对不存在的文件有合理行为", async () => {
 	assert.ok(r.threw || r.value !== undefined, "不存在的路径应有明确响应");
 });
 
-// ── 10. Git worktree（本仓库自身就是 git 仓库）────────────────
+// ── 10. Git worktree（**自建一个仓库**，而不是拿本仓库的 checkout 去验）────
 await check("worktree 分支列表可读取", async () => {
 	// 返回结构是 { isGitRepo, branches, currentBranch }，**不是数组**。
-	// 最初按数组断言是错的。（本项目自身是 git 仓库，可直接用仓库根目录验证）
+	//
+	// 这里刻意自己造一个仓库，而不是用本仓库根目录：本仓库在 CI 上是
+	// actions/checkout 拉出来的 —— PR 场景下是 **detached HEAD + 浅克隆**，
+	// 一个本地分支都没有；开发者本机则是完整克隆、有分支。
+	// 同一个断言在两种环境下结论不同，2026-09-29 在 CI 上实测为「分支列表为空」。
+	// **测试不该依赖宿主仓库的 checkout 形态** —— 造一个已知形状的仓库，
+	// 断言才有确定的含义（顺便真的验证了「能枚举出多个分支」这件事本身）。
+	const repoDir = "/tmp/zerowork-worktree-fixture";
+	rmSync(repoDir, { recursive: true, force: true });
+	mkdirSync(repoDir, { recursive: true });
+
+	const git = (...args) =>
+		execFileSync("git", args, {
+			cwd: repoDir,
+			stdio: "ignore",
+			// 不依赖宿主的 git 配置：签名与默认分支名都可能因人而异
+			env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+		});
+	git("init", "-q");
+	git("-c", "commit.gpgsign=false", "-c", "user.email=test@example.invalid", "-c", "user.name=ZeroWork Test", "commit", "-q", "--allow-empty", "-m", "chore: 初始提交");
+	git("branch", "feature/fixture");
+
 	const r = await win.evaluate(async (cwd) => {
 		try {
 			const b = await globalThis.kami.worktreeBranches(cwd);
@@ -553,11 +575,17 @@ await check("worktree 分支列表可读取", async () => {
 		} catch (e) {
 			return { ok: false, err: String(e?.message ?? e).slice(0, 120) };
 		}
-	}, ROOT);
+	}, repoDir);
+
 	assert.ok(r.ok, `worktreeBranches 调用失败: ${r.err}`);
 	assert.equal(r.isGitRepo, true, `应识别出 git 仓库，实际 isGitRepo=${r.isGitRepo}`);
 	assert.ok(Array.isArray(r.branches), `branches 应为数组，实际 ${JSON.stringify(r.branches)}`);
-	assert.ok(r.branches.length > 0, "分支列表为空");
+	// 默认分支名取决于 git 版本与配置，所以不断言具体名字，只断言「至少两个」：
+	// 初始分支 + 刚建的 feature/fixture
+	assert.ok(
+		r.branches.length >= 2,
+		`应至少列出两个分支，实际 ${JSON.stringify(r.branches)}`,
+	);
 	assert.ok(typeof r.current === "string" && r.current.length > 0, "currentBranch 为空");
 });
 

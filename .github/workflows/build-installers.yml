@@ -1,0 +1,196 @@
+# 工作流名称
+name: Build Installers
+# 工作流运行时显示名称
+run-name: 构建安装包
+
+# 怎样触发工作流
+on:
+  # 手动触发：只想出一批安装包而不发版时用（例如验证打包配置有没有被改坏）
+  workflow_dispatch:
+  # 被 release.yml 调用。**同一份构建逻辑，两个入口** ——
+  # 如果另写一个 tag 触发的工作流，「把产物附到 Release 上」这句话在架构上就不成立：
+  # 两个 tag 触发的工作流之间没有任何机制保证先后，谁先跑完不确定。
+  workflow_call:
+
+# 只需要读代码
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # macOS：一次构建两个架构
+  #
+  # 用一条命令 `--mac --arm64 --x64` 而不是拆成两个 job：
+  # electron-builder 支持一次产出多架构，拆开只是多租一台 runner、多一份安装依赖的时间。
+  # ---------------------------------------------------------------------------
+  macos:
+    name: macOS 安装包
+    runs-on: macos-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      # 生成构建溯源证明需要：OIDC 换取签名身份 + 写入 attestation
+      id-token: write
+      attestations: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+            ~/.cache/electron-builder
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+        env:
+          # 端到端测试用不到浏览器，构建也更用不到 —— 省下几百 MB 下载
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: 构建应用产物
+        run: npm run build
+
+      # 产物已经构建好了，跳过 dist:mac 里的重复构建
+      - name: 打包 macOS 安装包
+        run: npx electron-builder --mac --arm64 --x64 --publish never
+        env:
+          # 没有证书时不要去找钥匙串里的签名身份 —— 找不到会报错或卡住。
+          # 这与 electron-builder.yml 里的 `identity: null` 是同一个决定的两面。
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: 列出产物
+        run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
+
+      # ---------------------------------------------------------------------
+      # 构建溯源证明（SLSA provenance）
+      #
+      # 为什么需要它：**安装包没有代码签名**（没有证书）。用户无法从产物本身
+      # 判断它是不是由这个仓库的这段代码构建出来的 —— 而这正是「从 GitHub
+      # Release 下载一个未签名安装包」最大的信任缺口。
+      #
+      # 溯源证明补上了其中可验证的那一半：它由 CI 用 OIDC 身份签发，
+      # 记录了「哪个仓库、哪个 commit、哪个工作流」产出了这个摘要的文件。
+      # 用户可以验证它：
+      #
+      #     gh attestation verify <文件> --repo liang-zhenxiang/zerowork
+      #
+      # 它**替代不了代码签名**（不解决「首次打开的拦截」），
+      # 但把「无法验证来源」变成了「可验证」。
+      # 这也是 OSSF Scorecard 的 Signed-Releases 检查项接受的形式之一。
+      # ---------------------------------------------------------------------
+      - name: 生成构建溯源证明
+        # PR 上拿不到 OIDC token；本工作流本身也只由 tag / 手动触发，
+        # 这行是防御性的，防止将来有人把它接到 pull_request 上
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            release/*.dmg
+            release/*.zip
+
+      - name: 上传产物
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-macos
+          # 只要安装包本体；不要 .app 目录与 blockmap（前者巨大，后者是自动更新的差分文件，
+          # 本项目没有自动更新，带上只是徒增体积）
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+          # 产物由 Release 承载，artifact 只用于这一次运行内传递
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Windows
+  # ---------------------------------------------------------------------------
+  windows:
+    name: Windows 安装包
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: 缓存 Electron 二进制
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        with:
+          path: |
+            ~/.cache/electron
+            ~/Library/Caches/electron
+            ~/AppData/Local/electron/Cache
+            ~/.cache/electron-builder
+          key: electron-builder-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+
+      - name: 构建应用产物
+        run: npm run build
+
+      - name: 打包 Windows 安装包
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: 列出产物
+        shell: bash
+        run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
+
+      # ---------------------------------------------------------------------
+      # 构建溯源证明（SLSA provenance）
+      #
+      # 为什么需要它：**安装包没有代码签名**（没有证书）。用户无法从产物本身
+      # 判断它是不是由这个仓库的这段代码构建出来的 —— 而这正是「从 GitHub
+      # Release 下载一个未签名安装包」最大的信任缺口。
+      #
+      # 溯源证明补上了其中可验证的那一半：它由 CI 用 OIDC 身份签发，
+      # 记录了「哪个仓库、哪个 commit、哪个工作流」产出了这个摘要的文件。
+      # 用户可以验证它：
+      #
+      #     gh attestation verify <文件> --repo liang-zhenxiang/zerowork
+      #
+      # 它**替代不了代码签名**（不解决「首次打开的拦截」），
+      # 但把「无法验证来源」变成了「可验证」。
+      # 这也是 OSSF Scorecard 的 Signed-Releases 检查项接受的形式之一。
+      # ---------------------------------------------------------------------
+      - name: 生成构建溯源证明
+        # PR 上拿不到 OIDC token；本工作流本身也只由 tag / 手动触发，
+        # 这行是防御性的，防止将来有人把它接到 pull_request 上
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release/*.exe
+
+      - name: 上传产物
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: installer-windows
+          path: release/*.exe
+          if-no-files-found: error
+          retention-days: 7
