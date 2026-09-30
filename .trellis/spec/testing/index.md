@@ -110,7 +110,51 @@ await waitUntil(found, { timeout: 30_000, desc: "界面上出现 .widget-card（
 替换后**失败信息不能弱于原来**。把原来的上下文（页面尾部样本、轮数、原始提示语）
 搬进 `desc`。
 
-### 4. 截图的像素断言有实测依据
+### 4. 等到条件 A 之后，**不要立刻**断言副作用 B
+
+这是本项目在 CI 上**真实红过**的一条。
+
+```js
+// ✗ 错的：等的是「内容出现」，断言的是「样式表挂上」——
+//    这是两件事，没有先后约束
+for (let i = 0; i < 40; i++) {
+	const lines = [...document.querySelectorAll(".view-line")].map(...).join("\n");
+	if (lines.includes(mark)) {
+		const hrefs = [...document.styleSheets].map(...);
+		return { found: true, hasJsonCss: hrefs.includes("json-mode.css") };  // ← 可能还没挂上
+	}
+	await new Promise((r) => setTimeout(r, 1000));
+}
+
+// ✓ 对的：把两件事都放进**同一个完成条件**，都满足才返回
+const probe = (mark) => {
+	const lines = [...document.querySelectorAll(".view-line")].map(...).join("\n");
+	const hasMark = lines.includes(mark);
+	const hrefs = [...document.styleSheets].map(...);
+	return { complete: hasMark && hrefs.includes("json-mode.css"), ... };
+};
+```
+
+**为什么它像随机 flake**：本地快，两件事几乎同一拍，恰好过；
+CI 慢，条件 A 先满足、B 晚一拍 → 失败。而失败信息指向的是 B，
+让人以为是 B 坏了，实际是**等待写错了**。
+
+> 真实经过：`preview-renderers` 的 json 用例在 CI 上红了一条
+> 「文档里没有 json-mode.css」，本地 7/7 全过。
+> 用**定向延迟注入**（把该样式表的 `appendChild` 延迟 3 秒）复现，
+> 得到与 CI 逐字一致的失败信息，才确认是竞态而不是产品缺陷。
+> 同一次排查还揪出**第二处**同类写法（等编辑器容器出现就断言内容文本，
+> 本地两者相差 16ms，靠 1 秒轮询间隔侥幸跳过）。
+
+### 5. 「发送成功了没有」要验证到**副作用**，不要只看没报错
+
+`await win.waitForTimeout(4000)` 然后当作「消息发出去了」，是**无法证伪**的断言 ——
+发失败了也照样过。
+
+**等对端的可观察结果**：mock server 真的收到了请求（`mock.requests.length >= n`）、
+文件真的落了盘、状态真的变了。
+
+### 6. 截图的像素断言有实测依据
 
 `h.shoot()` 默认断言「亮度标准差 ≥ 3 且颜色数 ≥ 12」。这两个数是**量出来的**：
 
