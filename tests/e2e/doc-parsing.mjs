@@ -14,19 +14,22 @@
  * 只有"提取成功 + 回传成功"两个条件同时满足，标记才会出现在回复里。
  *
  * ⚠️ 凭据运行时从 ~/.claude/settings.json 读取，不进仓库、不打印。
- *    端点不可用时整轮跳过。
+ *
+ * ── 迁移说明（共享 harness）────────────────────────────────
+ *
+ * 骨架（隔离目录、启动并等到就绪、check 收集器、末尾报告与退出码）全部来自
+ * `./lib/harness.mjs`：不再手写固定路径 /tmp/zerowork-docparse*、不再 `rmSync`、
+ * 不再固定等 9 秒、不再自建报告循环。两处等待都走信号（回合结束、快照里出现标记）。
+ *
+ * ⚠️ 端点探不到时**逐条 h.skip**，不再是整轮 `exit(0)` ——
+ *   后者在报告里表现为「全绿」，实际一条断言都没跑，在 CI 上就是零信号。
+ *   改后报告会多出「跳过 N」。
  */
-import { _electron as electron } from "playwright";
-import { mkdirSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { homedir } from "node:os";
 import assert from "node:assert/strict";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-docparse";
-const WORKSPACE_DIR = "/tmp/zerowork-docparse-ws";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { resolve } from "node:path";
+import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 // ⚠️ 标记要挑**弱模型也抄得准**的形状。
 // 原先用的是 `ZWPDF42` / `ZWDOCX42` —— 一串辅音字母 + 数字。实测弱模型会把
@@ -36,8 +39,11 @@ const WORKSPACE_DIR = "/tmp/zerowork-docparse-ws";
 const PDF_MARK = "PLUTO7421";
 const DOCX_MARK = "LOTUS8532";
 
+const h = createHarness({ name: "doc-parsing" });
+
 // ── 读取本机模型端点（凭据不落盘、不打印）────────────────────
 const SETTINGS = resolve(homedir(), ".claude", "settings.json");
+
 function readEndpoint() {
 	if (!existsSync(SETTINGS)) return undefined;
 	try {
@@ -50,25 +56,47 @@ function readEndpoint() {
 		return undefined;
 	}
 }
-const endpoint = readEndpoint();
-if (endpoint === undefined) {
-	console.log("⚠ 未找到可用的模型端点配置，跳过文档解析测试。");
-	process.exit(0);
+
+/** 解析出可用端点；不可用时给出**能照着修**的原因。 */
+async function resolveEndpoint() {
+	if (!existsSync(SETTINGS)) {
+		return { reason: `未找到 ${SETTINGS}（需要其中的 env.ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL）` };
+	}
+	const endpoint = readEndpoint();
+	if (endpoint === undefined) {
+		return { reason: `${SETTINGS} 的 env 里缺少 ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_MODEL 中的某一项` };
+	}
+	const probe = await fetch(`${endpoint.baseUrl}/v1/messages`, {
+		method: "POST",
+		headers: { "content-type": "application/json", "x-api-key": endpoint.token, "anthropic-version": "2023-06-01" },
+		body: JSON.stringify({ model: endpoint.model, max_tokens: 16, messages: [{ role: "user", content: "hi" }] }),
+	}).catch(() => undefined);
+	if (!probe || !probe.ok) {
+		return { reason: `模型端点不可用（HTTP ${probe?.status ?? "无响应"}）：${endpoint.baseUrl}` };
+	}
+	return { endpoint };
 }
-const probe = await fetch(`${endpoint.baseUrl}/v1/messages`, {
-	method: "POST",
-	headers: { "content-type": "application/json", "x-api-key": endpoint.token, "anthropic-version": "2023-06-01" },
-	body: JSON.stringify({ model: endpoint.model, max_tokens: 16, messages: [{ role: "user", content: "hi" }] }),
-}).catch(() => undefined);
-if (!probe || !probe.ok) {
-	console.log(`⚠ 模型端点不可用（HTTP ${probe?.status ?? "无响应"}），跳过。`);
-	process.exit(0);
+
+/** 端点不可用时要**逐条**上报的跳过项 —— 与下面的 h.check 一一对应。 */
+const CHECKS = [
+	"启动后界面已渲染",
+	"配置真实模型并切换工作区",
+	"PDF 提取：模型读出文档标记",
+	"DOCX 提取：模型读出文档标记",
+	"无渲染层未捕获异常",
+];
+
+const { endpoint, reason } = await resolveEndpoint();
+
+if (endpoint === undefined) {
+	console.log(`⚠ ${reason}`);
+	console.log("  文档解析测试整轮跳过 —— 逐条记入报告，而不是伪装成全绿。");
+	for (const label of CHECKS) h.skip(label, reason);
+	await h.finish(); // finish 会 exit；下面只有端点可用时才会执行到
 }
 
 // ── 准备测试文档（自带生成，不依赖外部预置）─────────────────
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
+// 工作区由 harness 按用例名隔离，不需要自建 / 清空目录。
 
 /** 生成最小可用 PDF。PDF 是文本格式，可直接手写对象结构。 */
 function writeMinimalPdf(path, marker) {
@@ -120,38 +148,20 @@ function writeMinimalDocx(path, marker) {
 	});
 }
 
-writeMinimalPdf(resolve(WORKSPACE_DIR, "probe.pdf"), PDF_MARK);
-await writeMinimalDocx(resolve(WORKSPACE_DIR, "probe.docx"), DOCX_MARK);
-console.log(`✓ 模型端点可用，测试文档已自动生成`);
+writeMinimalPdf(resolve(h.WORKSPACE_DIR, "probe.pdf"), PDF_MARK);
+await writeMinimalDocx(resolve(h.WORKSPACE_DIR, "probe.docx"), DOCX_MARK);
 
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 240)]);
-	}
-};
+console.log(`✓ 模型端点可用，测试文档已自动生成：probe.pdf / probe.docx`);
 
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
+await h.launch();
+const win = h.window();
+
+await h.check("启动后界面已渲染", async () => {
+	// 先截图后断言：这一屏是后面所有断言的起点，界面不对时图里能直接看出来
+	await h.shoot("welcome");
 });
 
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
-
-await check("配置真实模型并切换工作区", async () => {
+await h.check("配置真实模型并切换工作区", async () => {
 	const r = await win.evaluate(
 		async ({ baseUrl, token, model, ws }) => {
 			const k = globalThis.kami;
@@ -174,19 +184,28 @@ await check("配置真实模型并切换工作区", async () => {
 				return { ok: false, err: String(e?.message ?? e).slice(0, 200) };
 			}
 		},
-		{ ...endpoint, ws: WORKSPACE_DIR },
+		{ ...endpoint, ws: h.WORKSPACE_DIR },
 	);
 	assert.ok(r.ok, `配置失败: ${r.err}`);
 });
 
-/** 让模型读文档并回报标记 */
+/**
+ * 让模型读文档并回报标记。
+ *
+ * 两段等待都是**信号**，没有一处固定 sleep：
+ *   ① 先等整个回合结束（`k.prompt` 落地）—— 工具调用发生在回合内部，
+ *      回合没结束时回复还可能继续追加
+ *   ② 再等快照的 assistant 文本里真的出现该标记
+ *
+ * ⚠️ 回合进行中不能用 `h.waitForSettled()`：渲染层有 500ms 级的计时器在改 DOM
+ * （时长刷新、等待提示轮播），「连续 800ms 无变动」永远达不到。
+ */
 async function readDocAndReport(filename, mark) {
-	return win.evaluate(
-		async ({ file, marker }) => {
-			const k = globalThis.kami;
+	const turn = await win.evaluate(
+		async ({ file }) => {
 			try {
 				await Promise.race([
-					k.prompt({
+					globalThis.kami.prompt({
 						// 提示词用**自然的提问**，不写「只回复 X、不要加其它内容」——
 						// 那会与系统提示词的交付纪律（产出后要做过程叙述）冲突，弱模型会卡在
 						// 矛盾里反复权衡、把输出预算烧光。这个坑在 docx-runtime 里踩过。
@@ -194,46 +213,65 @@ async function readDocAndReport(filename, mark) {
 					}),
 					new Promise((_, rej) => setTimeout(() => rej(new Error("TIMEOUT_150S")), 150_000)),
 				]);
+				return { timedOut: false };
 			} catch (e) {
-				if (String(e?.message ?? "").includes("TIMEOUT_150S")) return { timedOut: true };
+				const msg = String(e?.message ?? e);
+				// 超时之外的错误（提供方报错、工具拒绝……）也要留下来 —— 否则现象
+				// 只是「模型没回报标记」，真正的原因被吞掉了
+				return { timedOut: msg.includes("TIMEOUT_150S"), err: msg.slice(0, 200) };
 			}
-			for (let i = 0; i < 45; i++) {
-				const s = await k.snapshot();
-				const assistant = (s?.entries ?? []).filter((x) => x?.role === "assistant" && String(x?.text ?? "").length > 0);
-				const text = assistant.map((x) => x.text).join("\n");
-				if (text.includes(marker)) return { found: true, text: text.slice(-300) };
-				await new Promise((res) => setTimeout(res, 2000));
-			}
-			const s = await k.snapshot();
-			const assistant = (s?.entries ?? []).filter((x) => x?.role === "assistant");
-			return { found: false, text: JSON.stringify(assistant).slice(-300) };
 		},
-		{ file: filename, marker: mark },
+		{ file: filename },
 	);
+	if (turn.timedOut) return { timedOut: true, found: false, text: "(回合 150 秒未结束)", err: turn.err };
+
+	// 原来是页面里 `for × 45 + sleep 2s` 的手写轮询，换成 waitUntil：
+	// 同样的 90 秒预算，超时时带上最后一次快照状态。
+	let state = null;
+	let why = "";
+	try {
+		await waitUntil(
+			async () => {
+				state = await win.evaluate(async () => {
+					const s = await globalThis.kami.snapshot();
+					const assistant = (s?.entries ?? []).filter((x) => x?.role === "assistant" && String(x?.text ?? "").length > 0);
+					return { text: assistant.map((x) => x.text).join("\n") };
+				});
+				return state.text.includes(mark);
+			},
+			{ timeout: 90_000, interval: 2000, desc: `模型的回复里出现标记 ${mark}（提取成功 + 回传成功才会出现）` },
+		);
+		return { found: true, text: state.text };
+	} catch (error) {
+		why = error.message;
+	}
+
+	// 失败时的现场取法与改写前一致：全部 assistant 条目的尾部片段
+	const tail = await win.evaluate(async () => {
+		const s = await globalThis.kami.snapshot();
+		const assistant = (s?.entries ?? []).filter((x) => x?.role === "assistant");
+		return JSON.stringify(assistant).slice(-300);
+	});
+	return { found: false, text: tail || state?.text || "(没读到任何 assistant 条目)", why };
 }
 
-await check("PDF 提取：模型读出文档标记", async () => {
+await h.check("PDF 提取：模型读出文档标记", async () => {
 	const r = await readDocAndReport("probe.pdf", PDF_MARK);
-	assert.ok(!r.timedOut, "读取 PDF 时挂起");
-	assert.ok(r.found, `模型未能回报 PDF 标记 ${PDF_MARK}。回复尾部: ${r.text}`);
+	// 先截图、后断言 —— 断言失败时图里才有出问题的那一屏。
+	// 名字如实描述画面：本文件不驱动导航，回合结束后界面仍停在欢迎页
+	// （会话在后台跑），所以这张图抓的是「PDF 那一轮结束时的界面」。
+	await h.shoot("after-pdf-reply");
+	assert.ok(!r.timedOut, `读取 PDF 时挂起${r.err ? `（${r.err}）` : ""}`);
+	assert.ok(r.found, `模型未能回报 PDF 标记 ${PDF_MARK}。回复尾部: ${r.text}${r.why ? `（${r.why}）` : ""}`);
 });
 
-await check("DOCX 提取：模型读出文档标记", async () => {
+await h.check("DOCX 提取：模型读出文档标记", async () => {
 	const r = await readDocAndReport("probe.docx", DOCX_MARK);
-	assert.ok(!r.timedOut, "读取 DOCX 时挂起");
-	assert.ok(r.found, `模型未能回报 DOCX 标记 ${DOCX_MARK}。回复尾部: ${r.text}`);
+	await h.shoot("after-docx-reply");
+	assert.ok(!r.timedOut, `读取 DOCX 时挂起${r.err ? `（${r.err}）` : ""}`);
+	assert.ok(r.found, `模型未能回报 DOCX 标记 ${DOCX_MARK}。回复尾部: ${r.text}${r.why ? `（${r.why}）` : ""}`);
 });
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 文档解析工具链测试 ═══");
-let failed = 0;
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-}
-failed = results.filter(([s]) => s === "FAIL").length;
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-
-await app.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();
