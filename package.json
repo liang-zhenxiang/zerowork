@@ -22,6 +22,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:icons": "node tools/build-icons.mjs",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
     "dist": "npm run build && electron-builder",
