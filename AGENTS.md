@@ -227,3 +227,90 @@ gh api repos/{owner}/{repo}/actions/jobs/<job-id>/logs   # 运行未结束时取
 
 > **改维护流程时，`AGENTS.md` 与 `docs/MAINTAINER_GUIDE.md` 都要改** ——
 > 前者是会话自动加载的速查版，后者是事实来源。skill 是操作视角，同步更新即可。
+
+---
+
+## 任务工作流：Trellis（与本文档的分工）
+
+本仓库接入了 [Trellis](https://github.com/mindfold-ai/Trellis) 作为**任务执行框架**，
+它管的是「一个任务怎么想清楚、怎么做完」，与本文档管的「仓库怎么操作」**是两件事**：
+
+| 管什么 | 权威在哪 |
+| --- | --- |
+| **任务**：需求探索 → 技术设计 → 执行清单 → 验证 → 规格回写 | `.trellis/workflow.md` 与 `.trellis/` |
+| **仓库**：分支、提交、PR、CI 门禁、合并、发布、红线 | **本文档（`AGENTS.md`）** |
+
+**两套规则同时生效，各管各的。** 冲突时以本文档为准 —— 它是**必须遵守**的仓库约定，
+Trellis 是**建议采用**的工作方法。
+
+### 落地在哪
+
+| 路径 | 内容 | 提交进仓库？ |
+| --- | --- | --- |
+| `.trellis/workflow.md` | 工作流定义 + **本项目的叠加规则**（在文件开头） | ✅ |
+| `.trellis/spec/` | **分层编码规范** —— 改代码前先读对应那一层 | ✅ |
+| `.trellis/tasks/` | 任务目录：`prd.md` / `design.md` / `implement.md` | ✅ |
+| `.trellis/workspace/` | 每个开发者自己的会话日志 | ✅ |
+| `.trellis/.developer`、`.runtime/` | 本机身份与运行态 | ❌（`.trellis/.gitignore` 排除） |
+
+**spec 分层对应本项目的真实结构**（不是模板默认的 frontend/backend）：
+
+```
+.trellis/spec/main/      ← src/main/、src/main/sandbox/、src/preload/
+.trellis/spec/daemon/    ← src/main/daemon/（40 个模块）
+.trellis/spec/renderer/  ← src/renderer/
+.trellis/spec/shared/    ← src/shared/
+.trellis/spec/resources/ ← resources/（随时需记住：不参与本项目工具链）
+.trellis/spec/guides/    ← 跨层思考指南
+```
+
+### 新会话怎么拿到这些
+
+**两条通道同时生效**，不需要任何人手动调用 skill：
+
+1. **本文档** —— `CLAUDE.md` 用 `@AGENTS.md` 导入，每个会话自动加载（仓库操作规则）
+2. **SessionStart 钩子**（`.claude/hooks/session-start.py`）—— 自动注入 Trellis 的
+   工作流摘要与 **spec 索引清单**，agent 按需读取具体那一层
+
+### 每个开发者要做的第一件事
+
+Trellis 的开发身份是**本机的**（`.trellis/.developer`，不进库）。克隆后跑一次：
+
+```bash
+python3 ./.trellis/scripts/init_developer.py <你的名字>
+```
+
+名字用你在 git 里的用户名。**注意不要用别人的名字** —— 会话日志会记到那个人的目录下。
+
+### 硬规则
+
+- **Trellis 的任务授权 ≠ 实现授权**：即使用户授权建任务，也要先落盘规划产物再动手
+- **用户明确授予常设授权时**（如「全自动完成，不要问我」），任务创建视为已获同意，
+  不再逐次追问；**但规划产物仍要落盘** —— 授权的是「不必问」，不是「不必想清楚」
+- **改了 `.trellis/spec/` 的规范，要同步本文档与 `docs/MAINTAINER_GUIDE.md`** 中
+  对应的条目，避免两处说法打架
+- **中文内容编辑后必扫 U+FFFD**（脚本见上「中文内容质量」）
+
+---
+
+<!-- TRELLIS:START -->
+# Trellis Instructions
+
+These instructions are for AI assistants working in this project.
+
+This project is managed by Trellis. The working knowledge you need lives under `.trellis/`:
+
+- `.trellis/workflow.md` — development phases, when to create tasks, skill routing
+- `.trellis/spec/` — package- and layer-scoped coding guidelines (read before writing code in a given layer)
+- `.trellis/workspace/` — per-developer journals and session traces
+- `.trellis/tasks/` — active and archived tasks (PRDs, research, jsonl context)
+
+If a Trellis command is available on your platform (e.g. `/trellis:finish-work`, `/trellis:continue`), prefer it over manual steps. Not every platform exposes every command.
+
+If you're using Codex or another agent-capable tool, additional project-scoped helpers may live in:
+- `.agents/skills/` — reusable Trellis skills
+- `.codex/agents/` — optional custom subagents
+
+Managed by Trellis. Edits outside this block are preserved; edits inside may be overwritten by a future `trellis update`.
+
+<!-- TRELLIS:END -->

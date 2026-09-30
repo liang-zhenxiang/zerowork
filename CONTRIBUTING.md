@@ -30,6 +30,7 @@
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 进程模型、目录职责、**以及「为什么这样设计」** |
 | [docs/DESIGN.md](docs/DESIGN.md) | 改界面之前必读：设计 Token 的档位纪律与禁止清单 |
 | [AGENTS.md](AGENTS.md) | **用 AI 助手改这个项目**：开发流程与规则的速查版（AI 工具会自动加载它） |
+| [.trellis/spec/](.trellis/spec/) | **动手改代码之前**：按进程分层的编码规范 —— 改 daemon 和改界面要守的规矩不一样 |
 
 如果你要改的是界面，**第三份不能跳** —— 它规定了哪些做法被禁止，
 以及档位不够用时应该先改文档而不是在组件里加档。

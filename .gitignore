@@ -43,6 +43,27 @@ node_modules/
 # 详见 CLAUDE.md。
 CLAUDE.local.md
 
+# Claude Code 的个人设置（工具白名单、本机 hook 开关等）。同样是「本机偏好」，
+# 不同开发者的允许列表不一样，提交上来只会互相打架。
+.claude/settings.local.json
+
+# Trellis 的本机身份与运行态。
+#
+# ⚠️ **为什么 .trellis/.gitignore 里已经有规则，这里还要再写一遍：**
+# 那条规则**会随分支切换消失**。`.trellis/.gitignore` 是随仓库分发的内容，
+# 只有当你所在的分支包含它时才在工作区里；切到一个还没有它的分支，git 会把它
+# 从工作区删掉，而 `.developer` / `.runtime/` 这些**未被跟踪**的文件会留在磁盘上 ——
+# 此刻一次 `git add -A` 就会把本机开发身份与运行态一起提交进去。
+#
+# 这个坑**真实踩过**：身份文件与运行态被提交进了一个测试分支，靠重写提交才清掉。
+# 根 .gitignore 与分支无关，挡得住。
+#
+# 两条规则并存是有意的 —— 纵深防御，不是重复。
+.trellis/.developer
+.trellis/.runtime/
+.trellis/**/__pycache__/
+.trellis/**/*.pyc
+
 # Python 字节码缓存（运行时自动重建，不入库）
 __pycache__/
 *.pyc

@@ -34,7 +34,15 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** 被纳入检查的文档。CHANGELOG 与第三方清单不查链接（它们大量引用外部地址）。 */
+/**
+ * 被纳入检查的文档。CHANGELOG 与第三方清单不查链接（它们大量引用外部地址）。
+ *
+ * `.trellis/spec/` 下的是**分层编码规范** —— 它们是手写的、会随代码演进，
+ * 里面大量相对链接指向同层的其它文档，正是最容易腐烂的一类。纳入检查。
+ * 反过来，`.trellis/workflow.md` 与 `.claude/skills/trellis-*` 是 Trellis
+ * 生成的托管内容（`trellis update` 会整份替换），**不查** —— 查了只会
+ * 在别人跑一次 update 后误报。
+ */
 const DOC_FILES = [
 	'README.md',
 	'README.en.md',
@@ -49,6 +57,11 @@ const DOC_FILES = [
 	'docs/TROUBLESHOOTING.md',
 	'docs/MAINTAINER_GUIDE.md',
 	'docs/DESIGN.md',
+	'.trellis/spec/main/index.md',
+	'.trellis/spec/daemon/index.md',
+	'.trellis/spec/renderer/index.md',
+	'.trellis/spec/shared/index.md',
+	'.trellis/spec/resources/index.md',
 ];
 
 /** 环境变量的扫描范围：文档里提到它，这里就得有地方读它。 */
