@@ -18,7 +18,6 @@ import { INVOKE } from "../../shared/ipc.js";
 import { isAbsolute } from "node:path";
 import { join } from "node:path";
 import { LEGACY_DOC_EXTENSIONS } from "../../shared/ipc.js";
-import { mkdirSync } from "node:fs";
 import { normalize as normalize$1 } from "node:path";
 import { OFFICE_EXTENSIONS } from "../../shared/ipc.js";
 import { openSync } from "node:fs";
@@ -35,7 +34,6 @@ import { rmSync } from "node:fs";
 import { sep } from "node:path";
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { Type } from "typebox";
 import { writeFileSync } from "node:fs";
 import { clipAuditDetail } from "./audit.js";
@@ -212,21 +210,15 @@ ${pages[i - 1] ?? ""}
   };
 }
 
-let officeTemp;
-
-function getOfficeTempDir() {
-  if (officeTemp === void 0) {
-    officeTemp = join(tmpdir(), "zerowork-officeparser");
-    mkdirSync(officeTemp, { recursive: true });
-  }
-  return officeTemp;
-}
-
 async function extractOffice(path, offset, limit) {
-  const { parseOfficeAsync } = await import("officeparser");
+  const { parseOffice } = await import("officeparser");
   let full;
   try {
-    full = await parseOfficeAsync(path, { tempFilesLocation: getOfficeTempDir() });
+    // officeparser 8.x 的入口是 parseOffice，返回 AST，取正文要走 ast.to("text")。
+    // 4.x 的 parseOfficeAsync 导出与 tempFilesLocation 配置在这条路径上都已移除。
+    const ast = await parseOffice(path);
+    const { value } = await ast.to("text");
+    full = typeof value === "string" ? value : String(value);
   } catch (err) {
     throw mapOfficeError(err);
   }
@@ -850,11 +842,9 @@ export {
 	extractOffice,
 	extractPdf,
 	failureMessage,
-	getOfficeTempDir,
 	getPdfAssetUrls,
 	mapOfficeError,
 	mapPdfOpenError,
-	officeTemp,
 	parseFailureJson,
 	parseFailureJson$1,
 	parseImages,
