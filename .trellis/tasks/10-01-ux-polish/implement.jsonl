@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "改渲染层的硬约束：设计 Token 档位纪律、产物命名契约、禁止清单"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "角色分工：实现由子 agent 做，主会话只调度与验收"}
+{"file": "docs/DESIGN.md", "reason": "设计规范的事实来源；§3 规定变色类用 --ease-standard，§5.1/§6 是禁止清单，改动后必须同步本文档"}
