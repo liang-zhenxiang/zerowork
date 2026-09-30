@@ -14,52 +14,26 @@
  *
  * 安全：全程使用隔离的 ZEROWORK_CONFIG_DIR（临时目录），
  * 所有修改都会复原，不触碰真实配置。
+ *
+ * 迁移说明（共享 harness）：骨架（隔离目录、启动等待、check 收集器、末尾报告与
+ * 退出码）全部来自 `./lib/harness.mjs`。原先靠 `waitForTimeout(9000)` 等界面起来，
+ * 现在 `h.launch()` 等的是可观察信号（React 挂载 + daemon 报启动 + 界面稳定）。
+ * 文件内保留的 `setTimeout` 都在 **evaluate 的页面上下文里**，断言的契约是
+ * 「某条通道或某次发送**不得挂起**」—— 那是被测行为，不是等待策略，故原样保留。
  */
-import { _electron as electron } from "playwright";
+import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { createHarness, ROOT } from "./lib/harness.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-ipc";
-const WORKSPACE_DIR = "/tmp/zerowork-workspaces";
-const SHOT_DIR = resolve(ROOT, "artifacts");
+const h = createHarness({ name: "ipc-functional" });
+await h.launch();
+const win = h.window();
 
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(SHOT_DIR, { recursive: true });
-
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 160)]);
-	}
-};
-
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		// 工作区根目录也要隔离：配置目录隔离了，但工作区默认落在
-		// ~/ZeroWork。不设这个变量，测试会在用户真实家目录下建目录。
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
-
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+// 首屏留证：本文件会连续驱动上百次桥接调用，界面若在这中间崩掉，
+// 这张图就是「崩之前长什么样」的现场。
+await h.check("首屏画面已渲染", () => h.shoot("ipc-home"));
 
 /** 桥接对象是否就位 */
 const bridgeInfo = await win.evaluate(() => {
@@ -67,7 +41,7 @@ const bridgeInfo = await win.evaluate(() => {
 	if (!k) return { ok: false, methods: [] };
 	return { ok: true, methods: Object.keys(k).filter((n) => typeof k[n] === "function") };
 });
-await check("contextBridge 暴露 window.kami", () => assert.ok(bridgeInfo.ok, "window.kami 不存在"));
+await h.check("contextBridge 暴露 window.kami", () => assert.ok(bridgeInfo.ok, "window.kami 不存在"));
 console.log(`桥接方法总数: ${bridgeInfo.methods.length}`);
 
 // ── 1. 无参只读通道 ────────────────────────────────────────
@@ -138,7 +112,7 @@ const callAll = async (names) =>
 const mustOut = await callAll(MUST_RESPOND);
 for (const name of MUST_RESPOND) {
 	const r = mustOut[name];
-	await check(`只读通道 ${name} 有响应`, () => {
+	await h.check(`只读通道 ${name} 有响应`, () => {
 		assert.ok(r, "未取得结果");
 		assert.ok(r.ok, `调用失败: ${r.err}`);
 		assert.ok(!r.isUndef, "返回 undefined，handler 可能未实现");
@@ -148,7 +122,7 @@ for (const name of MUST_RESPOND) {
 const emptyOut = await callAll(MAY_BE_EMPTY);
 for (const name of MAY_BE_EMPTY) {
 	const r = emptyOut[name];
-	await check(`只读通道 ${name} 调用不报错（允许空态）`, () => {
+	await h.check(`只读通道 ${name} 调用不报错（允许空态）`, () => {
 		assert.ok(r, "未取得结果");
 		assert.ok(r.ok, `调用失败: ${r.err}`);
 	});
@@ -156,7 +130,7 @@ for (const name of MAY_BE_EMPTY) {
 
 // 需要参数的通道：从已有快照中取真实参数再调用
 for (const name of NEEDS_ARGS) {
-	await check(`带参通道 ${name} 调用成功`, async () => {
+	await h.check(`带参通道 ${name} 调用成功`, async () => {
 		const r = await win.evaluate(async (n) => {
 			const k = globalThis.kami;
 			try {
@@ -193,7 +167,7 @@ const ROUNDTRIP = [
 ];
 
 for (const [getter, setter, coerce] of ROUNDTRIP) {
-	await check(`${getter}/${setter} 读写往返`, async () => {
+	await h.check(`${getter}/${setter} 读写往返`, async () => {
 		const r = await win.evaluate(
 			async ({ g, s }) => {
 				const k = globalThis.kami;
@@ -222,22 +196,22 @@ for (const [getter, setter, coerce] of ROUNDTRIP) {
 }
 
 // ── 3. 会话与工作区的只读快照结构 ──────────────────────────
-await check("session 快照结构合理", async () => {
+await h.check("session 快照结构合理", async () => {
 	const s = await win.evaluate(() => globalThis.kami.snapshot());
 	assert.ok(s !== null && typeof s === "object", "snapshot 应返回对象");
 });
 
-await check("workspace 快照结构合理", async () => {
+await h.check("workspace 快照结构合理", async () => {
 	const w = await win.evaluate(() => globalThis.kami.workspaceSnapshot());
 	assert.ok(w !== null && typeof w === "object", "workspaceSnapshot 应返回对象");
 });
 
-await check("skills 快照可读取", async () => {
+await h.check("skills 快照可读取", async () => {
 	const s = await win.evaluate(() => globalThis.kami.skillsSnapshot());
 	assert.ok(s !== null && typeof s === "object", "skillsSnapshot 应返回对象");
 });
 
-await check("runtimes 快照可读取", async () => {
+await h.check("runtimes 快照可读取", async () => {
 	const r = await win.evaluate(() => globalThis.kami.runtimesSnapshot());
 	assert.ok(r !== null && typeof r === "object", "runtimesSnapshot 应返回对象");
 });
@@ -248,7 +222,7 @@ await check("runtimes 快照可读取", async () => {
 // 任何一环断了界面都会表现为「点了没反应」。这里对每个可写的功能域
 // 做一次真实往返，并在结束时清理干净（配置目录是隔离的临时目录）。
 
-await check("工作区：创建返回可用路径", async () => {
+await h.check("工作区：创建返回可用路径", async () => {
 	// 注意：不能用 listWorkspaceGroups 验证 —— 它是从**会话的 cwd** 派生的
 	// （见 daemon 的 listWorkspaceGroups 实现：遍历 listSessions 收集 cwd），
 	// 刚创建、还没有会话用过的目录不会出现在里面。最初这么断言是错的。
@@ -263,7 +237,7 @@ await check("工作区：创建返回可用路径", async () => {
 	assert.ok(r.hasName, `返回路径中不含工作区名：${r.path}`);
 });
 
-await check("自动化：保存 → 列出 → 删除", async () => {
+await h.check("自动化：保存 → 列出 → 删除", async () => {
 	// 入参字段取自 daemon 的 saveAutomation：name / prompt / schedule / cwd
 	// 四个都是必填且会 trim，缺任何一个都会抛错。
 	const r = await win.evaluate(async () => {
@@ -291,7 +265,7 @@ await check("自动化：保存 → 列出 → 删除", async () => {
 	if (r.id) assert.ok(r.gone, "删除后自动化仍在列表里");
 });
 
-await check("技能：读取快照 → 切换启用 → 复原", async () => {
+await h.check("技能：读取快照 → 切换启用 → 复原", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const snap = await k.skillsSnapshot();
@@ -313,7 +287,7 @@ await check("技能：读取快照 → 切换启用 → 复原", async () => {
 	assert.equal(r.restored, r.before, "技能开关未复原");
 });
 
-await check("MCP：写入配置 → 读回一致", async () => {
+await h.check("MCP：写入配置 → 读回一致", async () => {
 	// 注意：mcpConfigSet 收的是 **JSON 字符串**（daemon 侧 writeMcpConfig 直接
 	// 对它做文本处理），传对象会报 "text.charCodeAt is not a function"。
 	const r = await win.evaluate(async () => {
@@ -336,7 +310,7 @@ await check("MCP：写入配置 → 读回一致", async () => {
 	assert.ok(r.has, "写入的 MCP server 读不回来");
 });
 
-await check("会话：新建任务后快照可读", async () => {
+await h.check("会话：新建任务后快照可读", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		await k.newTask();
@@ -346,7 +320,7 @@ await check("会话：新建任务后快照可读", async () => {
 	assert.ok(r.hasSnap, "newTask 后 snapshot 不可用");
 });
 
-await check("权限：读取 → 设置 → 复原", async () => {
+await h.check("权限：读取 → 设置 → 复原", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const before = await k.getPermissions();
@@ -367,7 +341,7 @@ await check("权限：读取 → 设置 → 复原", async () => {
 });
 
 // ── 5. 会话生命周期 ────────────────────────────────────────
-await check("会话：新建 → 列表可见 → 重命名 → 归档 → 删除", async () => {
+await h.check("会话：新建 → 列表可见 → 重命名 → 归档 → 删除", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const out = {};
@@ -402,7 +376,7 @@ await check("会话：新建 → 列表可见 → 重命名 → 归档 → 删�
 	assert.ok(r.archiveRoundTrip, "归档往返失败");
 });
 
-await check("补全：@ 文件与 / 命令列表可读取", async () => {
+await h.check("补全：@ 文件与 / 命令列表可读取", async () => {
 	const r = await win.evaluate(async () => {
 		const c = await globalThis.kami.completions();
 		return {
@@ -415,7 +389,7 @@ await check("补全：@ 文件与 / 命令列表可读取", async () => {
 });
 
 // ── 6. 个人资料与偏好 ──────────────────────────────────────
-await check("个人资料：写入 → 读回 → 复位", async () => {
+await h.check("个人资料：写入 → 读回 → 复位", async () => {
 	// 注意：setProfile 收的是**字符串内容**，daemon 直接 writeFileSync 到画像文件，
 	// 传对象会报 "The data argument must be of type string"。
 	const r = await win.evaluate(async () => {
@@ -436,7 +410,7 @@ await check("个人资料：写入 → 读回 → 复位", async () => {
 	assert.ok(!r.afterReset, "resetProfile 后旧内容仍在");
 });
 
-await check("个性化：写入补丁 → 读回", async () => {
+await h.check("个性化：写入补丁 → 读回", async () => {
 	// setPersonalization 收的是**补丁对象**，合法键见 daemon 的 stringKeys：
 	// customInstructions / userNickname / assistantName / personaDescription
 	const r = await win.evaluate(async () => {
@@ -458,7 +432,7 @@ await check("个性化：写入补丁 → 读回", async () => {
 });
 
 // ── 7. 运行时开关 ──────────────────────────────────────────
-await check("运行时：启用开关往返", async () => {
+await h.check("运行时：启用开关往返", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const snap = await k.runtimesSnapshot();
@@ -479,7 +453,7 @@ await check("运行时：启用开关往返", async () => {
 });
 
 // ── 8. 审计日志 ────────────────────────────────────────────
-await check("审计：列表可读且结构正确", async () => {
+await h.check("审计：列表可读且结构正确", async () => {
 	const r = await win.evaluate(async () => {
 		const a = await globalThis.kami.auditList();
 		return {
@@ -496,7 +470,7 @@ await check("审计：列表可读且结构正确", async () => {
 const PROBE_FILE = "/tmp/zerowork-artifact-probe.txt";
 writeFileSync(PROBE_FILE, "e2e artifact probe\n第二行\n", "utf8");
 
-await check("路径 stat 返回真实文件信息", async () => {
+await h.check("路径 stat 返回真实文件信息", async () => {
 	const r = await win.evaluate(async (p) => {
 		const s = await globalThis.kami.statPath(p);
 		return { isObj: s !== null && typeof s === "object", raw: JSON.stringify(s).slice(0, 200) };
@@ -504,7 +478,7 @@ await check("路径 stat 返回真实文件信息", async () => {
 	assert.ok(r.isObj, `statPath 应返回对象，实际 ${r.raw}`);
 });
 
-await check("产物读取返回文件内容", async () => {
+await h.check("产物读取返回文件内容", async () => {
 	// 注意：产物读取被**限定在会话工作区内**（daemon 报错原文：
 	// 「当前任务还没有工作目录，无法读取产物」）。所以要先设好工作区，
 	// 且文件必须放在该工作区里 —— 用 /tmp 下的文件会被拒绝。
@@ -530,7 +504,7 @@ await check("产物读取返回文件内容", async () => {
 	assert.ok(r.text.length >= 0, "读取结果结构异常");
 });
 
-await check("路径 stat 对不存在的文件有合理行为", async () => {
+await h.check("路径 stat 对不存在的文件有合理行为", async () => {
 	const r = await win.evaluate(async () => {
 		try {
 			const s = await globalThis.kami.statPath("/tmp/definitely-not-exist-e2e-xyz");
@@ -544,7 +518,7 @@ await check("路径 stat 对不存在的文件有合理行为", async () => {
 });
 
 // ── 10. Git worktree（**自建一个仓库**，而不是拿本仓库的 checkout 去验）────
-await check("worktree 分支列表可读取", async () => {
+await h.check("worktree 分支列表可读取", async () => {
 	// 返回结构是 { isGitRepo, branches, currentBranch }，**不是数组**。
 	//
 	// 这里刻意自己造一个仓库，而不是用本仓库根目录：本仓库在 CI 上是
@@ -590,7 +564,7 @@ await check("worktree 分支列表可读取", async () => {
 });
 
 // ── 11. 会话导出 ───────────────────────────────────────────
-await check("会话导出返回可用结果", async () => {
+await h.check("会话导出返回可用结果", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const sessions = await k.listSessions();
@@ -613,7 +587,7 @@ await check("会话导出返回可用结果", async () => {
 // 关键点：prompt 会先走 parseBuiltinCommand，`/new`、`/plan` 这类内置命令
 // 在 daemon 侧就地处理，**不调用模型**。所以没有 API Key 也能验证
 // 「输入 → 发送 → 状态变化」这条真实链路，而不是只验证接口不报错。
-await check("发送 /new 命令生效", async () => {
+await h.check("发送 /new 命令生效", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const before = await k.snapshot();
@@ -630,7 +604,7 @@ await check("发送 /new 命令生效", async () => {
 	assert.ok(r.hasState, "快照缺少 state 字段");
 });
 
-await check("发送 /plan 命令切换交互模式", async () => {
+await h.check("发送 /plan 命令切换交互模式", async () => {
 	// 交互模式在 snapshot.state.interactionId（不是顶层）。
 	// 合法值见 snapshot.availableModes：ask / craft / plan
 	const r = await win.evaluate(async () => {
@@ -648,7 +622,10 @@ await check("发送 /plan 命令切换交互模式", async () => {
 	assert.equal(r.after, r.before, `第二次 /plan 未切回：期望 ${r.before}，实际 ${r.after}`);
 });
 
-await check("发送普通文本在无模型配置时给出明确错误", async () => {
+// 上面两条真的改了会话轴状态，界面此刻应当已经跟随 —— 再留一张现场图
+await h.check("会话轴变化后界面已渲染", () => h.shoot("ipc-session-axis"));
+
+await h.check("发送普通文本在无模型配置时给出明确错误", async () => {
 	// 没有配置模型时，发送普通消息应当**明确报错**，而不是静默挂起。
 	// 「挂起」是这类应用最难查的故障形态 —— 界面一直在转，用户不知道发生了什么。
 	const r = await win.evaluate(async () => {
@@ -670,7 +647,7 @@ await check("发送普通文本在无模型配置时给出明确错误", async (
 });
 
 // ── 13. 技能导入 ───────────────────────────────────────────
-await check("技能导入：从目录导入 → 快照可见", async () => {
+await h.check("技能导入：从目录导入 → 快照可见", async () => {
 	const r = await win.evaluate(async (srcDir) => {
 		const k = globalThis.kami;
 		try {
@@ -687,7 +664,7 @@ await check("技能导入：从目录导入 → 快照可见", async () => {
 });
 
 // ── 14. 会话分支 / 重启 ────────────────────────────────────
-await check("会话分支：在用户消息处分出分支", async () => {
+await h.check("会话分支：在用户消息处分出分支", async () => {
 	// 参数是 [path, userIndex, options]，userIndex 是**下标数字**，
 	// 不是 entryId 字符串（bridge 里的形参名 anchorEntryId 有误导性）。
 	const r = await win.evaluate(async () => {
@@ -712,18 +689,6 @@ await check("会话分支：在用户消息处分出分支", async () => {
 });
 
 // ── 15. 全程无渲染层异常 ────────────────────────────────────
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-await win.screenshot({ path: resolve(SHOT_DIR, "ipc-functional.png") });
-
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ IPC 功能性测试 ═══");
-let failed = 0;
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-	if (status === "FAIL") failed++;
-}
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-
-await app.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();
