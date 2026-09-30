@@ -13262,8 +13262,7 @@ function Sidebar({
   onOpenDiagnostics,
   onOpenStats,
   onOpenSkills,
-  onOpenAutomations,
-  onTodo
+  onOpenAutomations
 }) {
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
@@ -13649,9 +13648,13 @@ function Sidebar({
           type: "button",
           className: ready ? "nav-item" : "nav-item nav-item-pending",
           title: ready ? void 0 : "随版本迭代开放",
+          // 未就绪项挂真禁用态：此前只有颜色变淡，指针、hover 底、按下反馈
+          // 一样不少 —— 看着是灰的、摸起来是按钮，点下去才弹「待做」，
+          // 正是 DESIGN.md §7.6 说的「状态只靠颜色」。disabled 一并让它
+          // 退出 Tab 焦点序列。
+          disabled: !ready,
           onClick: () => {
-            if (!ready) onTodo(label);
-            else if (label === "专家·技能·连接器") onOpenSkills();
+            if (label === "专家·技能·连接器") onOpenSkills();
             else if (label === "自动化") onOpenAutomations();
           },
           children: [
@@ -14499,7 +14502,8 @@ function Composer({
         setDraft(text2);
         if (draftKey !== void 0) saveDraft(draftKey, text2);
         textareaRef.current?.focus();
-      }
+      },
+      focus: () => textareaRef.current?.focus()
     }),
     [img.pickFromDialog, draftKey]
   );
@@ -14946,35 +14950,109 @@ function guideText(readiness) {
   }
   return { title: "还没有选定要用哪个模型", action: "去选一个模型" };
 }
-function ModelGuide({ modelId, onOpenSettings }) {
+function OnboardingChecklist({
+  modelId,
+  cwd: cwd2,
+  onOpenSettings,
+  onOpenWorkspace,
+  onFocusComposer
+}) {
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
+  const [workspaces, setWorkspaces] = reactExports.useState(void 0);
+  const [sessions, setSessions] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
+  const [expanded, setExpanded] = reactExports.useState(false);
   const load = reactExports.useCallback(() => {
     setError(void 0);
-    window.kami.settingsSnapshot().then(setSnapshot).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    Promise.all([
+      window.kami.settingsSnapshot(),
+      window.kami.workspaceSnapshot(),
+      window.kami.listSessions()
+    ]).then(([settings, workspace, list2]) => {
+      setSnapshot(settings);
+      setWorkspaces(workspace.workspaces ?? []);
+      setSessions(list2 ?? []);
+    }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
   reactExports.useEffect(() => {
     load();
-  }, [load]);
-  if (error !== void 0 || snapshot === void 0) return null;
+  }, [load, cwd2]);
+  if (error !== void 0 || snapshot === void 0 || workspaces === void 0 || sessions === void 0) return null;
   const readiness = judgeModelReadiness(modelId ?? snapshot.activeModelId, snapshot.models);
-  if (readiness.kind === "ready") return null;
-  const text2 = guideText(readiness);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide", role: "status", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconKey, { size: 15 }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: text2.title }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+  const modelReady = readiness.kind === "ready";
+  const workspaceReady = workspaces.length > 0;
+  const messageReady = sessions.length > 0;
+  const allDone = modelReady && workspaceReady && messageReady;
+  if (allDone && !expanded) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "context-row", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
         type: "button",
         className: "mini-btn",
-        onClick: () => onOpenSettings("models"),
-        children: [
-          text2.action,
-          " →"
-        ]
+        onClick: () => setExpanded(true),
+        children: "上手清单"
       }
-    )
+    ) });
+  }
+  const text2 = guideText(readiness);
+  const rows = [
+    {
+      key: "workspace",
+      done: workspaceReady,
+      icon: IconWorkspace,
+      label: workspaceReady ? "已有工作空间" : "选一个工作空间，Agent 才有放文件的地方",
+      action: "选择工作空间",
+      go: onOpenWorkspace
+    },
+    {
+      key: "model",
+      done: modelReady,
+      icon: IconKey,
+      label: modelReady ? "已选定可用模型" : text2.title,
+      action: text2.action,
+      go: () => onOpenSettings("models")
+    },
+    {
+      key: "message",
+      done: messageReady,
+      icon: IconSend,
+      label: messageReady ? "已发出第一条消息" : "发出第一条消息，或从下面的案例开始",
+      action: "去写第一条",
+      go: onFocusComposer
+    }
+  ];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    allDone && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "context-row", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: "mini-btn",
+        onClick: () => setExpanded(false),
+        children: "收起上手清单"
+      }
+    ) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide", role: "status", children: [
+      rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(row.done ? IconCheck : row.icon, { size: 15 }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: row.label }),
+        !row.done && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            onClick: row.go,
+            children: [
+              row.action,
+              " →"
+            ]
+          }
+        )
+      ] }, row.key)),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconShieldSecured, { size: 15 }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: "本地优先 · 对话、文件与配置都在这台机器上" })
+      ] })
+    ] })
   ] });
 }
 const DEFAULT_INTERACTION_ID = "craft";
@@ -15434,8 +15512,10 @@ function pickerLabel(cwd2) {
   if (cwd2 === void 0 || cwd2 === "") return UNBOUND_LABEL;
   return isAutoSessionDirName(baseName$2(cwd2)) ? TEMP_TASK_LABEL : baseName$2(cwd2);
 }
-function WorkspacePicker({ cwd: cwd2, onChanged }) {
-  const [open, setOpen] = reactExports.useState(false);
+function WorkspacePicker({ cwd: cwd2, onChanged, open = false, onOpenChange }) {
+  const setOpen = (value) => {
+    onOpenChange?.(typeof value === "function" ? value(open) : value);
+  };
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
   const [creating, setCreating] = reactExports.useState(false);
   const [name2, setName] = reactExports.useState("");
@@ -15719,6 +15799,8 @@ function HomeView({
   const [casesVisible, setCasesVisible] = reactExports.useState(true);
   const [activeChipId, setActiveChipId] = reactExports.useState(void 0);
   const [chipPanelOpen, setChipPanelOpen] = reactExports.useState(false);
+  // 工作空间下拉的开合由 HomeView 持有：上手清单的「选择工作空间」要能把它顶开。
+  const [wsPickerOpen, setWsPickerOpen] = reactExports.useState(false);
   const chips = welcome === void 0 ? [] : chipsForScene(welcome.chips, sceneId);
   const chipById = new Map(chips.map((chip) => [chip.id, chip]));
   const sceneCases = casesForScene(welcome?.cases ?? [], chips);
@@ -15817,7 +15899,16 @@ function HomeView({
         ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-zone", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(ModelGuide, { modelId, onOpenSettings }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          OnboardingChecklist,
+          {
+            modelId,
+            cwd: cwd2,
+            onOpenSettings,
+            onOpenWorkspace: () => setWsPickerOpen(true),
+            onFocusComposer: () => composerRef.current?.focus()
+          }
+        ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Composer,
@@ -15869,7 +15960,7 @@ function HomeView({
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "context-row", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(WorkspacePicker, { cwd: cwd2, onChanged: onWorkspaceChanged }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(WorkspacePicker, { cwd: cwd2, onChanged: onWorkspaceChanged, open: wsPickerOpen, onOpenChange: setWsPickerOpen }),
             sceneId === "code" && cwd2 !== void 0 && cwd2 !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(WorktreeChip, { cwd: cwd2 }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(PermissionMenu, { onOpenSettings, onError })
           ] })
@@ -15885,7 +15976,15 @@ function HomeView({
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "cases-action", "aria-label": "关闭", onClick: () => setCasesVisible(false), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 14 }) })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "case-grid", children: visibleCases.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "case-card", title: c.subtitle, onClick: () => composerRef.current?.setText(c.prompt), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "case-grid", children: visibleCases.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        type: "button",
+        className: "case-card",
+        title: c.subtitle,
+        onClick: () => {
+          composerRef.current?.setText(c.prompt);
+          if (c.expert !== void 0) onSelectExpert(c.expert);
+        },
+        children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(CaseCover, { cover: c.cover, icon: iconForCase(c.chipId) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-title", children: c.title })
       ] }, c.id)) })
@@ -67876,8 +67975,7 @@ function App() {
         onOpenDiagnostics: openDiagnostics,
         onOpenStats: openStats,
         onOpenSkills: () => setView("skills"),
-        onOpenAutomations: openAutomations,
-        onTodo: showTodo
+        onOpenAutomations: openAutomations
       }
     ),
     view === "home" && /* @__PURE__ */ jsxRuntimeExports.jsx(

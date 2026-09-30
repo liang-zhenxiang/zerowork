@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "改渲染层：设计 Token 档位纪律、三态互斥、禁止清单、不得大规模重排"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "角色分工：实现由子 agent 做，主会话只调度与验收"}
+{"file": "docs/DESIGN.md", "reason": "设计规范事实来源：§3.3 卡片级别、§6 不新造类名/不隐藏核心功能"}

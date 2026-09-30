@@ -1033,7 +1033,9 @@ textarea:focus-visible {
 	text-align: left;
 }
 
-.nav-item:hover,
+/* :not(:disabled) —— 未就绪的导航项是真禁用态（见下 .nav-item:disabled），
+   不该再有 hover 底：有反馈就等于告诉用户「这是能点的」。 */
+.nav-item:hover:not(:disabled),
 .new-task:hover {
 	background: var(--bg-hover);
 }
@@ -1909,21 +1911,37 @@ textarea:focus-visible {
 }
 
 /*
- * 首页「还不能开始对话」引导条（spec: 首页引导）。
+ * 首页上手清单（原「还不能开始对话」引导条泛化而来，spec: 首页引导）。
  * 走 docs/DESIGN.md §3.3 的**卡片级别**（不是新开一个组件级别）：底 --bg、
  * 1px --border、圆角 --radius-md、内边距 --space-4，内部文字按「卡片标题
  * --text-body + 600 / meta --text-meta + --text-secondary」两档。
  * 常驻在输入卡上方，不遮不挡（判据不成立时组件返回 null，元素不存在）。
+ *
+ * 三条待办各占一行，所以外层从「一行」改成「一列」：行间距沿用原来那一档
+ * --space-3，行内仍是原来那套「图标 + 文字 + 右侧按钮」。
+ *
+ * 末尾那句「本地优先」也走同一行结构、同一档文字（--text-body + 600）。
+ * 它是**说明**不是待办，本该用上面写的 meta 档，但没有既有的 meta 类可复用，
+ * 而 design 明确要求这一句「不新增样式档位」——两害相权取复用，故未新开类名。
  */
 .home-guide {
 	display: flex;
-	align-items: center;
+	flex-direction: column;
+	align-items: stretch;
 	gap: var(--space-3);
 	margin-bottom: var(--space-3);
 	padding: var(--space-4);
 	background: var(--bg);
 	border: 1px solid var(--border);
 	border-radius: var(--radius-md);
+}
+
+/* 清单的每一行：图标（完成态换成对勾 —— 形态而非颜色承担「做完了」）+
+   一句说明 + 可点的去处。间距沿用卡片原来那一档 --space-3。 */
+.home-guide-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
 }
 
 .home-guide-icon {
@@ -9692,10 +9710,19 @@ textarea:focus-visible {
 	background: color-mix(in srgb, var(--warning) 12%, var(--bg));
 }
 
-/* ── 死导航降灰（spec: polish-ui-a11y-and-aesthetics）────────────── */
-/* 占位展示≠可用，视觉要诚实：图标 currentColor 随文字一起淡。 */
-.nav-item-pending {
+/* ── 死导航的真禁用态（spec: polish-ui-a11y-and-aesthetics）────────── */
+/* 占位展示≠可用，视觉与交互都要诚实：图标 currentColor 随文字一起淡。
+   【2026-10-01 订正】只降灰是不够的 —— 指针默认还是 pointer（全局
+   `button { cursor: pointer }`）、hover 有底色、按下有背景，等于「看着灰、
+   摸起来是按钮」，点下去才弹「待做」。这正是 docs/DESIGN.md §7.6 说的
+   「状态不只靠颜色」：形态要能独立表达。现按 disabled 补齐指针；
+   hover / active 两条已在各自规则上用 :not(:disabled) 让开。
+   （`.nav-item-pending` 是历史类名，保留作为显式 hook；真正的判据是
+   `:disabled` —— 未就绪项在渲染层挂了这个属性，也一并不进 Tab 序列。） */
+.nav-item-pending,
+.nav-item:disabled {
 	color: var(--text-faint);
+	cursor: default;
 }
 
 /* ── 设置页通用下拉与供应商 picker（替代原生 select）────────────── */
@@ -10249,7 +10276,7 @@ textarea:focus-visible {
    过渡名单里，**不在这里**：它们的点击目标是行内的按钮/子元素，给容器加按下态
    会变成「按行内任一按钮时整行也变色」，与「整行是按钮」的错觉叠加（同 9009 的口径）。 */
 .task-item:active,
-.nav-item:active,
+.nav-item:active:not(:disabled),
 .section-title-btn:active,
 .task-list-more:active:not(:disabled),
 .chip-panel-item:active,
