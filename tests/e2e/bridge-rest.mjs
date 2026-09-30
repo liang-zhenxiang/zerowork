@@ -17,22 +17,18 @@
  *   - `testModel` / `testDraftModel` 真会联网，只验「未配置模型时返回结构化失败」；
  *   - `memberPrompt` / `memberAbort` / `runAutomationNow` 需要真实成员与会话，
  *     只验「未知 id 被明确拒绝」。
+ *
+ * 迁移说明（共享 harness）：骨架（隔离目录、启动等待、check 收集器、末尾报告与
+ * 退出码）全部来自 `./lib/harness.mjs`。文件里保留的 `setTimeout` 都在 evaluate 的
+ * 页面上下文里，是 `call()` 用来把「**挂起**」与「明确报错」区分开的探针 ——
+ * 那是被测契约本身（30 秒内必须有回应），不是等待策略，故原样保留。
  */
-import { _electron as electron } from "playwright";
-import { mkdirSync, rmSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { createHarness, ROOT } from "./lib/harness.mjs";
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
 const RESOURCES = resolve(ROOT, "resources");
-const CONFIG_DIR = "/tmp/zerowork-bridge";
-const WORKSPACE_DIR = "/tmp/zerowork-bridge-ws";
-
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
 
 // 合法 id 从资源目录现读，避免把 id 写死在测试里（资源改名时测试不该假失败）
 const SCENES = readdirSync(join(RESOURCES, "scenes"), { withFileTypes: true })
@@ -45,36 +41,20 @@ const MODES = readdirSync(join(RESOURCES, "modes"))
 		return m === null ? f.replace(/\.md$/, "") : m[1];
 	});
 
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 260)]);
-	}
-};
+const h = createHarness({ name: "bridge-rest" });
+// harness 负责隔离与清空工作区根目录，目录本身要由用例建出来
+mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: RESOURCES,
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
-
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+const app = await h.launch();
+const win = h.window();
 
 await win.evaluate(async (ws) => {
 	await globalThis.kami.setWorkspace(ws);
-}, WORKSPACE_DIR);
+}, h.WORKSPACE_DIR);
+
+// 首屏留证：本文件驱动的是「此前没人碰过的通道」，界面若在这里崩掉，
+// 这张图就是崩之前的现场。
+await h.check("首屏画面已渲染", () => h.shoot("bridge-rest-home"));
 
 /**
  * 调一个桥接方法，**带超时**并把结果规整成 {ok, value} / {ok:false, err}。
@@ -104,7 +84,7 @@ const json = (v) => JSON.stringify(v).slice(0, 200);
 
 // ── ① 会话轴：场景 / 交互模式 / 推理强度 / 专家 ──────────────
 
-await check("会话轴：setScene 合法值生效、非法值被拒", async () => {
+await h.check("会话轴：setScene 合法值生效、非法值被拒", async () => {
 	const target = SCENES[0];
 	const good = await call("setScene", target);
 	assert.ok(!good.hang, "setScene 挂起");
@@ -117,7 +97,7 @@ await check("会话轴：setScene 合法值生效、非法值被拒", async () =
 	console.log(`      合法场景: ${SCENES.join("、")}`);
 });
 
-await check("会话轴：setInteraction 合法值生效、非法值被拒", async () => {
+await h.check("会话轴：setInteraction 合法值生效、非法值被拒", async () => {
 	const good = await call("setInteraction", MODES[0]);
 	assert.ok(!good.hang, "setInteraction 挂起");
 	const bad = await call("setInteraction", "__no_such_mode__");
@@ -126,7 +106,7 @@ await check("会话轴：setInteraction 合法值生效、非法值被拒", asyn
 	console.log(`      合法交互模式: ${MODES.join("、")}`);
 });
 
-await check("会话轴：setThinkingLevel 合法值生效、非法值被拒", async () => {
+await h.check("会话轴：setThinkingLevel 合法值生效、非法值被拒", async () => {
 	const good = await call("setThinkingLevel", "high");
 	assert.ok(!good.hang, "setThinkingLevel 挂起");
 	const bad = await call("setThinkingLevel", "__turbo__");
@@ -135,7 +115,7 @@ await check("会话轴：setThinkingLevel 合法值生效、非法值被拒", as
 	assert.ok(/档位|level|未知/.test(bad.err), `拒绝理由不明确：${bad.err}`);
 });
 
-await check("会话轴：setExpert 合法值生效、非法值被拒、undefined 清除", async () => {
+await h.check("会话轴：setExpert 合法值生效、非法值被拒、undefined 清除", async () => {
 	const experts = await win.evaluate(async () => {
 		const list = await globalThis.kami.listExperts();
 		return (Array.isArray(list) ? list : (list?.experts ?? [])).map((e) => e.name ?? e.id).filter(Boolean);
@@ -155,16 +135,19 @@ await check("会话轴：setExpert 合法值生效、非法值被拒、undefined
 	console.log(`      专家 ${experts.length} 位，取「${experts[0]}」验证`);
 });
 
-await check("会话轴：listWorkspaceGroups 返回数组", async () => {
+await h.check("会话轴：listWorkspaceGroups 返回数组", async () => {
 	const r = await call("listWorkspaceGroups");
 	assert.ok(!r.hang, "listWorkspaceGroups 挂起");
 	assert.ok(r.ok, `调用失败：${r.err}`);
 	assert.ok(Array.isArray(r.value), `应返回数组，实际 ${json(r.value)}`);
 });
 
+// 上面几条真的改了会话轴状态，界面此刻应当已经跟随 —— 留一张现场图
+await h.check("会话轴变化后界面已渲染", () => h.shoot("bridge-rest-session-axis"));
+
 // ── ② 提供商 CRUD 往返 ────────────────────────────────────
 
-await check("提供商：保存 → 读回 → 加模型 → 删除 → 读回报错", async () => {
+await h.check("提供商：保存 → 读回 → 加模型 → 删除 → 读回报错", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const id = "zw-bridge-probe";
@@ -219,20 +202,20 @@ await check("提供商：保存 → 读回 → 加模型 → 删除 → 读回�
 	assert.ok(r.goneAfterDelete || !r.stillThere, "删除后仍能读到该提供商");
 });
 
-await check("提供商：removeApiKey 对未知 provider 不挂起", async () => {
+await h.check("提供商：removeApiKey 对未知 provider 不挂起", async () => {
 	const r = await call("removeApiKey", "__no_such_provider__");
 	assert.ok(!r.hang, "removeApiKey 挂起");
 	assert.ok(true); // 抛错或静默都算合理，只要求「有回应」
 });
 
-await check("提供商：refreshCatalog 不挂起", async () => {
+await h.check("提供商：refreshCatalog 不挂起", async () => {
 	const r = await call("refreshCatalog");
 	assert.ok(!r.hang, "refreshCatalog 挂起（该调用可能联网，30 秒内应有结果或明确报错）");
 });
 
 // ── ③ 运行时管理 ──────────────────────────────────────────
 
-await check("运行时：总开关可切换并读回，且能还原", async () => {
+await h.check("运行时：总开关可切换并读回，且能还原", async () => {
 	// 总开关读的是 `runtimesSnapshot().master`（不是 settingsSnapshot —— 那是模型目录快照）
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
@@ -247,12 +230,12 @@ await check("运行时：总开关可切换并读回，且能还原", async () =
 	assert.equal(r.back, r.b === undefined ? true : r.b, "还原总开关失败");
 });
 
-await check("运行时：cancelInstall 对未知 id 不挂起", async () => {
+await h.check("运行时：cancelInstall 对未知 id 不挂起", async () => {
 	const r = await call("runtimeCancelInstall", "__no_such_runtime__");
 	assert.ok(!r.hang, "runtimeCancelInstall 挂起");
 });
 
-await check("运行时：reset 对未知 id 给出明确错误", async () => {
+await h.check("运行时：reset 对未知 id 给出明确错误", async () => {
 	const r = await call("runtimeReset", "__no_such_runtime__");
 	assert.ok(!r.hang, "runtimeReset 挂起");
 	assert.equal(r.ok, false, "未知运行时 id 应被拒绝（而不是静默成功）");
@@ -261,14 +244,14 @@ await check("运行时：reset 对未知 id 给出明确错误", async () => {
 
 // ── ④ MCP / 会话生命周期 / 团队的「明确拒绝」 ────────────────
 
-await check("MCP：切换未知 server 被明确拒绝", async () => {
+await h.check("MCP：切换未知 server 被明确拒绝", async () => {
 	const r = await call("mcpServerToggle", "__no_such_server__", false);
 	assert.ok(!r.hang, "mcpServerToggle 挂起");
 	assert.equal(r.ok, false, "切换未知 server 应被拒绝");
 	assert.ok(/找不到|不存在|server/i.test(r.err), `拒绝理由不明确：${r.err}`);
 });
 
-await check("会话：resume / restart / delete 传不存在的路径都有明确回应", async () => {
+await h.check("会话：resume / restart / delete 传不存在的路径都有明确回应", async () => {
 	// ⚠️ 两者的失败形态**不同**，断言要分开写：
 	//   resume / delete —— **抛错**（调用方拿异常）
 	//   restart —— **返回结构化失败** `{ ok: false, reason, message }`（branchFail），不抛
@@ -287,7 +270,7 @@ await check("会话：resume / restart / delete 传不存在的路径都有明�
 	console.log(`      restart 返回: ${json(rs.value)}`);
 });
 
-await check("团队：memberPrompt / memberAbort 传未知成员被明确拒绝", async () => {
+await h.check("团队：memberPrompt / memberAbort 传未知成员被明确拒绝", async () => {
 	for (const m of ["memberPrompt", "memberAbort"]) {
 		const args = m === "memberPrompt" ? ["__no_such_member__", "hi"] : ["__no_such_member__"];
 		const r = await call(m, ...args);
@@ -296,7 +279,7 @@ await check("团队：memberPrompt / memberAbort 传未知成员被明确拒绝"
 	}
 });
 
-await check("自动化：runAutomationNow 传未知任务被明确拒绝", async () => {
+await h.check("自动化：runAutomationNow 传未知任务被明确拒绝", async () => {
 	const r = await call("runAutomationNow", "__no_such_task__");
 	assert.ok(!r.hang, "runAutomationNow 挂起");
 	assert.equal(r.ok, false, "未知任务应被拒绝");
@@ -304,20 +287,20 @@ await check("自动化：runAutomationNow 传未知任务被明确拒绝", async
 
 // ── ⑤ 产物 / 路径 / 界面应答 ───────────────────────────────
 
-await check("产物：openArtifact 对不存在的路径给出明确错误", async () => {
+await h.check("产物：openArtifact 对不存在的路径给出明确错误", async () => {
 	const r = await call("openArtifact", "definitely-not-here.txt");
 	assert.ok(!r.hang, "openArtifact 挂起");
 	assert.equal(r.ok, false, "不存在的产物应被拒绝");
 });
 
-await check("产物：revealWorkspace 对未知目录被明确拒绝", async () => {
+await h.check("产物：revealWorkspace 对未知目录被明确拒绝", async () => {
 	const r = await call("revealWorkspace", "/tmp/__not_a_known_workspace__");
 	assert.ok(!r.hang, "revealWorkspace 挂起");
 	assert.equal(r.ok, false, "未知目录应被拒绝（该通道只校验，真正打开在主进程）");
 	assert.ok(/已知的工作空间|workspace/i.test(r.err), `拒绝理由不明确：${r.err}`);
 });
 
-await check("界面应答：respondToUi / questionnaireResponse 对未知 id 不挂起", async () => {
+await h.check("界面应答：respondToUi / questionnaireResponse 对未知 id 不挂起", async () => {
 	for (const [m, arg] of [
 		["respondToUi", { id: "__no_such_request__", value: "x" }],
 		["questionnaireResponse", { id: "__no_such_request__", answers: {} }],
@@ -328,7 +311,7 @@ await check("界面应答：respondToUi / questionnaireResponse 对未知 id 不
 	}
 });
 
-await check("路径：getFilePath 对非原生 File 返回字符串", async () => {
+await h.check("路径：getFilePath 对非原生 File 返回字符串", async () => {
 	const r = await win.evaluate(() => {
 		try {
 			const f = new globalThis.File(["hello"], "probe.txt", { type: "text/plain" });
@@ -344,7 +327,7 @@ await check("路径：getFilePath 对非原生 File 返回字符串", async () =
 
 // ── ⑥ 设置测试类：未配置时必须是结构化失败 ──────────────────
 
-await check("设置：testWebSearch 未配置时返回结构化失败", async () => {
+await h.check("设置：testWebSearch 未配置时返回结构化失败", async () => {
 	const r = await call("testWebSearch");
 	assert.ok(!r.hang, "testWebSearch 挂起");
 	assert.ok(r.ok, `调用失败：${r.err}`);
@@ -353,7 +336,7 @@ await check("设置：testWebSearch 未配置时返回结构化失败", async ()
 	console.log(`      返回: ${r.value.message}`);
 });
 
-await check("设置：testModel 对不存在的模型返回结构化失败", async () => {
+await h.check("设置：testModel 对不存在的模型返回结构化失败", async () => {
 	const r = await call("testModel", "__no_such_model__");
 	assert.ok(!r.hang, "testModel 挂起");
 	assert.ok(r.ok, `调用失败：${r.err}`);
@@ -380,7 +363,7 @@ async function restoreDialog() {
 	});
 }
 
-await check("worktree：基准分支可设置 / 读取 / 清除，非法类型被拒", async () => {
+await h.check("worktree：基准分支可设置 / 读取 / 清除，非法类型被拒", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const read = async () => (await k.workspaceSnapshot())?.worktreeBranch ?? null;
@@ -407,7 +390,7 @@ await check("worktree：基准分支可设置 / 读取 / 清除，非法类型�
 	assert.equal(r.restored, r.before, "还原失败");
 });
 
-await check("菜单：menuPopup 对未知菜单项给出明确错误", async () => {
+await h.check("菜单：menuPopup 对未知菜单项给出明确错误", async () => {
 	// 不 stub 也能测 —— 找不到菜单项时它直接抛错，这正是我们要的「明确拒绝」
 	const r = await call("menuPopup", "__no_such_menu_item__", 0, 0);
 	assert.ok(!r.hang, "menuPopup 挂起");
@@ -415,8 +398,8 @@ await check("菜单：menuPopup 对未知菜单项给出明确错误", async () 
 	assert.ok(/找不到菜单项|menu/i.test(r.err), `拒绝理由不明确：${r.err}`);
 });
 
-await check("产物：saveArtifactAs 用户选中 → 返回路径；取消 → 返回空", async () => {
-	const picked = resolve(WORKSPACE_DIR, "saved-artifact.txt");
+await h.check("产物：saveArtifactAs 用户选中 → 返回路径；取消 → 返回空", async () => {
+	const picked = resolve(h.WORKSPACE_DIR, "saved-artifact.txt");
 	await stubDialog({ save: { canceled: false, filePath: picked } });
 	const ok = await win.evaluate(async () => {
 		const v = await globalThis.kami.saveArtifactAs({ suggestedName: "saved-artifact.txt", content: "hi" });
@@ -432,8 +415,8 @@ await check("产物：saveArtifactAs 用户选中 → 返回路径；取消 → 
 	assert.ok(cancelled.isUndef, `取消时应返回 undefined，实际 ${cancelled.value}`);
 });
 
-await check("画像：importProfile 用户选中 md → 返回内容；取消 → 返回空", async () => {
-	const md = resolve(WORKSPACE_DIR, "profile.md");
+await h.check("画像：importProfile 用户选中 md → 返回内容；取消 → 返回空", async () => {
+	const md = resolve(h.WORKSPACE_DIR, "profile.md");
 	writeFileSync(md, "# 画像\n\n这段用于验证导入链路。\n", "utf8");
 	await stubDialog({ open: { canceled: false, filePaths: [md] } });
 	const ok = await win.evaluate(async () => {
@@ -451,7 +434,7 @@ await check("画像：importProfile 用户选中 md → 返回内容；取消 �
 	assert.ok(cancelled.isUndef, "取消时应返回 undefined");
 });
 
-await check("设置：testDraftModel 缺必填项时返回结构化失败（不联网）", async () => {
+await h.check("设置：testDraftModel 缺必填项时返回结构化失败（不联网）", async () => {
 	const noUrl = await call("testDraftModel", { baseUrl: "   ", providerId: "x", api: "anthropic-messages" }, "some-model", "k");
 	assert.ok(!noUrl.hang, "testDraftModel 挂起");
 	assert.equal(noUrl.value?.ok, false, `缺接口地址时应 ok:false，实际 ${json(noUrl.value)}`);
@@ -464,7 +447,7 @@ await check("设置：testDraftModel 缺必填项时返回结构化失败（不�
 
 // ── ⑧ 事件订阅：每个 on* 都能订阅并注销 ─────────────────────
 
-await check("事件订阅：全部 on* 可订阅、返回注销函数、注销不抛", async () => {
+await h.check("事件订阅：全部 on* 可订阅、返回注销函数、注销不抛", async () => {
 	const r = await win.evaluate(() => {
 		const k = globalThis.kami;
 		const names = Object.keys(k).filter((n) => n.startsWith("on") && typeof k[n] === "function");
@@ -487,15 +470,6 @@ await check("事件订阅：全部 on* 可订阅、返回注销函数、注销�
 	console.log(`      订阅通道 ${r.names.length} 个：${r.names.join("、")}`);
 });
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 桥接面补测（此前未驱动过的 IPC）═══");
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-}
-const failed = results.filter(([s]) => s === "FAIL").length;
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-
-await app.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();

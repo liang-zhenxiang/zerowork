@@ -15,18 +15,20 @@
  *
  * 为什么不用真实模型：这条验的是**渲染链路**，不是模型能力。mock 让轮次完全确定，
  * 也就没有「弱模型不肯调工具」这类抖动。
+ *
+ * 迁移说明（共享 harness）：骨架（清隔离目录、启动并等到就绪、check 收集器、
+ * 末尾报告与退出码）全部来自 `./lib/harness.mjs`，本文件只剩「驱动界面 + 断言」。
+ * 等待一律走信号：启动不再固定等 9 秒；「发送」不再固定等 3 秒，而是等
+ * **mock 真的收到请求**；页面里原来的 `for + sleep` 轮询换成 `waitUntil`。
+ *
+ * ⚠️ 这里**刻意不用** `h.waitForSettled()`：本文件的断言全部发生在**模型回合进行中**，
+ * 而回合中界面有 500ms 级的计时器在刷新（时长显示、等待提示轮播），
+ * 永远达不到「800ms 静默」——用了只会等到超时。回合结束后才静默。
  */
-import { _electron as electron } from "playwright";
-import { createServer } from "node:http";
-import { mkdirSync, rmSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-widget";
-const WORKSPACE_DIR = "/tmp/zerowork-widget-ws";
+import { createServer } from "node:http";
+import { mkdirSync } from "node:fs";
+import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 const WIDGET_TITLE = "渲染探针图";
 const FINAL_TEXT = "WIDGET_RENDER_DONE";
@@ -37,6 +39,9 @@ const WIDGET_CODE =
 	'<text x="340" y="110" text-anchor="middle" fill="#fff" font-size="32">WIDGET</text></svg>';
 
 // ── mock 模型服务 ────────────────────────────────────────────
+//
+// 注：这段内联的 mock 服务是各用例里重复的，**统一抽取是后续独立的一步**，
+// 本文件迁移时原样保留，不动它。
 function startMockModel() {
 	const requests = [];
 	const server = createServer((req, res) => {
@@ -99,41 +104,54 @@ function startMockModel() {
 	});
 }
 
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
-
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 240)]);
-	}
-};
+const h = createHarness({ name: "widget" });
+// harness 负责隔离与清空工作区根目录，目录本身要由用例建出来
+mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
 const mock = await startMockModel();
 console.log(`✓ mock 模型服务已就绪：${mock.baseUrl}`);
 
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
+await h.launch();
+const win = h.window();
 
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+await h.snap("home");
 
-await check("注册指向 mock 的 provider 并切模型", async () => {
+/** 等 mock 收到第 n 轮请求 —— 「模型真的被调到了」是比固定等待可靠的信号。 */
+async function waitForRounds(n, why) {
+	try {
+		await waitUntil(() => mock.requests.length >= n, {
+			timeout: 40_000,
+			interval: 500,
+			desc: `mock 收到第 ${n} 轮请求`,
+		});
+	} catch (error) {
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+	}
+}
+
+/**
+ * 在页面里轮询探针，直到它报告 `found`。
+ *
+ * 取代原来「在页面里 for 循环 + sleep」的写法：截止时间交给 `waitUntil` 统一管，
+ * 慢机器不假失败、快机器不白等；超时时把**页面尾部内容**带进错误里，
+ * 失败信息才能直接看出界面上到底有什么。
+ */
+async function waitForFound(desc, probe, { arg, timeout = 30_000 } = {}) {
+	let last = null;
+	try {
+		return await waitUntil(
+			async () => {
+				last = await win.evaluate(probe, arg);
+				return last?.found ? last : null;
+			},
+			{ timeout, interval: 500, desc },
+		);
+	} catch (error) {
+		throw new Error(`${error.message}；界面尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`);
+	}
+}
+
+await h.check("注册指向 mock 的 provider 并切模型", async () => {
 	const r = await win.evaluate(async ({ baseUrl, ws }) => {
 		const k = globalThis.kami;
 		try {
@@ -154,72 +172,65 @@ await check("注册指向 mock 的 provider 并切模型", async () => {
 		} catch (e) {
 			return { ok: false, err: String(e?.message ?? e).slice(0, 200) };
 		}
-	}, { baseUrl: mock.baseUrl, ws: WORKSPACE_DIR });
+	}, { baseUrl: mock.baseUrl, ws: h.WORKSPACE_DIR });
 	assert.ok(r.ok, `配置失败：${r.err}`);
 });
 
-await check("在输入框里输入并发送（走真实 UI 路径）", async () => {
+await h.check("在输入框里输入并发送（走真实 UI 路径）", async () => {
 	const box = win.locator('[aria-label="消息输入框"]');
 	await box.waitFor({ state: "visible", timeout: 30_000 });
 	await box.fill("请给我画一张示意图");
 	await box.press("Enter");
-	await win.waitForTimeout(3000);
+	// 原来是固定等 3 秒。改成等 mock 真收到请求 —— 发送有没有走通，这是直接证据
+	await waitForRounds(1, "消息没有发出去");
 });
 
-await check("mock 收到了两轮请求（工具调用循环转起来了）", async () => {
-	for (let i = 0; i < 20 && mock.requests.length < 2; i++) await win.waitForTimeout(1000);
-	assert.ok(mock.requests.length >= 2, `mock 只收到 ${mock.requests.length} 轮请求 —— 循环没转起来`);
+await h.check("mock 收到了两轮请求（工具调用循环转起来了）", async () => {
+	await waitForRounds(2, "工具调用循环没转起来");
 	const second = mock.requests[1];
 	const hasToolMsg = (second?.body?.messages ?? []).some((m) => m.role === "tool");
 	assert.ok(hasToolMsg, "第二轮请求里没有 role:tool —— 工具结果没回传");
 	console.log(`      mock 收到 ${mock.requests.length} 轮请求`);
 });
 
-await check("可视化卡片渲染到界面上（.widget-card + 标题）", async () => {
-	const r = await win.evaluate(async () => {
-		for (let i = 0; i < 30; i++) {
-			const card = document.querySelector(".widget-card");
-			if (card !== null) {
-				return {
-					found: true,
-					titleText: (card.querySelector(".widget-title")?.textContent ?? "").trim(),
-					hasFrame: card.querySelector(".widget-frame") !== null,
-					hasError: card.querySelector(".widget-error") !== null,
-					cardText: (card.textContent ?? "").slice(0, 120),
-				};
-			}
-			await new Promise((res) => setTimeout(res, 1000));
-		}
-		return { found: false, sample: (document.body.innerText || "").slice(-300) };
+await h.check("可视化卡片渲染到界面上（.widget-card + 标题）", async () => {
+	const r = await waitForFound("界面上出现 .widget-card（工具返回对了却没渲染？）", () => {
+		const card = document.querySelector(".widget-card");
+		if (card === null) return { found: false, sample: (document.body.innerText || "").slice(-300) };
+		return {
+			found: true,
+			titleText: (card.querySelector(".widget-title")?.textContent ?? "").trim(),
+			hasFrame: card.querySelector(".widget-frame") !== null,
+			hasError: card.querySelector(".widget-error") !== null,
+			cardText: (card.textContent ?? "").slice(0, 120),
+		};
 	});
-	assert.ok(r.found, `界面上没有出现 .widget-card —— 工具返回对了但没渲染？界面尾部：${r.sample}`);
+	// 先截图、后断言：卡片在屏上时留现场；下面的内容断言一旦失败，图里就有那一屏。
+	// 截图自带像素断言 —— DOM 里有卡片不等于卡片真的画出来了。
+	await h.shoot("widget-card");
 	assert.equal(r.titleText, WIDGET_TITLE, `卡片标题不对：${JSON.stringify(r.titleText)}`);
 	assert.ok(r.hasFrame, "卡片里没有 .widget-frame —— 内容没挂上");
 	assert.ok(!r.hasError, `卡片是错误态：${r.cardText}`);
 	console.log(`      卡片标题「${r.titleText}」，含 frame ✓`);
 });
 
-await check("最终回复也渲染出来（工具调用后模型继续说话）", async () => {
-	const r = await win.evaluate(async (mark) => {
-		for (let i = 0; i < 20; i++) {
-			if ((document.body.innerText || "").includes(mark)) return { found: true };
-			await new Promise((res) => setTimeout(res, 1000));
-		}
-		return { found: false, sample: (document.body.innerText || "").slice(-200) };
-	}, FINAL_TEXT);
-	assert.ok(r.found, `界面上找不到最终回复 ${FINAL_TEXT}。尾部：${r.sample}`);
+await h.check("最终回复也渲染出来（工具调用后模型继续说话）", async () => {
+	const r = await waitForFound(
+		"界面上出现最终回复",
+		(mark) => {
+			const text = document.body.innerText || "";
+			return text.includes(mark) ? { found: true } : { found: false, sample: text.slice(-200) };
+		},
+		{ arg: FINAL_TEXT, timeout: 20_000 },
+	);
+	await h.shoot("final-reply");
+	assert.ok(r.found, `界面上找不到最终回复 ${FINAL_TEXT}`);
 });
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 可视化卡片渲染测试 ═══");
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-}
-const failed = results.filter(([s]) => s === "FAIL").length;
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-
-await app.close();
+// 先关应用再关 mock：应用一关，daemon 与 mock 之间的长连接才会断开，
+// server.close() 才不会一直等在那儿（原实现的顺序就是这样）。
+await h.app().close();
 await mock.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();

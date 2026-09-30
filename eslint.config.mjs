@@ -88,7 +88,11 @@ export default [
 				getComputedStyle: "readonly",
 				setTimeout: "readonly",
 				clearTimeout: "readonly",
+				setInterval: "readonly",
+				clearInterval: "readonly",
 				fetch: "readonly",
+				// harness 用它等界面稳定：连续静默一段时间即认为这一屏渲染完了
+				MutationObserver: "readonly",
 			},
 		},
 	},

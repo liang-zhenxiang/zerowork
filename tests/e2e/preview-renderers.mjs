@@ -24,19 +24,36 @@
  * 懒加载块的样式表在构建产物里不存在时，预加载助手会 reject 懒加载 promise，
  * 未拦截的 `vite:preloadError` 直接把整个渲染层打进错误边界 ——
  * 表现为「点开 xlsx / 代码预览就界面渲染出错」，而不是「样式缺失」。
+ *
+ * ── 迁移说明（共享 harness）────────────────────────────────
+ *
+ * 骨架（隔离目录、启动并等到就绪、check 收集器、末尾报告与退出码）全部来自
+ * `./lib/harness.mjs`，本文件只剩「驱动界面 + 断言」。启动不再固定等 9 秒，
+ * 发送不再固定等 4 秒（改为等 **mock 真的收到请求**）。
+ *
+ * ⚠️ 这里**刻意不用** `h.waitForSettled()`：断言发生在模型回合进行中/之后，
+ * 而回合期间渲染层有 500ms 级计时器在改 DOM，达不到「800ms 静默」。
+ *
+ * ── 竞态修复：为什么轮询条件是「全部条件」而不是「第一个条件」──
+ *
+ * 下面四处页面内轮询原来都是「等到条件 A 成立 → 立刻断言副作用 B」，
+ * 而**懒加载的样式表是异步挂进文档的**：内容可以先渲染出来、样式表晚一拍到位。
+ * 于是同一条用例「本地快 → 恰好过、CI 慢 → 偶发红」。
+ *
+ * 真实故障（CI 日志）：json 用例报「文档里没有 json-mode.css」，
+ * 而当时 `document.styleSheets` 里 `app.css` / `office-xlsx.css` / `code-preview.css`
+ * （更早的预览挂上的）都在，**独缺刚挂上的那一份** —— 正是「晚一拍」的样子。
+ *
+ * 修法：把该断言涉及的条件**全部**放进同一个轮询的退出条件里，
+ * 全满足才返回，慢机器只是多等几轮。**不是**「先等内容、再 sleep 一段时间、再查 CSS」
+ * —— 那是把竞态换成一个猜的时长，慢机器上照样红。
  */
-import { _electron as electron } from "playwright";
-import { createServer } from "node:http";
-import { mkdirSync, rmSync, writeFileSync, existsSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import { writeFileSync, existsSync, statSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-office";
-const WORKSPACE_DIR = "/tmp/zerowork-office-ws";
+import { createHarness, waitUntil, ROOT } from "./lib/harness.mjs";
 
 const XLSX_NAME = "预算探针.xlsx";
 const XLSX_MARK = "ZEROWORK_XLSX_7788";
@@ -201,9 +218,12 @@ async function writePptx(target) {
 
 // ── mock 模型（只要让会话建起来，内容不重要）────────────
 function startMockModel() {
+	// 记下收到的请求 —— 「发送有没有走通」用这个当判据，比固定等 4 秒可靠
+	const requests = [];
 	const server = createServer((req, res) => {
 		req.on("data", () => {});
 		req.on("end", () => {
+			requests.push({ url: req.url });
 			res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
 			res.write(
 				`data: ${JSON.stringify({
@@ -225,48 +245,64 @@ function startMockModel() {
 	});
 	return new Promise((ok) => {
 		server.listen(0, "127.0.0.1", () =>
-			ok({ baseUrl: `http://127.0.0.1:${server.address().port}/v1`, close: () => new Promise((r) => server.close(r)) }),
+			ok({ baseUrl: `http://127.0.0.1:${server.address().port}/v1`, requests, close: () => new Promise((r) => server.close(r)) }),
 		);
 	});
 }
 
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
+// ── 夹具落盘（工作区由 harness 按用例名隔离）──────────────
+const h = createHarness({ name: "preview" });
+const WORKSPACE_DIR = h.WORKSPACE_DIR;
+
 writeXlsx(join(WORKSPACE_DIR, XLSX_NAME));
 await writePptx(join(WORKSPACE_DIR, PPTX_NAME));
 writeFileSync(join(WORKSPACE_DIR, JS_NAME), `// ${JS_MARK}\nexport const previewProbe = () => 42;\n`, "utf8");
 writeFileSync(join(WORKSPACE_DIR, JSON_NAME), `{\n  "mark": "${JSON_MARK}",\n  "n": 1\n}\n`, "utf8");
 console.log(`✓ 夹具已生成：${XLSX_NAME} / ${PPTX_NAME} / ${JS_NAME} / ${JSON_NAME}`);
 
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 260)]);
-	}
-};
-
 const mock = await startMockModel();
 
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
+await h.launch();
+const win = h.window();
+await h.snap("home");
 
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+/** 等 mock 收到第 n 轮请求 —— 「消息真的发出去了」是比固定等待可靠的信号。 */
+async function waitForRequests(n, why) {
+	try {
+		await waitUntil(() => mock.requests.length >= n, {
+			timeout: 40_000,
+			interval: 500,
+			desc: `mock 收到第 ${n} 轮请求`,
+		});
+	} catch (error) {
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+	}
+}
+
+/**
+ * 在页面里轮询探针，直到它报告「该断言的**全部**条件都就位」。
+ *
+ * 探针每轮返回一个**完整的状态快照**（`complete` 为真才算完成），
+ * 而不是分两步「先等 A，再读 B」—— 懒加载的样式表是异步挂进文档的，
+ * 分两步就会踩到「内容先出、样式表后到」的竞态（见文件头）。
+ *
+ * 超时时把**最后一次探针状态**带进错误里：失败信息要能直接看出卡在哪一步
+ * （容器没出现？样式表没进文档？还是计算样式不对？）。
+ */
+async function waitForComplete(desc, probe, { arg, timeout = 60_000, interval = 800 } = {}) {
+	let last = null;
+	try {
+		return await waitUntil(
+			async () => {
+				last = await win.evaluate(probe, arg);
+				return last?.complete ? last : null;
+			},
+			{ timeout, interval, desc },
+		);
+	} catch (error) {
+		throw new Error(`${error.message}\n  最后一次探针状态：${JSON.stringify(last ?? "(未取到)").slice(0, 400)}`);
+	}
+}
 
 /** 点开「工作空间文件」视图，等文件树出现。 */
 async function openWorkspaceTree() {
@@ -274,8 +310,12 @@ async function openWorkspaceTree() {
 		const btn = document.querySelector('[aria-label="展开产物面板"]');
 		btn?.click();
 	});
-	await win.waitForTimeout(1500);
 	// ViewSwitcher：按钮文本是当前视图名（默认「概览」）；点开菜单选「工作空间文件」
+	await waitUntil(() => win.evaluate(() => document.querySelector(".view-switcher button") !== null), {
+		timeout: 30_000,
+		interval: 500,
+		desc: "出现视图切换按钮（.view-switcher）",
+	});
 	const ok = await win.evaluate(() => {
 		const btn = [...document.querySelectorAll(".view-switcher button")][0];
 		if (btn === undefined) return false;
@@ -283,7 +323,14 @@ async function openWorkspaceTree() {
 		return true;
 	});
 	assert.ok(ok, "找不到视图切换按钮（.view-switcher）—— 产物面板没打开？");
-	await win.waitForTimeout(500);
+
+	await waitUntil(
+		() =>
+			win.evaluate(
+				() => [...document.querySelectorAll(".view-switcher-menu .preview-item")].some((n) => (n.textContent || "").includes("工作空间文件")),
+			),
+		{ timeout: 30_000, interval: 500, desc: "视图菜单里出现「工作空间文件」项" },
+	);
 	const picked = await win.evaluate(() => {
 		const item = [...document.querySelectorAll(".view-switcher-menu .preview-item")].find((n) =>
 			(n.textContent || "").includes("工作空间文件"),
@@ -297,23 +344,30 @@ async function openWorkspaceTree() {
 
 /** 点开某个文件行，返回它的标题（便于诊断）。 */
 async function clickFileRow(name) {
-	for (let i = 0; i < 30; i++) {
-		const clicked = await win.evaluate((label) => {
-			const rows = [...document.querySelectorAll(".file-tree-row.file-tree-file")];
-			if (rows.length === 0) return "no-rows";
-			const row = rows.find((r) => (r.textContent || "").includes(label) || (r.getAttribute("title") || "").includes(label));
-			if (row === undefined) return `not-found:${rows.map((r) => r.textContent.trim()).join("|")}`;
-			row.click();
-			return "ok";
-		}, name);
-		if (clicked === "ok") return;
-		if (String(clicked).startsWith("not-found:")) {
-			// 文件树可能还在扫描，继续等
-			if (i >= 28) throw new Error(`文件树里找不到「${name}」。现有条目：${clicked.slice(11)}`);
-		}
-		await win.waitForTimeout(1000);
+	// 文件树可能还在扫描，用轮询等它出现 —— 固定等待在慢机器上不够、快机器上白等。
+	let listing = "";
+	try {
+		await waitUntil(
+			async () => {
+				const r = await win.evaluate((label) => {
+					const rows = [...document.querySelectorAll(".file-tree-row.file-tree-file")];
+					if (rows.length === 0) return { state: "no-rows" };
+					const row = rows.find(
+						(n) => (n.textContent || "").includes(label) || (n.getAttribute("title") || "").includes(label),
+					);
+					if (row === undefined) return { state: "not-found", listing: rows.map((n) => n.textContent.trim()).join("|") };
+					row.click();
+					return { state: "ok" };
+				}, name);
+				if (r.listing !== undefined) listing = r.listing;
+				return r.state === "ok";
+			},
+			{ timeout: 40_000, interval: 1000, desc: `文件树里出现「${name}」并点开` },
+		);
+	} catch (error) {
+		if (listing !== "") throw new Error(`文件树里找不到「${name}」。现有条目：${listing}`);
+		throw new Error(`等了 40 秒文件树也没出现（.file-tree-row.file-tree-file 为空）—— ${error.message}`);
 	}
-	throw new Error(`等了 30 秒文件树也没出现（.file-tree-row.file-tree-file 为空）`);
 }
 
 /** 关掉当前预览标签、回到文件列表（面板在预览态下不显示文件树）。 */
@@ -325,10 +379,15 @@ async function closePreviewTab() {
 		return true;
 	});
 	assert.ok(closed, "找不到预览标签的关闭按钮，无法回到文件列表");
-	await win.waitForTimeout(2000);
+	// 等文件树真的回来，而不是固定等 2 秒 —— 回来的快慢由界面说了算
+	await waitUntil(() => win.evaluate(() => document.querySelector(".file-tree-row.file-tree-file") !== null), {
+		timeout: 30_000,
+		interval: 500,
+		desc: "关闭预览标签后文件树重新出现",
+	});
 }
 
-await check("建会话并打开产物面板 → 工作空间文件", async () => {
+await h.check("建会话并打开产物面板 → 工作空间文件", async () => {
 	const r = await win.evaluate(async ({ baseUrl, ws }) => {
 		const k = globalThis.kami;
 		try {
@@ -356,89 +415,94 @@ await check("建会话并打开产物面板 → 工作空间文件", async () =>
 	await box.waitFor({ state: "visible", timeout: 30_000 });
 	await box.fill("看一眼工作区里的表格");
 	await box.press("Enter");
-	await win.waitForTimeout(4000);
+	// 原来是固定等 4 秒。改成等 mock 真收到请求 —— 消息有没有发出去，这是直接证据。
+	await waitForRequests(1, "消息没有发出去");
 
 	await openWorkspaceTree();
+	// 先截图、后断言：这一屏是后面所有断言的起点，画面不对时图里能直接看出来。
+	await h.shoot("workspace-tree");
 });
 
-await check("XLSX：预览容器出现且**真的解析了工作簿**", async () => {
+await h.check("XLSX：预览容器出现且**真的解析了工作簿**", async () => {
 	await clickFileRow(XLSX_NAME);
-	const r = await win.evaluate(
-		async (sheetName) => {
-			for (let i = 0; i < 40; i++) {
-				const office = document.querySelector(".preview-office");
-				if (office !== null) {
-					// 表格是 **canvas** 绘制的，单元格文本不在 innerText 里 ——
-					// 所以断言不能看单元格内容，要看**只有真解析了工作簿才会出现**的
-					// 东西：底部的工作表标签（名字来自文件本身）。
-					const tab = office.querySelector(".luckysheet-sheets-item-name");
-					// 等标签上的名字变成**夹具里那个表名** —— 它在文件里，不在代码里，
-					// 出现了就说明工作簿真被解析了。
-					if (tab !== null && (tab.textContent || "").trim() === sheetName) {
-						const cs = getComputedStyle(tab);
-						return {
-							found: true,
-							canvas: office.querySelectorAll("canvas").length,
-							tabName: (tab.textContent || "").trim(),
-							// 这条样式只写在 office-xlsx.css 里（app.css 里 0 处）：
-							// 拿它证明**该 chunk 自己的样式表真的加载了** ——
-							// 曾经它压根不进产物，CSS 预加载失败还会把界面打进错误边界。
-							tabPaddingLeft: cs.paddingLeft,
-							tabWidth: Math.round(tab.getBoundingClientRect().width),
-						};
-					}
-					if (i >= 38) {
-						return {
-							found: true,
-							canvas: office.querySelectorAll("canvas").length,
-							tabName: undefined,
-							text: (office.innerText || "").slice(0, 200),
-							note: `容器在但没等到工作表标签；面板头：${(office.querySelector(".preview-office-name")?.textContent ?? "?").trim()}`,
-						};
-					}
-				}
-				await new Promise((res) => setTimeout(res, 1000));
+	const r = await waitForComplete(
+		`xlsx 预览渲染出工作表标签「${XLSX_SHEET}」且 office-xlsx.css 生效`,
+		(sheetName) => {
+			const office = document.querySelector(".preview-office");
+			if (office === null) {
+				return { complete: false, found: false, stage: "no-container", sample: (document.body.innerText || "").slice(-300) };
 			}
-			return { found: false, sample: (document.body.innerText || "").slice(-300) };
+			// 表格是 **canvas** 绘制的，单元格文本不在 innerText 里 ——
+			// 所以断言不能看单元格内容，要看**只有真解析了工作簿才会出现**的
+			// 东西：底部的工作表标签（名字来自文件本身）。
+			const tab = office.querySelector(".luckysheet-sheets-item-name");
+			const tabName = tab === null ? null : (tab.textContent || "").trim();
+			// 这条样式只写在 office-xlsx.css 里（app.css 里 0 处）：
+			// 拿它证明**该 chunk 自己的样式表真的加载了** ——
+			// 曾经它压根不进产物，CSS 预加载失败还会把界面打进错误边界。
+			const paddingLeft = tab === null ? null : getComputedStyle(tab).paddingLeft;
+			const hrefs = [...document.styleSheets].map((s) => (s.href || "").split("/").pop());
+			const canvas = office.querySelectorAll("canvas").length;
+			return {
+				// **全部条件**就位才算完成：标签名（来自文件）+ canvas + 样式表已进文档
+				// 且计算值已生效。此前只等标签名，样式表晚一拍挂上时读到的就是旧值。
+				complete: tabName === sheetName && canvas > 0 && hrefs.includes("office-xlsx.css") && paddingLeft === "3px",
+				found: true,
+				stage: "container",
+				tabName,
+				canvas,
+				hrefs,
+				paddingLeft,
+				tabWidth: tab === null ? 0 : Math.round(tab.getBoundingClientRect().width),
+				note: `容器在但没等到工作表标签；面板头：${(office.querySelector(".preview-office-name")?.textContent ?? "?").trim()}`,
+			};
 		},
-		XLSX_SHEET,
+		{ arg: XLSX_SHEET },
 	);
+	// 先截图、后断言 —— 断言失败时图里才有出问题的那一屏
+	await h.shoot("xlsx-preview");
 	assert.ok(r.found, `没有出现 .preview-office —— xlsx 预览没打开。界面尾部：${r.sample}`);
 	assert.equal(r.tabName, XLSX_SHEET, `工作表标签不对（夹具里的表名就叫「${XLSX_SHEET}」）：${JSON.stringify(r.tabName)}。${r.note ?? ""}`);
-	assert.ok(r.canvas > 0, `没有 canvas —— 表格网格没画出来。${r.text ?? ""}`);
+	assert.ok(r.canvas > 0, `没有 canvas —— 表格网格没画出来`);
 	// 这条是**回归守卫**：样式表没进产物时这里会是 "0px"
+	// （轮询已把它纳入完成条件，这里再断言一次是为了把「期望值」写在断言里）
 	assert.equal(
-		r.tabPaddingLeft,
+		r.paddingLeft,
 		"3px",
-		`工作表标签的 padding-left 是 ${r.tabPaddingLeft}，不是 office-xlsx.css 里的 3px —— 该 chunk 的样式表没加载`,
+		`工作表标签的 padding-left 是 ${r.paddingLeft}，不是 office-xlsx.css 里的 3px —— 该 chunk 的样式表没加载。当前样式表：${JSON.stringify(r.hrefs)}`,
 	);
 	assert.ok(r.tabWidth > 0, "工作表标签宽度为 0 —— 有样式表但布局没生效");
 	console.log(`      xlsx 预览：${r.canvas} 个 canvas，工作表标签「${r.tabName}」（宽 ${r.tabWidth}px，样式表已生效）`);
 });
 
-await check("PPTX：预览容器出现且渲染出幻灯片文本", async () => {
+await h.check("PPTX：预览容器出现且渲染出幻灯片文本", async () => {
 	// 先关掉 xlsx 的预览标签回到文件列表 —— 面板在预览态下不显示文件树。
 	await closePreviewTab();
 	await clickFileRow(PPTX_NAME);
-	const r = await win.evaluate(
-		async (mark) => {
-			for (let i = 0; i < 40; i++) {
-				const office = document.querySelector(".preview-office");
-				if (office !== null && (office.innerText || "").includes(mark)) {
-					return { found: true, hasMark: true, textLen: (office.innerText || "").length };
-				}
-				await new Promise((res) => setTimeout(res, 1000));
-			}
+	const r = await waitForComplete(
+		`pptx 预览渲染出幻灯片文本 ${PPTX_MARK}`,
+		(mark) => {
 			const office = document.querySelector(".preview-office");
+			if (office === null) {
+				return { complete: false, found: false, stage: "no-container", sample: "(无容器)" };
+			}
+			const text = office.innerText || "";
 			return {
-				found: office !== null,
-				hasMark: false,
-				text: office === null ? "(无容器)" : (office.innerText || "").slice(0, 200),
-				html: office === null ? "" : office.innerHTML.slice(0, 300),
+				// 这里的「条件」与「断言」是同一件事（都看这段文本）—— 本来就没有
+				// 「条件 A 成立就断言副作用 B」的竞态，仍统一走同一个轮询，
+				// 好让失败时的状态快照格式一致。
+				complete: text.includes(mark),
+				found: true,
+				stage: "container",
+				hasMark: text.includes(mark),
+				textLen: text.length,
+				text: text.slice(0, 200),
+				html: office.innerHTML.slice(0, 300),
 			};
 		},
-		PPTX_MARK,
+		{ arg: PPTX_MARK, timeout: 45_000 },
 	);
+	await h.shoot("pptx-preview");
 	assert.ok(r.found, `没有出现 .preview-office —— pptx 预览没打开`);
 	assert.ok(
 		r.hasMark,
@@ -447,29 +511,34 @@ await check("PPTX：预览容器出现且渲染出幻灯片文本", async () => 
 	console.log(`      pptx 预览渲染出 ${r.textLen} 字符，含夹具文本 ${PPTX_MARK}`);
 });
 
-await check("CODE (.js)：monaco 渲染出源码，且 code-preview.css 生效", async () => {
+await h.check("CODE (.js)：monaco 渲染出源码，且 code-preview.css 生效", async () => {
 	await closePreviewTab();
 	await clickFileRow(JS_NAME);
-	const r = await win.evaluate(
-		async (mark) => {
-			for (let i = 0; i < 40; i++) {
-				const ed = document.querySelector(".monaco-editor");
-				if (ed !== null) {
-					const lines = [...document.querySelectorAll(".view-line")].map((n) => n.textContent || "").join("\n");
-					return {
-						found: true,
-						hasMark: lines.includes(mark),
-						lines: lines.slice(0, 200),
-						// 这条 position 只写在 code-preview.css 里（app.css 里 monaco-editor 出现 0 次）
-						position: getComputedStyle(ed).position,
-					};
-				}
-				await new Promise((res) => setTimeout(res, 1000));
+	const r = await waitForComplete(
+		`代码预览渲染出 ${JS_MARK} 且 code-preview.css 生效`,
+		(mark) => {
+			const ed = document.querySelector(".monaco-editor");
+			if (ed === null) {
+				return { complete: false, found: false, sample: (document.body.innerText || "").slice(-200) };
 			}
-			return { found: false, sample: (document.body.innerText || "").slice(-200) };
+			const lines = [...document.querySelectorAll(".view-line")].map((n) => n.textContent || "").join("\n");
+			const hasMark = lines.includes(mark);
+			// 这条 position 只写在 code-preview.css 里（app.css 里 monaco-editor 出现 0 次）
+			const position = getComputedStyle(ed).position;
+			return {
+				// 此前只要 `.monaco-editor` 一出现就返回，随后立刻断言 view-line 里有
+				// mark、position 是 relative —— 两件都可能在首帧之后才成立。
+				// 源码内容**与**该 chunk 自己的样式表都就位才算完成。
+				complete: hasMark && position === "relative",
+				found: true,
+				hasMark,
+				lines: lines.slice(0, 200),
+				position,
+			};
 		},
-		JS_MARK,
+		{ arg: JS_MARK },
 	);
+	await h.shoot("code-preview");
 	assert.ok(r.found, `没出现 .monaco-editor —— 代码预览没渲染。界面尾部：${r.sample}`);
 	assert.ok(r.hasMark, `编辑器里没有夹具代码里的 ${JS_MARK}。首行：${JSON.stringify(r.lines)}`);
 	assert.equal(
@@ -480,26 +549,38 @@ await check("CODE (.js)：monaco 渲染出源码，且 code-preview.css 生效",
 	console.log(`      .js 预览：monaco 渲染出源码，样式表已生效`);
 });
 
-await check("CONFIG (.json)：json-mode 按需加载，且 json-mode.css 进了文档", async () => {
+await h.check("CONFIG (.json)：json-mode 按需加载，且 json-mode.css 进了文档", async () => {
 	await closePreviewTab();
 	await clickFileRow(JSON_NAME);
-	const r = await win.evaluate(
-		async (mark) => {
-			for (let i = 0; i < 40; i++) {
-				const lines = [...document.querySelectorAll(".view-line")].map((n) => n.textContent || "").join("\n");
-				if (lines.includes(mark)) {
-					// 加载失败的样式表**不会**出现在 document.styleSheets 里，
-					// 所以「在不在这个列表里」就是「加载成没成功」的判据。
-					const hrefs = [...document.styleSheets].map((s) => (s.href || "").split("/").pop());
-					return { found: true, hrefs, hasJsonCss: hrefs.includes("json-mode.css") };
-				}
-				await new Promise((res) => setTimeout(res, 1000));
+	const r = await waitForComplete(
+		`json 预览渲染出 ${JSON_MARK} 且 json-mode.css 进了文档`,
+		(mark) => {
+			const ed = document.querySelector(".monaco-editor");
+			if (ed === null) {
+				return { complete: false, found: false, sample: (document.body.innerText || "").slice(-200) };
 			}
-			return { found: false, sample: (document.body.innerText || "").slice(-200) };
+			const lines = [...document.querySelectorAll(".view-line")].map((n) => n.textContent || "").join("\n");
+			const hasMark = lines.includes(mark);
+			// 加载失败的样式表**不会**出现在 document.styleSheets 里，
+			// 所以「在不在这个列表里」就是「加载成没成功」的判据。
+			const hrefs = [...document.styleSheets].map((s) => (s.href || "").split("/").pop());
+			const hasJsonCss = hrefs.includes("json-mode.css");
+			return {
+				// ⚠️ 这一条就是 CI 上偶发红的那处：原来只等内容出现，然后**立刻**读样式表。
+				// 内容与样式表都就位才算完成 —— CI 上遇到的正是「文本先出、CSS 后到」。
+				complete: hasMark && hasJsonCss,
+				found: true,
+				hasMark,
+				hasJsonCss,
+				hrefs,
+				lines: lines.slice(0, 200),
+			};
 		},
-		JSON_MARK,
+		{ arg: JSON_MARK },
 	);
-	assert.ok(r.found, `编辑器里没出现 ${JSON_MARK} —— json 预览没渲染。界面尾部：${r.sample}`);
+	await h.shoot("json-preview");
+	assert.ok(r.found, `没出现 .monaco-editor —— json 预览没渲染。界面尾部：${r.sample}`);
+	assert.ok(r.hasMark, `编辑器里没出现 ${JSON_MARK}。首行：${JSON.stringify(r.lines)}`);
 	assert.ok(
 		r.hasJsonCss,
 		`文档里没有 json-mode.css（按需加载的样式表没进来）。当前样式表：${JSON.stringify(r.hrefs)}`,
@@ -507,7 +588,7 @@ await check("CONFIG (.json)：json-mode 按需加载，且 json-mode.css 进了�
 	console.log(`      .json 预览：json-mode.css 已随按需加载进入文档`);
 });
 
-await check("构建产物里三份 chunk 样式表都在（这是上游前提）", () => {
+await h.check("构建产物里三份 chunk 样式表都在（这是上游前提）", () => {
 	// 界面侧断言只能证明「样式表加载成功了」，证明不了「它被构建出来了」。
 	// 这一条守住构建侧：产物里必须有这三份 —— 它们正是曾经完全缺失的那三份。
 	const assetsDir = resolve(ROOT, "out", "renderer", "assets");
@@ -521,16 +602,10 @@ await check("构建产物里三份 chunk 样式表都在（这是上游前提）
 	console.log(`      产物样式表：app.css + office-xlsx.css / code-preview.css / json-mode.css`);
 });
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 文件预览渲染器测试 ═══");
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-}
-const failed = results.filter(([s]) => s === "FAIL").length;
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
-
-await app.close();
+// 先关应用再关 mock：应用一关，daemon 与 mock 之间的长连接才会断开，
+// server.close() 才不会一直等在那儿。
+await h.app().close();
 await mock.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();

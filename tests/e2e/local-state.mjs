@@ -22,62 +22,45 @@
  * ⚠️ 与其余 e2e 一致：`ZEROWORK_CONFIG_DIR` 与 `ZEROWORK_WORKSPACE_DIR`
  *    都指向 /tmp 下的隔离目录。画像 / 记忆 / 偏好这些是**用户真实数据**，
  *    不隔离就会把本机配置写坏。
+ *
+ * 迁移说明（共享 harness）：骨架（隔离目录、启动等待、check 收集器、末尾报告与
+ * 退出码）全部来自 `./lib/harness.mjs` —— 隔离目录改由 `name` 派生，
+ * 所以下面断言工作区路径时用的是 `h.WORKSPACE_DIR` 的特征串而非旧目录名。
  */
-import { _electron as electron } from "playwright";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import assert from "node:assert/strict";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, "..", "..");
-const CONFIG_DIR = "/tmp/zerowork-localstate";
-const WORKSPACE_DIR = "/tmp/zerowork-localstate-ws";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { createHarness } from "./lib/harness.mjs";
 
 const MARK = "ZW_STATE_MARK_7f3a";
 
-rmSync(CONFIG_DIR, { recursive: true, force: true });
-rmSync(WORKSPACE_DIR, { recursive: true, force: true });
-mkdirSync(WORKSPACE_DIR, { recursive: true });
-writeFileSync(resolve(WORKSPACE_DIR, "probe.txt"), "zw-local-state\n", "utf8");
+const h = createHarness({ name: "local-state" });
 
-const results = [];
-const check = async (name, fn) => {
-	try {
-		await fn();
-		results.push(["PASS", name, ""]);
-	} catch (e) {
-		results.push(["FAIL", name, String(e.message ?? e).slice(0, 260)]);
-	}
-};
+// harness 负责隔离与清空工作区根目录，目录与夹具文件要由用例自己建出来
+// （probe.txt 用于 statPath 的「文件 / 目录 / 不存在」三态断言，必须在启动前就位）
+mkdirSync(h.WORKSPACE_DIR, { recursive: true });
+writeFileSync(resolve(h.WORKSPACE_DIR, "probe.txt"), "zw-local-state\n", "utf8");
 
-const app = await electron.launch({
-	args: [ROOT],
-	env: {
-		...process.env,
-		ZEROWORK_CONFIG_DIR: CONFIG_DIR,
-		ZEROWORK_RESOURCES_DIR: resolve(ROOT, "resources"),
-		ZEROWORK_WORKSPACE_DIR: WORKSPACE_DIR,
-	},
-	timeout: 120_000,
-});
+/** 隔离工作区目录名里的特征串：断言「路径真的写进去了」时用它，不写死绝对路径。 */
+const WS_TAG = "local-state";
 
-const pageErrors = [];
-const win = await app.firstWindow({ timeout: 120_000 });
-win.on("pageerror", (e) => pageErrors.push(String(e)));
-await win.waitForLoadState("domcontentloaded");
-await win.waitForTimeout(9000);
+await h.launch();
+const win = h.window();
 
 // 后续多数接口都相对「当前工作区」解析路径，先钉住工作区。
 await win.evaluate(async (ws) => {
 	await globalThis.kami.setWorkspace(ws);
-}, WORKSPACE_DIR);
+}, h.WORKSPACE_DIR);
+
+// 首屏留证：本文件会对设置里的几十项做真实读写往返，
+// 界面若在这中间崩掉（白屏 / 错误边界），这张图是崩之前的现场。
+await h.check("首屏画面已渲染", () => h.shoot("local-state-home"));
 
 const json = (v) => JSON.stringify(v);
 
 // ── ① 设置往返 ─────────────────────────────────────────────
 
-await check("设置：回复风格切换后生效并可还原", async () => {
+await h.check("设置：回复风格切换后生效并可还原", async () => {
 	const styles = await win.evaluate(async () => (await globalThis.kami.getStyle()).styles.map((s) => s.id));
 	assert.ok(styles.length >= 2, `可用风格不足 2 种，无法做切换断言：${styles.join(", ")}`);
 	const r = await win.evaluate(async (all) => {
@@ -95,7 +78,7 @@ await check("设置：回复风格切换后生效并可还原", async () => {
 	assert.equal(r.restored, r.before, `还原失败：期望 ${r.before}，实际 ${r.restored}`);
 });
 
-await check("设置：非法风格被拒绝", async () => {
+await h.check("设置：非法风格被拒绝", async () => {
 	const r = await win.evaluate(async () => {
 		try {
 			await globalThis.kami.setStyle("__no_such_style__");
@@ -108,7 +91,7 @@ await check("设置：非法风格被拒绝", async () => {
 	assert.ok(/风格/.test(r.err), `拒绝理由不明确：${r.err}`);
 });
 
-await check("设置：推理强度默认档切换后生效并可还原", async () => {
+await h.check("设置：推理强度默认档切换后生效并可还原", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const before = (await k.getThinkingLevelDefault()).level;
@@ -122,7 +105,7 @@ await check("设置：推理强度默认档切换后生效并可还原", async (
 	assert.equal(r.restored, r.before, "还原失败");
 });
 
-await check("设置：非法推理强度档位被拒绝", async () => {
+await h.check("设置：非法推理强度档位被拒绝", async () => {
 	const r = await win.evaluate(async () => {
 		try {
 			await globalThis.kami.setThinkingLevelDefault("__turbo__");
@@ -134,7 +117,7 @@ await check("设置：非法推理强度档位被拒绝", async () => {
 	assert.ok(r.rejected, "未知档位应被拒绝");
 });
 
-await check("设置：记忆开关切换后生效并可还原", async () => {
+await h.check("设置：记忆开关切换后生效并可还原", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const before = (await k.getMemoryEnabled()).enabled;
@@ -147,7 +130,7 @@ await check("设置：记忆开关切换后生效并可还原", async () => {
 	assert.equal(r.restored, r.before, "还原失败");
 });
 
-await check("记忆：开关联动内置「记忆整理」任务（创建 / 转 paused / 不删除）", async () => {
+await h.check("记忆：开关联动内置「记忆整理」任务（创建 / 转 paused / 不删除）", async () => {
 	// 记忆整理是**内置定时任务**（`builtin: true`）：开启记忆时创建它、关闭时把它转
 	// 成 paused（不是删掉 —— 关掉开关不该把用户的自定义改动一起丢掉）。
 	// 这条是纯本地状态联动，不需要模型。
@@ -180,7 +163,7 @@ await check("记忆：开关联动内置「记忆整理」任务（创建 / 转 
 	console.log(`      内置任务「${r.on.name}」：开启 ${r.on.status} / 关闭 ${r.off.status}`);
 });
 
-await check("设置：记忆正文写入后可读回并可还原", async () => {
+await h.check("设置：记忆正文写入后可读回并可还原", async () => {
 	const r = await win.evaluate(
 		async (mark) => {
 			const k = globalThis.kami;
@@ -196,7 +179,7 @@ await check("设置：记忆正文写入后可读回并可还原", async () => {
 	assert.equal(r.restored.length, r.beforeLen, "还原失败（长度不符）");
 });
 
-await check("设置：用户画像写入 → 读回 → 重置 → 变空", async () => {
+await h.check("设置：用户画像写入 → 读回 → 重置 → 变空", async () => {
 	const r = await win.evaluate(
 		async (mark) => {
 			const k = globalThis.kami;
@@ -215,7 +198,7 @@ await check("设置：用户画像写入 → 读回 → 重置 → 变空", asyn
 	assert.equal(r.restored, r.before, "还原后画像与写入前不一致");
 });
 
-await check("设置：个性化（昵称/助手名）写入后可读回并还原", async () => {
+await h.check("设置：个性化（昵称/助手名）写入后可读回并还原", async () => {
 	const r = await win.evaluate(
 		async (mark) => {
 			const k = globalThis.kami;
@@ -234,7 +217,7 @@ await check("设置：个性化（昵称/助手名）写入后可读回并还原
 	assert.ok(String(r.after.assistantName).includes(MARK), `助手名未读回：${json(r.after).slice(0, 160)}`);
 });
 
-await check("设置：权限档位可读、可写同值、非法档位被拒", async () => {
+await h.check("设置：权限档位可读、可写同值、非法档位被拒", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const before = await k.getPermissions();
@@ -256,7 +239,7 @@ await check("设置：权限档位可读、可写同值、非法档位被拒", a
 	assert.ok(/权限范围|sandbox/.test(r.err), `拒绝理由不明确：${r.err}`);
 });
 
-await check("设置：Agent 团队开关切换后生效并可还原", async () => {
+await h.check("设置：Agent 团队开关切换后生效并可还原", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const before = await k.getAgentTeamsEnabled();
@@ -272,7 +255,7 @@ await check("设置：Agent 团队开关切换后生效并可还原", async () =
 	assert.equal(r.restored, r.b, "还原失败");
 });
 
-await check("设置：默认工作区路径写入后可读回并还原", async () => {
+await h.check("设置：默认工作区路径写入后可读回并还原", async () => {
 	// 真实形状是 { effective, custom, isDefault }：effective = 生效根，
 	// custom = 用户显式设置的那个（未设则为 undefined）。
 	const r = await win.evaluate(
@@ -291,15 +274,15 @@ await check("设置：默认工作区路径写入后可读回并还原", async (
 				restCustom: rest.custom ?? null,
 			};
 		},
-		WORKSPACE_DIR,
+		h.WORKSPACE_DIR,
 	);
-	assert.ok(String(r.midCustom ?? "").includes("localstate-ws"), `自定义路径未写入：${JSON.stringify(r)}`);
+	assert.ok(String(r.midCustom ?? "").includes(WS_TAG), `自定义路径未写入：${JSON.stringify(r)}`);
 	assert.equal(r.midIsDefault, false, "写入后 isDefault 应为 false");
-	assert.ok(String(r.midEffective ?? "").includes("localstate-ws"), `生效根未跟随：${r.midEffective}`);
+	assert.ok(String(r.midEffective ?? "").includes(WS_TAG), `生效根未跟随：${r.midEffective}`);
 	assert.equal(r.restCustom, r.beforeCustom, "还原失败");
 });
 
-await check("设置：Web 搜索配置保存 → 可读 → 清除 → 变空", async () => {
+await h.check("设置：Web 搜索配置保存 → 可读 → 清除 → 变空", async () => {
 	// 注意：getWebSearchConfig **只回传 providerId 与 hasKey**，不回传 key 本身
 	// （凭据不该往渲染层送）。所以这里能验证的往返就到「读得出/读不出」为止。
 	const r = await win.evaluate(async () => {
@@ -316,7 +299,7 @@ await check("设置：Web 搜索配置保存 → 可读 → 清除 → 变空", 
 	assert.equal(r.cleared.hasKey, false, "清除后 hasKey 应为 false");
 });
 
-await check("设置：Web 搜索空 API Key 被拒绝", async () => {
+await h.check("设置：Web 搜索空 API Key 被拒绝", async () => {
 	const r = await win.evaluate(async () => {
 		try {
 			await globalThis.kami.setWebSearchConfig({ providerId: "bocha", apiKey: "   " });
@@ -330,7 +313,7 @@ await check("设置：Web 搜索空 API Key 被拒绝", async () => {
 
 // ── ② 工作区管理 ───────────────────────────────────────────
 
-await check("工作区：创建后出现在快照，移除不删磁盘目录", async () => {
+await h.check("工作区：创建后出现在快照，移除不删磁盘目录", async () => {
 	// ⚠️ 两条容易误判的语义，都在这里钉死：
 	//
 	// 1) `snapshot.workspaces` 是**根目录的 readdir 结果**（listWorkspaces），
@@ -365,7 +348,7 @@ await check("工作区：创建后出现在快照，移除不删磁盘目录", a
 	assert.equal(r.stillThere, "directory", `移除不该删掉用户目录，实际 ${r.stillThere}`);
 });
 
-await check("工作区：显示名校验拦住非法输入", async () => {
+await h.check("工作区：显示名校验拦住非法输入", async () => {
 	// ⚠️ 改名的**读回**路径依赖 listWorkspaceGroups()，而它的 cwd 列表取自
 	// **会话文件**（listSessions）—— 新建的空间还没有会话，所以无模型时
 	// 读不回显示名。这里覆盖能测的部分：校验规则本身。
@@ -397,7 +380,7 @@ await check("工作区：显示名校验拦住非法输入", async () => {
 	);
 });
 
-await check("工作区：git 分支列表可读（非仓库时也不崩）", async () => {
+await h.check("工作区：git 分支列表可读（非仓库时也不崩）", async () => {
 	const r = await win.evaluate(async (ws) => {
 		try {
 			const b = await globalThis.kami.worktreeBranches(ws);
@@ -405,7 +388,7 @@ await check("工作区：git 分支列表可读（非仓库时也不崩）", asy
 		} catch (e) {
 			return { ok: false, err: String(e?.message ?? "").slice(0, 160) };
 		}
-	}, WORKSPACE_DIR);
+	}, h.WORKSPACE_DIR);
 	// 该目录不是 git 仓库 —— 契约是「给出明确回应」，不是「必须列出分支」
 	assert.ok(r.ok || r.err.length > 0, "分支列表既没返回也没给出错误说明");
 	if (r.ok) console.log(`      分支列表: ${r.shape}`);
@@ -413,7 +396,7 @@ await check("工作区：git 分支列表可读（非仓库时也不崩）", asy
 
 // ── ③ 会话与统计 ───────────────────────────────────────────
 
-await check("会话：列表 / 补全项 / 隐藏上下文可读", async () => {
+await h.check("会话：列表 / 补全项 / 隐藏上下文可读", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const list = await k.listSessions();
@@ -440,7 +423,7 @@ await check("会话：列表 / 补全项 / 隐藏上下文可读", async () => {
 	);
 });
 
-await check("统计：快照 / 用量 / 运行台账可读", async () => {
+await h.check("统计：快照 / 用量 / 运行台账可读", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const snap = await k.statsSnapshot();
@@ -465,7 +448,7 @@ await check("统计：快照 / 用量 / 运行台账可读", async () => {
 	console.log(`      统计快照样例: ${r.sample}`);
 });
 
-await check("审计：列表可读、导出有内容、清空后只剩「已清空」这一条", async () => {
+await h.check("审计：列表可读、导出有内容、清空后只剩「已清空」这一条", async () => {
 	// ⚠️ 清空**不是**变成 0 条 —— clearAuditRecords 删完文件后会立刻补写一条
 	// `category: "audit", outcome: "cleared"` 的记录。这是**有意的安全设计**：
 	// 「擦除审计日志」本身必须留下痕迹，否则谁都能悄悄清干净。
@@ -495,7 +478,7 @@ await check("审计：列表可读、导出有内容、清空后只剩「已清�
 
 // ── ④ 自动化任务 CRUD ──────────────────────────────────────
 
-await check("自动化：保存 → 列表含之 → 启停 → 删除 → 列表不含", async () => {
+await h.check("自动化：保存 → 列表含之 → 启停 → 删除 → 列表不含", async () => {
 	// 注意 API 名：暴露出来的是 listAutomations / saveAutomation /
 	// toggleAutomation / deleteAutomation（不是 automationXxx —— 那是通道常量名）。
 	const r = await win.evaluate(
@@ -523,7 +506,7 @@ await check("自动化：保存 → 列表含之 → 启停 → 删除 → 列�
 				goneAfterDelete: !afterDelete.some((t) => t.id === task.id),
 			};
 		},
-		{ ws: WORKSPACE_DIR, mark: "7f3a" },
+		{ ws: h.WORKSPACE_DIR, mark: "7f3a" },
 	);
 	assert.ok(r.savedId, "保存后未返回任务 id");
 	assert.ok(r.found, "保存的任务未出现在列表里");
@@ -532,7 +515,7 @@ await check("自动化：保存 → 列表含之 → 启停 → 删除 → 列�
 	console.log(`      保存时 ${r.savedStatus} → 启停后 ${r.statusAfterToggle}`);
 });
 
-await check("自动化：非法入参被拒绝（空名称 / 空内容 / 非法周期）", async () => {
+await h.check("自动化：非法入参被拒绝（空名称 / 空内容 / 非法周期）", async () => {
 	const r = await win.evaluate(async (ws) => {
 		const k = globalThis.kami;
 		const bad = [
@@ -551,7 +534,7 @@ await check("自动化：非法入参被拒绝（空名称 / 空内容 / 非法�
 			}
 		}
 		return { rejected, labels };
-	}, WORKSPACE_DIR);
+	}, h.WORKSPACE_DIR);
 	assert.equal(
 		r.rejected.length,
 		r.labels.length,
@@ -561,7 +544,7 @@ await check("自动化：非法入参被拒绝（空名称 / 空内容 / 非法�
 
 // ── ⑤ 技能开关 ─────────────────────────────────────────────
 
-await check("技能：停用后快照里状态变掉，再启用可还原", async () => {
+await h.check("技能：停用后快照里状态变掉，再启用可还原", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const items = (s) => s?.skills ?? s?.items ?? [];
@@ -583,7 +566,7 @@ await check("技能：停用后快照里状态变掉，再启用可还原", asyn
 
 // ── ⑥ 诊断与路径接口 ───────────────────────────────────────
 
-await check("诊断：docx 环境状态 / 全局快捷键状态可读", async () => {
+await h.check("诊断：docx 环境状态 / 全局快捷键状态可读", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const docx = await k.docxEnvStatus();
@@ -595,7 +578,7 @@ await check("诊断：docx 环境状态 / 全局快捷键状态可读", async ()
 	console.log(`      docx 环境: ${r.sample}`);
 });
 
-await check("诊断：专家清单 / 团队任务可读", async () => {
+await h.check("诊断：专家清单 / 团队任务可读", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const experts = await k.listExperts();
@@ -608,12 +591,12 @@ await check("诊断：专家清单 / 团队任务可读", async () => {
 	console.log(`      专家 ${r.count} 位，例如：${r.names.join("、")}`);
 });
 
-await check("路径：statPath 区分文件 / 目录 / 不存在", async () => {
+await h.check("路径：statPath 区分文件 / 目录 / 不存在", async () => {
 	// ⚠️ statPath 的相对路径是相对 **会话桶的 cwd**（任务目录）解析的，
 	// 不是相对工作区 —— 所以这里传绝对路径。契约是
 	// { kind: "file" | "directory" | "missing" }：不存在也是**正常返回值**、
 	// 不抛错（调用方要靠它决定「先读还是先建」）。
-	const probe = resolve(WORKSPACE_DIR, "probe.txt");
+	const probe = resolve(h.WORKSPACE_DIR, "probe.txt");
 	const r = await win.evaluate(
 		async ({ file, dir }) => {
 			const k = globalThis.kami;
@@ -623,14 +606,14 @@ await check("路径：statPath 区分文件 / 目录 / 不存在", async () => {
 				missing: (await k.statPath(`${dir}/__definitely_missing__.txt`))?.kind,
 			};
 		},
-		{ file: probe, dir: WORKSPACE_DIR },
+		{ file: probe, dir: h.WORKSPACE_DIR },
 	);
 	assert.equal(r.file, "file", `probe.txt 应识别为文件，实际 ${r.file}`);
 	assert.equal(r.dir, "directory", `工作区目录应识别为目录，实际 ${r.dir}`);
 	assert.equal(r.missing, "missing", `不存在的路径应返回 missing，实际 ${r.missing}`);
 });
 
-await check("路径：预览服务地址可读", async () => {
+await h.check("路径：预览服务地址可读", async () => {
 	const r = await win.evaluate(async (ws) => {
 		try {
 			const u = await globalThis.kami.previewBaseUrl(ws);
@@ -638,12 +621,12 @@ await check("路径：预览服务地址可读", async () => {
 		} catch (e) {
 			return { ok: false, err: String(e?.message ?? "").slice(0, 160) };
 		}
-	}, WORKSPACE_DIR);
+	}, h.WORKSPACE_DIR);
 	assert.ok(r.ok, `预览地址不可读：${r.err}`);
 	console.log(`      预览地址: ${r.value}`);
 });
 
-await check("会话：abort / rewriteQueue 空操作不炸", async () => {
+await h.check("会话：abort / rewriteQueue 空操作不炸", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		let abortErr = "";
@@ -665,15 +648,9 @@ await check("会话：abort / rewriteQueue 空操作不炸", async () => {
 	assert.equal(r.rewriteErr, "", `重写空队列报错：${r.rewriteErr}`);
 });
 
-await check("无渲染层未捕获异常", () => assert.equal(pageErrors.length, 0, pageErrors.join("; ")));
+await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
-// ── 报告 ─────────────────────────────────────────────
-console.log("\n═══ 本地状态读写测试（不需模型）═══");
-for (const [status, name, msg] of results) {
-	console.log(`  [${status}] ${name}${msg ? `  —— ${msg}` : ""}`);
-}
-const failed = results.filter(([s]) => s === "FAIL").length;
-console.log(`\n通过 ${results.length - failed}/${results.length}`);
+// 几十项设置往返跑完，界面还活着吗 —— 收尾前再留一张现场图
+await h.check("收尾画面已渲染", () => h.shoot("local-state-final"));
 
-await app.close();
-process.exit(failed === 0 ? 0 : 1);
+await h.finish();
