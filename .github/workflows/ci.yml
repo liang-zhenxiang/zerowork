@@ -115,7 +115,7 @@ jobs:
       # Electron 的约 100 MB 二进制由 @electron/get 下载到这几个目录，
       # **不在 setup-node 的 npm 缓存覆盖范围内** —— 不单独缓存的话每个 job 各下一次。
       - name: 缓存 Electron 二进制
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/electron
@@ -157,7 +157,7 @@ jobs:
           cache: npm
 
       - name: 缓存 Electron 二进制
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/electron
@@ -208,7 +208,7 @@ jobs:
           cache: npm
 
       - name: 缓存 Electron 二进制
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v6.1.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cache/electron
