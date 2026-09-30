@@ -215,6 +215,61 @@
   > 这类错误的日志**根本不存在**（0 个 job），必须去 workflow run 页面看注解，
   > 而不是从日志里找 —— 我为此多花了两轮
 
+### 变更
+
+- **过渡缓动收敛到 `--ease-standard`**。`app.css` 里散着 49 个裸 `ease`
+  （CSS 关键字，`cubic-bezier(0.25, 0.1, 0.25, 1)`），而 `docs/DESIGN.md` §3
+  规定变色与纯视觉反馈一律走 `--ease-standard`（=`ease-out`，另一条曲线）。
+  两条曲线混用，同样的 150ms 在不同控件上手感不一致。现全部收口，
+  `rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'`
+  命中数为 0。规则与守卫命令写进 `docs/DESIGN.md` §3.2
+
+  涉及 `background` / `color` / `box-shadow` / `transform` / `opacity` /
+  `border-color` / `scrollbar-color` / `stroke-dashoffset`，以及两处布局属性
+  例外（面板 `width`、文档盒 `height`）。**不改变时长档位，也不改动画**
+  （animation 仍走 `--ease-out`），所以是纯一致性改动
+
+### 修复
+
+- **界面显示的版本号是 `0.1.4`，而 `package.json` 是 `0.2.1`** —— 用户在侧栏
+  品牌行与「设置 → 关于」看到的是一个**根本不存在的版本**（`0.1.4` 是开源前的
+  内部编号，按 semver 还小于已发布的 `0.2.0`）。根因是版本号在渲染层被**写死了
+  两处字面量**，发版时没有跟着走。
+
+  改为**构建期注入**：版本从 `package.json` 读一次，经 Vite 的
+  `renderer.define` 替换 `__APP_VERSION__`（dev 与 build 都生效，同步、零运行时
+  开销）。单一真源只剩 `package.json` 一处。
+
+  并加自动守卫 —— `npm run check:renderer-assets` 现在同时校验「产物 `app.js`
+  里含当前版本号」。之所以校验**产物**而不是扫源码里的 semver 字面量：后者会
+  被依赖自带的版本字符串误伤。这条守着的是「只有构建之后才能验证」的渲染层契约，
+  与它原本守的产物命名契约同一性质
+
+- **「减弱动态效果」在应用里基本没生效**。系统开启 `prefers-reduced-motion:
+  reduce` 后，全应用的 15 个 `@keyframes` 里只有 1 个被停掉（`.turn-nav`），
+  其余照放 —— 转圈、首页标题的逐字打字机、状态行的扫光、工具点的呼吸脉冲
+  都还在动。对前庭敏感的用户，这正是最该关掉的那几种（无限循环 + 大面积）。
+
+  现覆盖全部 15 个关键帧的宿主：无限循环的 4 处一律停掉，33 个一次性入场动画
+  一并关掉，打字机与光标按终态处理（见下条）
+
+  规则块从文件**中段移到末尾** —— `@media` 不提高优先级，同级选择器靠源码顺序
+  裁决，放中段会被后文那些动画声明盖掉
+
+- **关掉动画后，首页标题会永久不可见**（同一处改动里必须一并处理）。
+  `.home-title-char` 的基础态是 `opacity: 0`，靠动画淡入到 1（`both` 填充）——
+  只写 `animation: none` 就等于让首页标题消失。所以规则块里**同时显式写出终态**
+  `opacity: 1`；光标 `.home-title-caret` 的终态是「收笔后隐」，显式给 `opacity: 0`，
+  而不是停成一支恒亮的光标。
+
+  同理 `.text-shimmer`：扫光一停，文字会停在「背景定位 0%、被 `background-clip:
+  text` 裁在 26% 极浅色上」的基础态（实测几乎读不出来），故改回实色
+
+  这条有 e2e 防线：`tests/e2e/gui-smoke.mjs` 以 `reducedMotion: 'reduce'` 断言
+  「标题文字非空且 `opacity` 为 1」「`.spinner` / `.text-shimmer` 的
+  `animation-name` 为 `none`」，并先用未开启状态做反向对照。
+  **去掉终态那一行，断言会变红** —— 陷阱是真的，不是推测
+
 ---
 
 ## [0.2.1] - 2026-09-30
