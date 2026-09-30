@@ -12,6 +12,16 @@ import {
   OFFICE_EXTENSIONS,
   docKindOf,
 } from "../shared/ipc.js";
+/**
+ * 应用的唯一标识。**必须与 `electron-builder.yml` 的 `appId` 完全一致** ——
+ * 那个值是安装器的身份（macOS 的 CFBundleIdentifier、Windows 的 AUMID、
+ * NSIS 升级用的 GUID 都由它派生），这里是运行时那一半。
+ *
+ * 不一致时 Windows 上会出问题：安装器把快捷方式的 AUMID 设成 `appId`，
+ * 而应用自己报的是另一个值 —— 任务栏固定项与通知分组就对不上了。
+ * `npm run check:app-id` 会守住这条一致性。
+ */
+const APP_ID = "io.github.liang-zhenxiang.zerowork";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const MENU_BAR_ITEMS = [
   { id: "about", label: "关于", mnemonic: "A" },
@@ -437,6 +447,9 @@ if (!app.requestSingleInstanceLock()) {
     window.focus();
   });
   void app.whenReady().then(() => {
+    // 与安装器对齐 Windows 的 Application User Model ID（见上方 APP_ID 的注释）。
+    // 非 Windows 平台上这是 no-op —— Electron 的文档里标了 `@platform win32`。
+    app.setAppUserModelId(APP_ID);
     installCsp(process.env["ELECTRON_RENDERER_URL"] !== void 0);
     registerIpc();
     startDaemon();

@@ -111,6 +111,7 @@ function main() {
 	runCheck('ESLint', NPM, ['run', '--silent', 'lint']);
 	runCheck('Prettier（工具链与工作流）', NPM, ['run', '--silent', 'format:check']);
 	runCheck('TypeScript 类型检查', NPM, ['run', '--silent', 'typecheck']);
+	runCheck('应用标识一致性', process.execPath, ['scripts/check-app-id.mjs']);
 	runCheck('文档有效性', process.execPath, ['scripts/check-docs.mjs']);
 	runCheck('随包内容完整性', process.execPath, ['scripts/check-resources.mjs']);
 	runCheck('行尾一致性', process.execPath, ['scripts/check-line-endings.mjs']);

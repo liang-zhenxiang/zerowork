@@ -68,6 +68,7 @@
     "test:all": "npm run lint:all && npm run test && npm run test:gui",
     "lint:all": "node scripts/lint.mjs",
     "check:daemon-graph": "node tools/check-daemon-graph.mjs",
+    "check:app-id": "node scripts/check-app-id.mjs",
     "check:commit-msg": "node scripts/check-commit-msg.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:resources": "node scripts/check-resources.mjs",

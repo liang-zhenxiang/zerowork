@@ -73,6 +73,11 @@ jobs:
       - name: 校验 daemon 模块图
         run: npm run check:daemon-graph
 
+      # 安装器的 appId 与运行时的 APP_ID 必须一致 —— 不一致时**只在 Windows 上出问题**，
+      # 而开发机多半是 macOS，所以这条要靠机器守
+      - name: 校验应用标识一致性
+        run: npm run check:app-id
+
       - name: 校验文档有效性
         run: npm run check:docs
 
