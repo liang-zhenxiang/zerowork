@@ -471,6 +471,57 @@ gh release view vX.Y.Z                 # 5. 验证正文开头是本轮主题句
 先看 `zizmor` 有没有报新的 findings —— 它抓的是**工作流本身**的问题
 （权限过宽、表达式注入、`uses:` 没 pin），这些在本地跑业务代码是复现不出来的。
 
+### 发布流水线起不来（`startup_failure`）
+
+**症状**：推了 tag，但 `gh run list --workflow=release.yml` 显示
+`completed/startup_failure`，而且 `gh run view <id>` **一个 job 都没有**。
+
+**这类错误的日志根本不存在** —— `gh run view --log` 会说「log not found」。
+错误在 **workflow run 的页面上以注解形式**显示，用 API 拿不到
+（`startup_failure` 不产生 check run）。所以只能打开那个 run 的网页看。
+
+本项目真实踩过一次，注解原文：
+
+```
+Invalid workflow file: .github/workflows/release.yml#L307
+The workflow is not valid.
+The job is requesting 'attestations: write, id-token: write',
+but is only allowed 'attestations: none, id-token: none'
+```
+
+**根因**：`release.yml` 里 `installers` 这个 job 用 `uses:` 调用
+`build-installers.yml`，而它只声明了 `permissions: contents: read`。
+**调用方的 `permissions` 是「被调工作流的上限」** —— 不是「只声明我自己要用的」。
+被调的 workflow 里有 job 要 `id-token: write` + `attestations: write`
+（生成构建溯源证明），上限不够就整个工作流校验失败。
+
+修法是给调用方补上那两项：
+
+```yaml
+  installers:
+    uses: ./.github/workflows/build-installers.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+```
+
+**为什么它藏了这么久**：这个缺陷是「加溯源证明」那次改动引入的，
+而它**只在 tag 触发、且走到那条 `uses:` 调用路径时**才暴露 —— 那之后没有发布过，
+所以直到下一次发版才第一次跑到。**每次动 release.yml 之后，最可靠的验证仍然是
+真的打一个 tag 走一遍**（或至少用一个临时 tag 试）。
+
+**排查时我误判过两次**，教训值得记下来：
+
+1. 先怀疑是 `uses:` 用了 `$/`（自仓库引用语法），改成 `./` —— 问题依旧。
+   我当时是靠「同一 commit 上其他工作流都跑得通」做排除法的，
+   但**那个推理有漏洞**：其他工作流都不调用可复用工作流，
+   所以「差别只在那一行」这个结论并不成立。排除法要能覆盖所有差异，否则只是猜
+2. 两轮之后才想到**去看 run 页面上的注解** —— 而答案一直写在那里
+
+**结论：症状里已经给了线索（0 个 job = 启动阶段就被拒 = 工作流校验失败），
+就该直接去找校验错误，而不是从「最近改了什么」开始猜。**
+
 ### 发布出问题
 
 | 症状 | 处理 |

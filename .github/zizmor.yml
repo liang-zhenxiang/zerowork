@@ -55,20 +55,21 @@ rules:
   # release.yml 用 `./.github/workflows/build-installers.yml` 调用同仓库的可复用工作流，
   # 而 zizmor 建议改用 `$/`（自仓库引用语法：无歧义、解析到当前运行的 commit）。
   #
-  # **这里不用它，是实测的结果**：`$/` 会让 release.yml 在 tag 触发时直接
-  # `startup_failure` —— 推上 v0.2.1 的 tag 之后，这次 run **0 个 job 就结束了**，
-  # `startup_failure` —— 推上 v0.2.1 的 tag 之后，这次 run **0 个 job 就结束了**，
-  # 都跑得通，说明不是仓库的 Actions 策略问题，差别就在这一行。
+  # 这里保留 `./`，理由是**工具链的一致性**：actionlint 不认识 `$/` 的 `uses` 格式
+  # （会报 "is not following the format ... nor ./path"），而本地与 CI 的工作流检查
+  # 都以 actionlint 为准。为了迁就一个工具而在另一个工具上开豁免，只是把告警挪个地方 ——
+  # 而 actionlint 建模的是 GitHub 实际的 schema，它的告警更值得听。
   #
-  # 「有歧义」这条理由在本仓库也不成立：`./` 的歧义来自
-  # 「第一个路径段会不会被误认成 owner」，而本仓库名是 `zerowork`、不含 `/`。
+  # zizmor 这条审计针对的歧义（「第一个路径段会不会被误认成 owner」）在本仓库不成立：
+  # 仓库名是 `zerowork`，不含 `/`。
   #
-  # 复核方式（两条都能验）：
-  #   gh run list --workflow=release.yml --json conclusion   # `$/` 时期是 startup_failure
-  #   grep -n 'uses:' .github/workflows/release.yml          # 现在是 `./`
+  # 复核方式：
+  #   grep -n 'uses:' .github/workflows/release.yml    # 应当是 `./`
+  #   actionlint                                       # 不应当有任何豁免
   #
-  # **若将来 GitHub 修好了 `$/` 在这个位置的行为**，可以改回去 ——
-  # 但改之前请先用一个临时 tag 实测一次 tag 触发的 run 能不能起来。
+  # ⚠️ **别把这条豁免读成「`$/` 有问题」。** v0.2.1 第一次发布的 `startup_failure`
+  # 曾被误判成它导致的（连 CHANGELOG 都那样写过），真因是调用方少授予了权限。
+  # 经过见 docs/MAINTAINER_GUIDE.md 的「发布流水线起不来」。
   # ---------------------------------------------------------------------------
   self-repository:
     ignore:
