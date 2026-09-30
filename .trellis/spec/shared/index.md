@@ -23,7 +23,7 @@
 1. **改动的影响面最大**：一个通道常量改错，主进程、preload、daemon、渲染层**四处**同时失效
 2. **它是类型补全的起点**：`docs/ARCHITECTURE.md` 的「渐进补类型」路径把这一层列为第一步
    （体量小、被依赖广、契约价值最高）
-3. **它是跨层 bug 的高发区** —— 见 `../guides/cross-layer-thinking-guide.md`
+3. **它是跨层 bug 的高发区** —— 见 [`../guides/index.md`](../guides/index.md)（跨层改动指南）
 
 ---
 

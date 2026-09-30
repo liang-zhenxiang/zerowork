@@ -1,97 +1,115 @@
-# Thinking Guides
+# 跨层改动指南
 
-> **Purpose**: Expand your thinking to catch things you might not have considered.
-
----
-
-## Why Thinking Guides?
-
-**Most bugs and tech debt come from "didn't think of that"**, not from lack of skill:
-
-- Didn't think about what happens at layer boundaries → cross-layer bugs
-- Didn't think about code patterns repeating → duplicated code everywhere
-- Didn't think about edge cases → runtime errors
-- Didn't think about future maintainers → unreadable code
-
-These guides help you **ask the right questions before coding**.
+> **什么时候读这一页**：一次改动涉及 **2 个以上进程或层**的时候。
+> 只改一个文件里的纯逻辑、不碰边界，不需要读。
+>
+> 本页只讲**这个项目**的边界长什么样、以及跨过去之前要做哪些功课。
 
 ---
 
-## Available Guides
+## 一、先认清边界
 
-| Guide | Purpose | When to Use |
-|-------|---------|-------------|
-| [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
-| [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+本项目有**四个进程/层**加**一份共享契约**：
 
----
+| 层 | 位置 | 它是什么 |
+| --- | --- | --- |
+| **主进程** | `src/main/index.js` | Electron 能力的唯一持有者：窗口、菜单、快捷键、CSP、IPC 路由 |
+| **daemon** | `src/main/daemon/` | Agent 内核。**独立的 `utilityProcess`**，崩了不带走界面 |
+| **preload** | `src/preload/index.js` | `contextBridge` 桥，定义渲染层可见的 IPC 面 |
+| **渲染层** | `src/renderer/` | React SPA，sandbox 渲染进程 |
+| **共享契约** | `src/shared/ipc.js` | 通道常量与文档类型判定，**主进程与 preload 共用** |
 
-## Quick Reference: Thinking Triggers
-
-### When to Think About Cross-Layer Issues
-
-- [ ] Feature touches 3+ layers (API, Service, Component, Database)
-- [ ] Data format changes between layers
-- [ ] Multiple consumers need the same data
-- [ ] You're not sure where to put some logic
-- [ ] You are adding an event kind, JSONL record, RPC payload, or config field
-- [ ] UI / command code starts casting raw payload fields directly
-
-→ Read [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md)
-
-### When to Think About Code Reuse
-
-- [ ] You're writing similar code to something that exists
-- [ ] You see the same pattern repeated 3+ times
-- [ ] You're adding a new field to multiple places
-- [ ] **You're modifying any constant or config**
-- [ ] **You're creating a new utility/helper function** ← Search first!
-- [ ] Two files read the same untyped payload field with local casts
-- [ ] Multiple branches update the same derived state from `kind` / `action`
-
-→ Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
-
-### When Verifying AI Cross-Review Results
-
-- [ ] Reviewer claims "user input can be malicious" → Check the actual data source (internal manifest? user config? external API?)
-- [ ] Reviewer flags "missing validation" → Is the data from a trusted internal source?
-- [ ] Reviewer says "behavior change" → Read the code comments — is it intentional design?
-- [ ] Reviewer identifies a "bug" in test → Mentally delete the feature being tested — does the test still pass? If yes → tautological test
-
-**Common AI reviewer false-positive patterns**:
-1. **Trust boundary confusion**: Treating internal data (bundled JSON manifests) as untrusted external input
-2. **Ignoring design comments**: Flagging intentional behavior documented in code comments as bugs
-3. **Variable misreading**: Not tracing a variable to its actual definition (e.g., Map keyed by path vs name)
-
-**Verification rule**: Every CRITICAL/WARNING finding must be verified against the actual code before prioritizing. Budget ~35% false-positive rate for AI reviews.
+完整的数据流见 `docs/ARCHITECTURE.md` 的「一条消息的生命周期」——
+它讲清了这四层为什么这样分工。**跨层改动之前先读它。**
 
 ---
 
-## Pre-Modification Rule (CRITICAL)
+## 二、跨层改动的检查清单
 
-> **Before changing ANY value, ALWAYS search first!**
+### 1. 改一个 IPC 通道，要动**四个地方**
+
+| 位置 | 做什么 |
+| --- | --- |
+| `src/shared/ipc.js` | 定义常量（**唯一的字符串字面量来源**） |
+| `src/preload/index.js` | 通过 contextBridge 暴露 |
+| `src/main/index.js` | `registerIpc()` 里路由 |
+| 消费方（daemon / renderer） | 使用 |
+
+**任何一处用了裸字符串而不是常量引用，都是一颗定时炸弹** ——
+改名时不会报错，只会静默失效。
+
+### 2. 就绪状态：用查询，不要只靠推送
+
+真实的竞态：daemon 就绪后**推送** `daemon:ready`，而渲染层同时也在**注册监听器**。
+谁先完成取决于机器 —— 推送早于注册就**永久丢失**，界面卡在「正在启动」且无法恢复。
+
+解法是加一条**主动查询**通道（`INVOKE.daemonStatus`）。
+**这是一个通用模式：跨进程的「就绪」状态用查询，不要只靠推送。**
+
+### 3. 共享的几何值以主进程为准
+
+例如 `titleBarOverlay.height`（菜单条高）与窗口最小宽 —— 主进程是来源，
+渲染层不另记一份。**注意到这一点靠的是「改之前先全局搜索」。**
+
+---
+
+## 三、三条已确立的契约（改动不得破坏）
+
+1. **界面渲染的数据是「投影」，不是 daemon 的原始状态。**
+   `session-view.js` 决定「什么值得显示」。那一层出错的表现是
+   「数据区空白或停在加载态」而**不是崩溃** —— 这类问题只有真正调一次 IPC 才暴露
+
+2. **落盘先于界面更新。** 所以「界面上看到了」意味着「记录已经写下了」。
+   不要为了「让界面先响应」把顺序倒过来
+
+3. **权限判定在 daemon 侧、独立于模型。**
+   模型无法通过「说这是安全的」绕过它。任何把权限判定下放到提示词、
+   或让模型可以自证的改动，都要拒绝
+
+---
+
+## 四、动手之前先搜索
+
+**改任何值之前，先全局搜一遍。** 这一条习惯能挡掉大部分「忘了改另一处」的 bug：
 
 ```bash
-# Search for the value you're about to change
-grep -r "value_to_change" .
+rg "264px" src/           # 侧栏宽度有两处同值，改要一起改
+rg "titleBarOverlay" .    # 跨进程共享的几何值
+rg "<你要改的字段名>" src/ src/shared/
 ```
 
-This single habit prevents most "forgot to update X" bugs.
+同一个坑在本项目**真实出现过**：某些值在多处硬编码，改了一处另一处就成了不一致。
 
 ---
 
-## How to Use This Directory
+## 五、同一份数据不要每个消费方各自解析
 
-1. **Before coding**: Skim the relevant thinking guide
-2. **During coding**: If something feels repetitive or complex, check the guides
-3. **After bugs**: Add new insights to the relevant guide (learn from mistakes)
+**症状**：两个文件各自用局部类型断言去读同一份 payload 的字段；
+多个分支从同一个 `kind` / `action` 各自推导同一份派生状态。
+
+**为什么危险**：字段改名或语义变化时，只有一个消费方被改到，其余静默出错。
+而且没有编译期检查兜底（本项目 `checkJs` 关闭，见 `docs/ARCHITECTURE.md`）。
+
+**做法**：让**来源层**给出结构化的结果，消费方直接用 ——
+不要每个消费方各写一遍「从原始 payload 里挑字段」。
 
 ---
 
-## Contributing
+## 六、警惕重复：先搜再写
 
-Found a new "didn't think of that" moment? Add it to the relevant guide.
+**新增代码之前先搜一遍有没有现成的。** 判断标准很简单：
+**你正在写的东西，是不是已经存在（只是长得不太一样）？**
 
----
+本项目的真实案例（都发生在 2026-09 到 10 月）：
 
-**Core Principle**: 30 minutes of thinking saves 3 hours of debugging.
+| 重复 | 代价 |
+| --- | --- |
+| 21 个 e2e 脚本各自复制同一套骨架 | **改一处要改 21 个文件**；新用例成本高到没人写 |
+| `startMockModelServer` 被内联重写 6 遍 | 修 mock 的行为要改 6 处，漏一处就不一致 |
+
+> **重复的真正代价不是「代码多」，而是「改动成本随副本数线性增长」，
+> 以及「新代码的门槛高到没人愿意加」。** 后者更致命 ——
+> 它表现为「测试补不齐」「功能没人做」，而不是某个具体的 bug。
+
+判断要不要抽象：**写第二遍时留意，写第三遍时抽。**
+只出现两次就抽，往往抽出一个错的边界。

@@ -63,6 +63,7 @@ const DOC_FILES = [
 	'.trellis/spec/shared/index.md',
 	'.trellis/spec/resources/index.md',
 	'.trellis/spec/testing/index.md',
+	'.trellis/spec/guides/index.md',
 ];
 
 /** 环境变量的扫描范围：文档里提到它，这里就得有地方读它。 */
