@@ -261,6 +261,7 @@ Trellis 是**建议采用**的工作方法。
 .trellis/spec/renderer/  ← src/renderer/
 .trellis/spec/shared/    ← src/shared/
 .trellis/spec/resources/ ← resources/（随时需记住：不参与本项目工具链）
+.trellis/spec/testing/   ← 写测试之前必读：分层、harness 用法、验收标准、踩过的坑
 .trellis/spec/guides/    ← 跨层思考指南
 ```
 
