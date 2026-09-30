@@ -50,3 +50,26 @@ rules:
   adhoc-packages:
     ignore:
       - ci.yml
+
+  # ---------------------------------------------------------------------------
+  # release.yml 用 `./.github/workflows/build-installers.yml` 调用同仓库的可复用工作流，
+  # 而 zizmor 建议改用 `$/`（自仓库引用语法：无歧义、解析到当前运行的 commit）。
+  #
+  # **这里不用它，是实测的结果**：`$/` 会让 release.yml 在 tag 触发时直接
+  # `startup_failure` —— 推上 v0.2.1 的 tag 之后，这次 run **0 个 job 就结束了**，
+  # `startup_failure` —— 推上 v0.2.1 的 tag 之后，这次 run **0 个 job 就结束了**，
+  # 都跑得通，说明不是仓库的 Actions 策略问题，差别就在这一行。
+  #
+  # 「有歧义」这条理由在本仓库也不成立：`./` 的歧义来自
+  # 「第一个路径段会不会被误认成 owner」，而本仓库名是 `zerowork`、不含 `/`。
+  #
+  # 复核方式（两条都能验）：
+  #   gh run list --workflow=release.yml --json conclusion   # `$/` 时期是 startup_failure
+  #   grep -n 'uses:' .github/workflows/release.yml          # 现在是 `./`
+  #
+  # **若将来 GitHub 修好了 `$/` 在这个位置的行为**，可以改回去 ——
+  # 但改之前请先用一个临时 tag 实测一次 tag 触发的 run 能不能起来。
+  # ---------------------------------------------------------------------------
+  self-repository:
+    ignore:
+      - release.yml
