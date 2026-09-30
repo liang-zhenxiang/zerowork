@@ -262,7 +262,8 @@ Trellis 是**建议采用**的工作方法。
 .trellis/spec/shared/    ← src/shared/
 .trellis/spec/resources/ ← resources/（随时需记住：不参与本项目工具链）
 .trellis/spec/testing/   ← 写测试之前必读：分层、harness 用法、验收标准、踩过的坑
-.trellis/spec/guides/    ← 跨层思考指南
+.trellis/spec/workflow/  ← 谁来做：主会话是调度者与验收者，**实现交给子 agent**
+.trellis/spec/guides/    ← 跨层改动指南（进程边界、契约、先搜再写）
 ```
 
 ### 新会话怎么拿到这些
