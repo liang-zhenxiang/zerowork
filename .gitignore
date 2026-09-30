@@ -43,6 +43,13 @@ node_modules/
 # 详见 CLAUDE.md。
 CLAUDE.local.md
 
+# Claude Code 的个人设置（工具白名单、本机 hook 开关等）。同样是「本机偏好」，
+# 不同开发者的允许列表不一样，提交上来只会互相打架。
+.claude/settings.local.json
+
+# Trellis 的本机身份与运行态在 .trellis/.gitignore 里单独排除
+# （.developer / .runtime/ / __pycache__ …），这里不重复维护一份。
+
 # Python 字节码缓存（运行时自动重建，不入库）
 __pycache__/
 *.pyc

@@ -20,3 +20,13 @@
 # 这两个文件体量大，禁用文本转换，避免行尾归一化产生巨型 diff
 src/renderer/src/*.js -text
 src/main/daemon/index.js -text
+
+# Trellis: append-only developer journals should merge cleanly across
+# parallel sessions/worktrees — each session only appends a new block, so
+# there is nothing to actually conflict on.
+#
+# Do NOT add a rule for workspace/*/index.md here — it is fully regenerated
+# every session, so a real conflict there is expected and safe to resolve by
+# picking either side (task state lives in task.json, not index.md). See
+# .trellis/spec/cli/backend/directory-structure.md for details.
+.trellis/workspace/*/journal-*.md merge=union

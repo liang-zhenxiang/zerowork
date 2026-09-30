@@ -28,6 +28,55 @@
 
 ### 新增
 
+- **接入 [Trellis](https://github.com/mindfold-ai/Trellis) 工作流框架** ——
+  让**任务、分层规范、跨会话记忆**有结构化的载体。此前那些东西散在 Issue 与对话里，
+  对话一被压缩就没了，下一个人接手要从头问一遍。
+
+  落地内容：`.trellis/spec/` 放**按进程分层**的编码规范、`.trellis/tasks/` 放任务的
+  PRD 与技术设计、`.trellis/workspace/` 放每个开发者自己的会话日志。
+  **SessionStart 钩子会把这些自动注入每个新会话**，不需要任何人手动调用 skill。
+
+  已沉淀的四项工作（各自带完整的 `prd.md`，含现状勘察结论与验收标准）：
+  测试体系补强、UI/UX 精修、上手体验调研、Trellis 集成本身。
+
+- **`.trellis/spec/` —— 按进程分层的编码规范**（主进程 / daemon / 渲染层 /
+  共享契约 / 随包资源）。
+
+  这里**没有沿用模板默认的 `frontend/` + `backend/`** —— 那个分层对本项目不成立
+  （它是 Web 项目的形状，生成的占位规范是 `hook-guidelines.md`、`state-management.md`、
+  `database-guidelines.md` 之类）。本项目是 Electron 桌面应用，真实分层是
+  主进程 / daemon / 渲染层 / 共享契约 / 资源。
+
+  内容取自 `docs/ARCHITECTURE.md`、`docs/DESIGN.md` 与 `AGENTS.md` 里**已确立的约束**，
+  不是通用最佳实践 —— 例如 daemon 那层的第一条是「40 个模块的顶层求值顺序由 import 图
+  决定，顶层引入跨模块引用会触发 TDZ，而这个错误静态检查看不出来」。
+
+- **`AGENTS.md` 的「任务工作流：Trellis」一节** —— 写明两套规则的**分工**：
+  Trellis 管「一个任务怎么想清楚、怎么做完」，`AGENTS.md` 管「仓库怎么操作」
+  （分支、提交、PR、CI、发布）。**冲突时以 `AGENTS.md` 为准。**
+
+  这一节是必需的：不写清楚，两套流程会被当成互相替代，或者在某一步分叉。
+
+- **`.trellis/workflow.md` 的「本仓库的叠加规则」** —— 在 Trellis 工作流开头声明本项目的
+  覆盖项：提交走 PR 而不是直接提交、spec 分层对应真实目录、用户授予常设授权时
+  任务创建视为已获同意、文档一律中文。
+
+- `.gitignore` 补上 `.claude/settings.local.json`（个人设置，不同开发者不一样，
+  提交上来只会互相打架）与 Trellis 的本机身份文件说明。
+
+- `npm run check:docs` 把 `.trellis/spec/` 的五个分层索引纳入链接校验 ——
+  它们是手写的、会随代码演进，里面的相对链接正是最容易腐烂的一类。
+
+### 变更
+
+- **Trellis 的会话自动提交改设为关闭**（`.trellis/config.yaml` 的
+  `session_auto_commit: false`）。它默认会在写会话日志后自动 `git commit`，
+  而本仓库的红线是「一切改动走分支 + PR + CI 门禁」——
+  自动提交会产生游离提交、打乱 PR 粒度。关掉后日志照常写盘，只是不碰 git。
+
+- 两个项目级 skill（`maintain-loop` / `oss-bootstrap`）与 `README`（中英）、
+  `CONTRIBUTING.md` 补上 Trellis 的说明与入口，避免规则分叉。
+
 - **`AGENTS.md`** —— 开发流程与规则的速查版，**由 AI 工具自动加载**。
   此前那些规则只存在于两个项目级 skill 里，而 skill 要**被显式调用**才会加载 ——
   结果是：新开一个会话，AI 并不知道这个项目该怎么开发（分支策略、提交规范、

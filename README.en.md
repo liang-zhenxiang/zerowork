@@ -111,6 +111,7 @@ but refuses to run commands would be advertising platform support that does not 
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | **People changing code** — process model, modules, and *why* it is built this way |
 | [docs/DESIGN.md](docs/DESIGN.md) | **People changing the UI** — design-token tiers and the prohibition list |
 | [AGENTS.md](AGENTS.md) | **Anyone using an AI assistant on this project** — the condensed development flow and rules (AI tools load it automatically) |
+| [.trellis/spec/](.trellis/spec/) | **Before touching a given layer** — per-process coding guidelines (main / daemon / renderer / shared / resources) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | **Contributors** — local checks, commit convention, branching |
 | [SECURITY.md](SECURITY.md) | **Anyone reporting a vulnerability** — includes the threat model |
 
