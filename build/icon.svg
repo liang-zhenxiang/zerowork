@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    ZeroWork 应用图标（设计源）
+
+    调用关系：本文件是**唯一的设计源**，`tools/build-icons.mjs` 读它并生成
+      build/icon.icns（macOS）/ build/icon.ico（Windows）/ build/icon.png（备用）
+    改设计 = 改这个文件，然后 `npm run build:icons`。
+
+    两条硬性约定（违反会让生成脚本取到错的底色）：
+      1. **画布必须满幅平色**：尺寸 1024×1024，最底层背景铺满整个画布，
+         且是单一平色、无渐变、无纹理。macOS 与 Windows 都会自己给应用图标
+         套圆角遮罩，所以这里**不要**自己画圆角、不要留透明边。
+      2. **标记之外不要放别的图形**：`build/` 目录里也不能再出现别的图片 ——
+         electron-builder 会把该目录下每张图都当作候选图标，尺寸不足就报错。
+
+    视觉沿用既有品牌（`src/renderer/src/assets/logo.png`）：
+      底色 #F6F8FA、纯黑单线条、线宽约为画布的 2.9%。
+    圆环读作「0」，环内的折页读作「文档」——合起来是「把文档工作归零」。
+  -->
+
+  <!-- 满幅底色。不要改成圆角矩形，也不要在外面留透明区 -->
+  <rect width="1024" height="1024" fill="#F6F8FA"/>
+
+  <g stroke="#000000" stroke-width="30" fill="none" stroke-linejoin="round" stroke-linecap="round">
+    <!-- 外环：与 96px 版 logo 的环径比例一致（外径 ≈ 画布的 54.5%） -->
+    <circle cx="512" cy="512" r="264"/>
+    <!-- 文档：右上角留出折角 -->
+    <path d="M 392 640 L 392 430 Q 392 400 422 400 L 570 400 L 632 462 L 632 640 Z"/>
+  </g>
+  <!-- 折角本身填实，形成「被翻起的一页」 -->
+  <path d="M 570 400 L 632 462 L 570 462 Z" fill="#000000"/>
+</svg>
