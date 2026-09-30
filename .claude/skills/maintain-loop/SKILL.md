@@ -150,6 +150,30 @@ print('\n'.join(bad) if bad else 'OK')
 
 ---
 
+### 提交前先看 `git status` 的全貌（真实踩过）
+
+`git add -A` 之前**必须**先看一眼完整输出，尤其是当工作区里有工具生成的文件时。
+
+真实事故：接了 Trellis 之后，`.trellis/.developer`（本机开发身份）与
+`.trellis/.runtime/`（运行态）被 `git add -A` 一起提交进了分支。
+
+根因不是「忘了加 gitignore」—— 规则本来就有，在 `.trellis/.gitignore` 里。
+根因是**那条规则会随分支切换消失**：
+
+```
+.trellis/.gitignore 是随仓库分发的内容，只有在你所在的分支包含它时才在工作区。
+切到一个还没有它的分支 → git 把它从工作区删掉
+                      → .developer / .runtime/ 这些「未被跟踪」的文件留在磁盘上
+                      → 此刻一次 git add -A 就会把它们提交进去
+```
+
+处置是**纵深防御**：根 `.gitignore` 里也写一份（根的不受分支切换影响），
+并在注释里写清楚「为什么两处都要有」。
+
+> 推广：**任何「靠某个被跟踪文件来生效」的忽略规则都有这个脆弱性** ——
+> `.gitignore` 会随分支消失，`package.json` 的 `files` 字段不会。
+> 保护本机文件时优先放在根 `.gitignore`。
+
 ## 四、CI 与合并
 
 - CI 全绿才合并：`gh pr checks <N>`。**唯一门禁是 `CI 总览`**。
