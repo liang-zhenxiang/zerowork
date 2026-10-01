@@ -67648,6 +67648,24 @@ function App() {
     if (!(panelOpen && !taskDiagOpen && !sourcesOpen)) setPanelFullscreen(false);
   }, [panelOpen, taskDiagOpen, sourcesOpen]);
   const [sidebarOpen, setSidebarOpen] = reactExports.useState(true);
+  /*
+   * 专注模式快捷键（⌘./Ctrl+.）：切侧栏开合。按钮切换已存在（顶栏
+   * sidebar-toggle-btn），这里补的是键盘路径——同类工具（VS Code 的 ⌘B）
+   * 的惯例是**不排除输入框聚焦**：带修饰键的「.」不会输入文本，而写长句时
+   * 恰恰是最想收起侧栏的时刻，排除输入框反而砍掉了主场景。
+   * preventDefault：拦下修饰键组合的任何原生残留行为（如部分输入法的
+   * Ctrl+. 标点快捷），保证按键只干这一件事。
+   */
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key !== "." ) return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      setSidebarOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const openPreview2 = reactExports.useCallback((sel) => {
     setPreviewTabs((tabs) => {
       if (tabs.some((t) => sameSelection(t, sel))) return tabs;
@@ -68301,7 +68319,8 @@ function App() {
         className: `bar-btn sidebar-toggle-btn${sidebarOpen ? " active" : ""}`,
         "aria-label": sidebarOpen ? "收起侧栏" : "展开侧栏",
         "aria-pressed": sidebarOpen,
-        title: sidebarOpen ? "收起侧栏" : "展开侧栏",
+        // 快捷键提示跟随平台修饰键写法（与菜单条 mnemonic 同思路）。
+        title: `${sidebarOpen ? "收起侧栏" : "展开侧栏"}（${navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+.）`,
         onClick: () => setSidebarOpen((v) => !v),
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPanelLeft, { size: 16 })
       }
