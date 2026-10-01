@@ -35,6 +35,27 @@
  * - **失败时自动补拍**：`finish()` 在有任何 FAIL 时会再截一张 `_failure.png`，
  *   哪怕用例自己忘了截图
  *
+ * ## `h.skip` 在 check **里面**和外面不是一回事
+ *
+ * ```js
+ * await h.check("默认档下命令被拦下", async () => {
+ *   if (process.platform === "win32") {
+ *     h.skip("默认档下命令被拦下", "本机是 Windows —— 有命令沙箱，该前提不成立");
+ *     return;                    // 到不了这里，h.skip 已经抛哨兵中止了这条 check
+ *   }
+ *   assert.equal(...);
+ * });
+ * ```
+ *
+ * **在回调里**：这条 check 被**改记为 SKIP** —— 不再并列记一条 PASS。
+ * 一条 check 恒等于报告里的一行，所以「跳过的」与「通过的」不会同时出现，
+ * 也不会出现「一条断言都没跑却算通过」把退出码 2 那道防线抵消掉。
+ * `label` 必须就是外层 check 的 label（对不上直接报错），这样同一条 check
+ * 在所有平台上报告里的名字都一样。
+ *
+ * **在回调外**（如文件顶部「端点不可用 → 整轮跳过」）：行为与从前完全一致，
+ * 独立追加一条 SKIP，不影响任何 check。
+ *
  * ## 退出码是三档，不是一个布尔值
  *
  * `finish()` 结束时不再只回答「绿/红」，而是分三种情形（判定逻辑集中在
@@ -44,7 +65,7 @@
  * | --- | --- | --- |
  * | `0` | 通过 | 至少有一条 PASS，且没有 FAIL、没有渲染层未捕获异常 |
  * | `1` | 失败 | 有 FAIL，或有渲染层未捕获异常 |
- * | `2` | **无信号** | 一条都没通过：整轮跳过，或压根没记过任何断言 |
+ * | `2` | **无信号** | 一条都没通过：整轮跳过、**在 check 里跳过**、或压根没记过任何断言 |
  *
  * 为什么要单分出 `2`：**一个永远跳过的测试，和一个不存在的测试，在门禁上
  * 没有区别** —— 两者提供的信号都是零。把它们混进「失败」会让 CI 日志误导人
@@ -78,7 +99,7 @@ const dim = (t) => paint('2', t);
  *
  * - `EXIT_OK`（0）：至少一条 PASS，且没有 FAIL / 渲染层异常
  * - `EXIT_FAILED`（1）：有东西坏了（断言挂了、渲染层抛了）
- * - `EXIT_NO_SIGNAL`（2）：什么都没验（整轮跳过，或没记过任何断言）
+ * - `EXIT_NO_SIGNAL`（2）：什么都没验（整轮跳过、在 check 里跳过、或没记过任何断言）
  *
  * 刻意不复用 `1`：`1` 在 CI 日志里的意思是「断言失败」，而「全跳过」不是
  * 断言失败 —— 混成一个码会让人去查一个根本不存在的缺陷。
@@ -118,8 +139,11 @@ export function classifyRun({ passed, failed, pageErrors = 0 }) {
 	if (failed > 0) return { code: EXIT_FAILED, kind: 'failed' };
 	// 渲染层未捕获异常同样算失败（界面出问题最直接的信号）
 	if (pageErrors > 0) return { code: EXIT_FAILED, kind: 'failed' };
-	// 一条都没通过：整轮跳过（passed 0 / skipped N）或压根没记断言（0/0/0）。
+	// 一条都没通过：整轮跳过、在 check 里跳过（passed 0 / skipped N），或压根没记断言（0/0/0）。
 	// 两者都与「本文件不存在」等价，不能算绿。
+	//
+	// ⚠️ 「在 check 里跳过」之所以也是 0，靠的是 `h.check` 把跳过**改记为 SKIP**
+	// 而不是并列记一条 PASS —— 否则它会让这一档永远进不去（见 `SkipSignal`）。
 	if (passed === 0) return { code: EXIT_NO_SIGNAL, kind: 'no-signal' };
 	return { code: EXIT_OK, kind: 'ok' };
 }
@@ -144,6 +168,37 @@ export async function waitUntil(fn, { timeout = 30_000, interval = 250, desc = '
 	}
 	const suffix = lastError ? `（最后一次尝试抛出：${lastError.message}）` : '';
 	throw new Error(`等待超时 ${timeout}ms：${desc}${suffix}`);
+}
+
+/**
+ * 「**这条 check 被跳过**」的哨兵。
+ *
+ * ## 为什么需要它
+ *
+ * `h.check(name, fn)` 的语义是「fn 不抛异常就算过」。在这个语义下
+ * 「这条 check 被跳过」**表达不出来** —— 在回调里写 `h.skip(...)` 只是往 results
+ * 里多追加了一条 SKIP，外层那条 check 照样记成 PASS。于是报告里同时出现
+ * `[PASS]` 与 `[SKIP]`，而实际上一条断言都没跑；更糟的是它会**抵消**
+ * 「一条都没通过 → 退出码 2」那道防线（见 `classifyRun()`）。
+ *
+ * 所以「跳过」必须是一条**能中断 check 的控制流**：`h.skip()` 在 check 回调内部
+ * 抛出本哨兵，`h.check` 捕获它，把这一条**改记为 SKIP**（而不是并列记成 PASS）。
+ * 这正是「补语义」而不是「改判定」—— 调用点写下的意图（这条不适用，跳过）
+ * 从此**真的**成立。
+ *
+ * ## 刻意只做「整条 check」的粒度
+ *
+ * 在回调里 `h.skip` 会中止**整条** check，不存在「只跳过其中一条断言、其余照跑」。
+ * 需要那种粒度时，把那条断言拆成自己的一条 `h.check` —— 这样一条 check 恒等于
+ * 结果里的一行，报告与退出码的计数口径才不会漂移。
+ */
+class SkipSignal extends Error {
+	constructor(label, reason) {
+		super(reason || `check「${label}」被跳过`);
+		this.name = 'SkipSignal';
+		this.label = label;
+		this.reason = reason;
+	}
 }
 
 /**
@@ -198,6 +253,15 @@ export function createHarness(opts) {
 	const procLines = [];
 	const pageErrors = [];
 
+	/**
+	 * 当前正在执行的 check 的 label 栈（`h.skip` 靠它判断「是不是在 check 里」）。
+	 *
+	 * 用**栈**而不是布尔：`h.check` 理论上可以嵌套（回调里再开一条 check），
+	 * 那时 `h.skip` 表达的是「跳过最内层那一条」。实际用例里还没有嵌套的写法，
+	 * 但栈的代价一样低，而布尔在嵌套下会静默跳错层。
+	 */
+	const checkStack = [];
+
 	let app = null;
 	let win = null;
 	let finished = false;
@@ -235,21 +299,69 @@ export function createHarness(opts) {
 		procLines,
 		pageErrors,
 
-		/** 逐条记录断言结果。**不因单条失败中断整轮** —— 一次跑完拿到完整清单。 */
+		/**
+		 * 逐条记录断言结果。**不因单条失败中断整轮** —— 一次跑完拿到完整清单。
+		 *
+		 * 结局有三种，且**一条 check 恒等于报告里的一行**：
+		 *
+		 * | 回调的结局 | 记成 | 计数口径 |
+		 * | --- | --- | --- |
+		 * | 正常返回 | `PASS` | 计入 passed（退出码那档只认它） |
+		 * | 抛出 `SkipSignal`（回调里调了 `h.skip`） | `SKIP` | 计入 skipped，**不计入 passed** |
+		 * | 抛别的异常 | `FAIL` | 计入 failed |
+		 *
+		 * 返回值是「**这一条没有失败**」：跳过也算没有失败 —— 「什么都没验」由退出码
+		 * 那一档去表达（见文件头），不由这个布尔值表达。
+		 */
 		async check(label, fn) {
+			checkStack.push(label);
 			try {
 				await fn();
 				results.push(['PASS', label, '']);
 				return true;
 			} catch (error) {
+				if (error instanceof SkipSignal) {
+					// 「这条 check 被跳过」—— 用 SKIP **替代**它的 PASS，而不是并列记两条。
+					// label 用 check 自己的，保证同一条 check 在**所有平台**下报告里的名字一致
+					// （离线整轮跳过走 h.skip 在 check 外的那条路，用的也是这个 label）。
+					results.push(['SKIP', label, error.reason]);
+					return true;
+				}
 				results.push(['FAIL', label, String(error?.message ?? error).slice(0, 400)]);
 				return false;
+			} finally {
+				checkStack.pop();
 			}
 		},
 
-		/** 跳过一条断言，但**在报告里留痕** —— 静默跳过会让「全绿」失去意义。 */
+		/**
+		 * 跳过一条断言，但**在报告里留痕** —— 静默跳过会让「全绿」失去意义。
+		 *
+		 * 两种位置，语义不同：
+		 *
+		 * - **在 `h.check` 的回调里**：中止这条 check，并把它**改记为 SKIP**
+		 *   （不再记 PASS —— 否则一条断言都没跑却记成通过，还会抵消「无信号」那道防线）。
+		 *   为了不出现「跳过的是这条、记的却是那条」，`label` 必须**就是外层 check 的
+		 *   label**；对不上会直接报错（宁可拒绝，也不静默丢标签）。
+		 * - **在回调外**（文件顶部整轮跳过那种）：独立记一条 SKIP，行为与从前一致。
+		 */
 		skip(label, reason) {
-			results.push(['SKIP', label, reason]);
+			const inCheck = checkStack.length > 0;
+			if (!inCheck) {
+				results.push(['SKIP', label, reason]);
+				return;
+			}
+			const current = checkStack[checkStack.length - 1];
+			if (label !== current) {
+				// 这里抛出去会被外层 check 记成 FAIL —— 正是想要的：这种标签错位是
+				// 写错的代码，不该被默默接受（那会重新造出「两个名字指同一条 check」的混乱）。
+				throw new Error(
+					`h.skip 在 check 回调里调用时，label 必须是外层 check 的 label —— ` +
+						`外层是「${current}」，传进来的是「${label}」。` +
+						`把它改成外层那条 h.check 的 label（这条 check 会因此记成 SKIP）。`,
+				);
+			}
+			throw new SkipSignal(label, reason);
 		},
 
 		/**
