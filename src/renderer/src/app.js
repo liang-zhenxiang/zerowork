@@ -13629,6 +13629,32 @@ function Sidebar({
   const groupsUnavailable = tasksError !== void 0 || link2.kind === "down";
   const visibleTasks = tasksExpanded ? tasks ?? [] : (tasks ?? []).slice(0, TASKS_COLLAPSED_COUNT);
   const hiddenTaskCount = tasks === void 0 ? 0 : tasks.length - visibleTasks.length;
+  /**
+   * 一条导航行。抽出来的唯一目的是让「已就绪」与「即将开放」两段
+   * 共用同一份渲染，避免为分组复制一遍按钮（DESIGN.md §6 禁复制）。
+   *
+   * 未就绪项挂真禁用态：此前只有颜色变淡，指针、hover 底、按下反馈一样不少
+   * —— 看着是灰的、摸起来是按钮，点下去才弹「待做」，正是 DESIGN.md §7.6
+   * 说的「状态只靠颜色」。disabled 一并让它退出 Tab 焦点序列。
+   */
+  const renderNavItem = ({ icon: Icon, label, ready }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      type: "button",
+      className: ready ? "nav-item" : "nav-item nav-item-pending",
+      title: ready ? void 0 : "随版本迭代开放",
+      disabled: !ready,
+      onClick: () => {
+        if (label === "专家·技能·连接器") onOpenSkills();
+        else if (label === "自动化") onOpenAutomations();
+      },
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 16 }),
+        label
+      ]
+    },
+    label
+  );
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { className: "sidebar", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-brand", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "brand-name", children: "ZeroWork" }),
@@ -13638,32 +13664,15 @@ function Sidebar({
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "new-task", onClick: onNewTask, children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 15 }),
+      // size 16 与 .nav-item 的图标同档。此前是 15 —— 全侧栏唯一一处 1px 不一致，
+      // 而 plus 只有两笔、ink 面积本来就小，小 1px 之后笔画还要再细 6%，
+      // 于是它与下面每一项读起来「不是同一套图标」。（它一直是纯黑
+      // rgb(0,0,0)，与导航项同色 —— 看着浅是笔画细，不是颜色。）
+      /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 16 }),
       "新建任务"
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "sidebar-nav", children: [
-      NAV_ITEMS$1.map(({ icon: Icon, label, ready }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "button",
-        {
-          type: "button",
-          className: ready ? "nav-item" : "nav-item nav-item-pending",
-          title: ready ? void 0 : "随版本迭代开放",
-          // 未就绪项挂真禁用态：此前只有颜色变淡，指针、hover 底、按下反馈
-          // 一样不少 —— 看着是灰的、摸起来是按钮，点下去才弹「待做」，
-          // 正是 DESIGN.md §7.6 说的「状态只靠颜色」。disabled 一并让它
-          // 退出 Tab 焦点序列。
-          disabled: !ready,
-          onClick: () => {
-            if (label === "专家·技能·连接器") onOpenSkills();
-            else if (label === "自动化") onOpenAutomations();
-          },
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 16 }),
-            label
-          ]
-        },
-        label
-      )),
+      NAV_ITEMS$1.filter((item) => item.ready).map(renderNavItem),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenDiagnostics, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconChart, { size: 16 }),
         "诊断"
@@ -13671,6 +13680,22 @@ function Sidebar({
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenStats, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconStats, { size: 16 }),
         "统计"
+      ] }),
+      // 未开放的 4 项收成**连续一组**，排在已就绪项之后，并给一个组标题。
+      //
+      // 为什么是「分组」而不只是「加个灰色角标」：它们此前与已就绪项交替排列
+      // （灰-灰-黑-黑-灰-灰-黑-黑），读起来像「一半图标没加载出来」；
+      // 连成一块 + 一个标题之后，同样的灰度读起来是「一组还没开放的功能」——
+      // 差别只在格式塔的邻近性，不在颜色。
+      //
+      // 依据 .trellis/tasks/10-01-onboarding/design.md 与 docs/ONBOARDING-RESEARCH.md §1
+      // 的决策记录：方案 (b) 同时要求「去掉 hover/active 反馈」与
+      // 「**用文字或角标说明状态**」（docs/DESIGN.md §7.6）。上一轮只落了前者，
+      // 后者没落 —— 这里补上，并采用同一份记录里方案 (a) 认可的「重组而不是隐藏」：
+      // 6 项一个不少地留在主导航里，只是排成两段，组内顺序不变。
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-title", children: "即将开放" }),
+        NAV_ITEMS$1.filter((item) => !item.ready).map(renderNavItem)
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-scroll", children: [
@@ -15050,7 +15075,7 @@ function OnboardingChecklist({
       ] }, row.key)),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconShieldSecured, { size: 15 }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: "本地优先 · 对话、文件与配置都在这台机器上" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text home-guide-note", children: "本地优先 · 对话、文件与配置都在这台机器上" })
       ] })
     ] })
   ] });

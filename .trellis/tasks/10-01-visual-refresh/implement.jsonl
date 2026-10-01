@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层硬约束：设计 token 档位纪律、命令式类名族、禁止清单、不得大规模重排"}
+{"file": "docs/DESIGN.md", "reason": "设计规范的事实来源：档位纪律、四态过渡、三态互斥、禁止清单、受控例外"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "角色分工：实现由子 agent 做；以及「判定是问题前先搜决策记录」那条教训"}
