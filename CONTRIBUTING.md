@@ -146,10 +146,14 @@ npm start
 npm run lint:all
 ```
 
-它跑完 CI 里**本地能跑**的那些静态检查：eslint、prettier、tsc、daemon 模块图、
-文档有效性、随包内容完整性、行尾一致性、渲染层产物契约，以及
-actionlint / yamllint / zizmor（没装的工具会**跳过并提示安装方式**，
-跳过项在结尾单独列出，**不会被算作通过**）。
+它跑完 CI 里**本地能跑**的那些静态检查 —— **清单以 `scripts/lint.mjs` 为准**，
+跑一次输出的头几行就会逐项列出。涵盖 eslint / prettier / tsc / daemon 模块图 /
+文档有效性 / 受控例外登记 / 应用标识 / 发布说明 / 随包内容与体积 / 行尾 / 渲染层产物契约，
+以及 actionlint、yamllint、zizmor 这些外部工具。
+
+> **这里刻意不再逐项枚举**：每次新增一项检查，枚举就会漂移一次 ——
+> 此前它已经漏掉了「应用标识一致性」与「发布说明的首次运行指引」两项。
+> 没装的工具会**跳过并提示安装方式**，跳过项在结尾单独列出，**不会被算作通过**。
 
 **它不覆盖两件事，交接时请留意：**
 
@@ -166,6 +170,7 @@ npm run format:check         # prettier（范围见 .prettierignore）
 npm run typecheck            # tsc --noEmit（当前为宽松模式，见 tsconfig.json 注释）
 npm run check:daemon-graph   # daemon 模块图闭合
 npm run check:docs           # 文档链接有效 + 环境变量有出处
+npm run check:design-exceptions  # 代码引用的受控例外编号与 DESIGN.md §5 的登记表一致
 npm run check:resources      # 随包关键文件存在且被 git 跟踪
 npm run check:line-endings   # 行尾一致性
 npm run build && npm run check:renderer-assets   # 渲染层产物契约（需先构建）

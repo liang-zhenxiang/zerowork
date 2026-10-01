@@ -14,7 +14,7 @@
  * | 覆盖 | 不覆盖 |
  * | --- | --- |
  * | eslint、prettier、tsc | **提交信息规范** —— CI 校的是 PR 标题，而标题在 PR 建立之前根本不存在。本地全绿不等于 commit-messages 会绿 |
- * | 文档链接、随包内容、行尾、渲染层产物契约 | **端到端 GUI 测试** —— 需要真实图形环境，CI 在 macOS 上跑 |
+ * | 文档链接、受控例外登记、随包内容、行尾、渲染层产物契约 | **端到端 GUI 测试** —— 需要真实图形环境，CI 在 macOS 上跑 |
  * | 发布说明里的首次运行指引（见 `scripts/check-release-notes.mjs`） | |
  * | 随包体积与依赖契约（需先 `dist:dir`，否则跳过） | |
  * | actionlint、yamllint、zizmor（工作流） | **安装包构建** —— 见 .github/workflows/build-installers.yml |
@@ -115,6 +115,7 @@ function main() {
 	runCheck('TypeScript 类型检查', NPM, ['run', '--silent', 'typecheck']);
 	runCheck('应用标识一致性', process.execPath, ['scripts/check-app-id.mjs']);
 	runCheck('文档有效性', process.execPath, ['scripts/check-docs.mjs']);
+	runCheck('受控例外登记一致性', process.execPath, ['scripts/check-design-exceptions.mjs']);
 	runCheck('发布说明的首次运行指引', process.execPath, ['scripts/check-release-notes.mjs']);
 	runCheck('随包内容完整性', process.execPath, ['scripts/check-resources.mjs']);
 	runCheck('行尾一致性', process.execPath, ['scripts/check-line-endings.mjs']);

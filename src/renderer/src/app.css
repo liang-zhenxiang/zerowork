@@ -967,7 +967,9 @@ textarea:focus-visible {
 	   （折叠时还会留在 x=0）。 */
 	/* 滚动职责移交给 .sidebar-scroll（任务+空间区），导航项固定不动。 */
 	overflow: hidden;
-	/* 折叠过渡：`flex-basis` 是 docs/DESIGN.md §5.1 的**第二条 width 受控例外**（理由见下条规则）。
+	/* 折叠过渡：`flex-basis` 是 docs/DESIGN.md §5 的**受控例外 ④**（理由见下条规则）。
+	   编号是**全局序号**，没有「第 N 条 width 例外」这种平行叫法 —— 此前这里写的就是后者，
+	   同一件事两个名字，正是 §5 编号规则要杜绝的。
 	   元素常驻 DOM（App.tsx 的 data-sidebar 状态，不再条件挂载）才有「起始态→终态」可跑 ——
 	   条件挂载的元素挂载即终态，transition 不触发（第 2 期弹层踩过同一个坑）。
 	   visibility 只服务 a11y：它参与过渡时，折叠过程中保持 visible 到动画结束（离散属性
@@ -2992,8 +2994,11 @@ textarea:focus-visible {
  * 完成态一律回归静态灰字 —— 多种动效并存会让用户分不清什么还在跑。
  * 文字基色走 --shimmer-color（默认三级灰），套用方按需覆盖变量。
  *
- * 保持 background-position、不改为伪元素扫光（Task 3 评估结论，登记为 docs/DESIGN.md §5
- * 受控例外）：① 伪元素拿不到文字内容，而「文字明暗流动」必须以文字形状为裁剪源
+ * 保持 background-position、不改为伪元素扫光（Task 3 评估结论，登记在 docs/DESIGN.md §10.3
+ * 的动效登记里）。**它不占 §5 的号位**：§5.1 管的是布局属性过渡，而 background-position
+ * 不触发布局与重排，这里也是 animation 不是 transition —— 此前把它写成「§5 受控例外」
+ * 是归错了档。三条理由（①②③ 是**理由的序号**，不是例外编号）：
+ * ① 伪元素拿不到文字内容，而「文字明暗流动」必须以文字形状为裁剪源
  * （background-clip: text）；② 即便用 content: attr(data-text) 复制文字，仍需 mask-position
  * 移动遮罩 —— 与 background-position 同类，都不是合成属性；③ 本类用在 8 处行内 <span>，
  * 改 display: inline-block 才能裁剪，会破坏行内排版与基线对齐；重绘面积仅限文字区域，收益不成立。
@@ -3221,7 +3226,8 @@ textarea:focus-visible {
 	transform: translateY(-50%);
 	/* 轨道高度**不过渡**（dsh 在这里做了 220ms 的高度动画）：docs/DESIGN.md §5.1 禁止
 	   过渡 height，而这里能换来的只是「新开一轮时 10px 的微动」—— 收益不抵一条
-	   受控例外，直接瞬时到位。 */
+	   受控例外，直接瞬时到位。**§5 登记表里没有它**：本条走的正是合规写法（不是破例）。
+	   注意 ⑤ 不是它 —— ⑤ 是 widget iframe 的高度，别把这条算到 ⑤ 名下。 */
 }
 
 /* 轨道自身不是滚动内容的一部分（挂在 .stream-wrap 上），但梯子高过轨道时
@@ -5119,7 +5125,9 @@ textarea:focus-visible {
  * 结构：`.panel-slot`（常驻、宽度 0 ↔ panelWidth + 外壳留白）> 三选一的 .preview-panel（条件挂载）。
  * 2026-09-19 加这一层，起因是用户实测反馈「右侧边栏没有动画」：面板本体是条件挂载的，
  * 挂载即终态 —— transition 没有起点可跑，于是开合只能是「消息列瞬跳 + 面板闪现」。
- * 左侧栏早有 flex-basis 过渡（docs/DESIGN.md §5 受控例外 ④），右侧在此补齐，同一手法、
+ * 左侧栏早有 flex-basis 过渡（docs/DESIGN.md §5 受控例外 ④），右侧在此补齐 ——
+ * 同一类「让位栏」，但用 `width` 而不是 flex-basis，所以它是**另一条**受控例外，
+ * 即 §5 的 ③（`.panel-slot` 与 `.preview-panel` 共用这一条）。
  * 同一语义：面板**不是浮层**，它是占布局宽度的让位栏，`transform` 表达不了让位
  * （transform 不改变布局宽度，只能做浮层覆盖），所以这里动 `width`。
  *
@@ -5152,6 +5160,8 @@ textarea:focus-visible {
 	 * 但开合动画里面板宽会被逐帧收窄，「带着内容一起滑走」退化成「内容每帧重排」。
 	 */
 	padding: var(--space-2) var(--space-2) var(--space-2) 0;
+	/* 容器开合：与 .preview-panel 的 width 过渡是**同一条受控例外 ③**
+	   （docs/DESIGN.md §5）—— 外壳宽度跟着面板走，两者错拍会看着像面板被拉伸。 */
 	transition: width var(--dur-base) var(--ease-out), visibility var(--dur-base);
 }
 

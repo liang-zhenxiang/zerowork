@@ -81,6 +81,12 @@ jobs:
       - name: 校验文档有效性
         run: npm run check:docs
 
+      # DESIGN.md §5.1 禁止过渡布局属性，破例必须登记编号 —— 这条规则原先只有自觉在守，
+      # 结果代码引用的 ③ 在表里根本不存在。这条把「代码引用的编号」与「表里的编号」
+      # 做成双向一致 + 每条布局属性过渡都挂了编号，见 scripts/check-design-exceptions.mjs
+      - name: 校验受控例外登记一致性
+        run: npm run check:design-exceptions
+
       # 用户从 Release 页下载安装包，装完打不开时回到的还是那个页面。
       # 这条守住「为什么打不开、我该怎么办」必须出现在发布说明里（且在 PR 清单之前），
       # 以及 README / 使用指南三处都写着同一件事 —— 它防的是某次改版把指引删掉。
