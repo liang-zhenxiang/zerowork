@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/main/index.md", "reason": "打包硬约束：asar 必须为 false（utilityProcess.fork 需要真实路径）"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "角色分工：实现由子 agent 做，主会话只调度与验收"}
+{"file": ".trellis/spec/testing/index.md", "reason": "反向验证怎么做；断言不得削弱"}

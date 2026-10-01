@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：体积检查必须能失败（反向验证）"}
+{"file": ".trellis/spec/main/index.md", "reason": "检查是否误改了打包的硬约束"}
