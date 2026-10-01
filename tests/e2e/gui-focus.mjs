@@ -28,17 +28,12 @@ const win = h.window();
 const sidebarState = () =>
 	win.evaluate(() => document.querySelector(".app")?.dataset.sidebar ?? null);
 
-/** 派发一个带修饰键的「.」按键（keydown 足以触发，无需 keyup）。 */
-const pressShortcut = (modifier) =>
-	win.evaluate((mod) => {
-		const event = new KeyboardEvent("keydown", {
-			key: ".",
-			bubbles: true,
-			cancelable: true,
-			[mod]: true,
-		});
-		window.dispatchEvent(event);
-	}, modifier);
+/**
+ * 用 Playwright 真实键盘按组合键（Meta+./Control+.），不走合成事件——
+ * 合成 KeyboardEvent 需要浏览器全局、在 eslint 的 Node 视角是 no-undef，
+ * 而真实按键连「修饰键原生行为被 preventDefault 拦住」这条也一并覆盖。
+ */
+const pressShortcut = (combo) => win.keyboard.press(combo);
 
 await h.check("默认侧栏展开", async () => {
 	assert.equal(await sidebarState(), "open");
@@ -46,7 +41,7 @@ await h.check("默认侧栏展开", async () => {
 const openStats = (await h.shoot("sidebar-open")).stats;
 
 await h.check("⌘+.（meta 修饰）能折叠侧栏", async () => {
-	await pressShortcut("metaKey");
+	await pressShortcut("Meta+.");
 	await waitUntil(async () => (await sidebarState()) === "collapsed", {
 		timeout: 10_000,
 		desc: "data-sidebar 切到 collapsed",
@@ -67,14 +62,14 @@ await h.check("折叠后画面确实变了（亮度差 > 1，布局真的让位�
 });
 
 await h.check("Ctrl+.（ctrl 修饰，Windows/Linux 路径）也能触发", async () => {
-	await pressShortcut("ctrlKey"); // 展开
+	await pressShortcut("Control+."); // 展开
 	await waitUntil(async () => (await sidebarState()) === "open", { timeout: 10_000, desc: "恢复展开" });
-	await pressShortcut("ctrlKey"); // 再折叠
+	await pressShortcut("Control+."); // 再折叠
 	await waitUntil(async () => (await sidebarState()) === "collapsed", { timeout: 10_000, desc: "再次折叠" });
 });
 
 await h.check("裸「.」不触发（打字场景不误伤）", async () => {
-	await pressShortcut("__none__");
+	await win.keyboard.press(".");
 	await new Promise((r) => setTimeout(r, 300));
 	assert.equal(await sidebarState(), "collapsed", "无修饰键的 . 不应改变侧栏状态");
 });
