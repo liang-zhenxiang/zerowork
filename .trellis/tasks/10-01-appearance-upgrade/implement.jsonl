@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/main/index.md", "reason": "主进程改动（nativeTheme/titleBarOverlay）的分层规范"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon handler 与偏好持久化的规范（session-files.js 成对注册模式）"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层 chunk 粒度源码的外科手术式改动规范"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared/ipc.js 通道契约规范"}
