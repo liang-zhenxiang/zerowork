@@ -13649,7 +13649,9 @@ function Sidebar({
         else if (label === "自动化") onOpenAutomations();
       },
       children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 16 }),
+        // 未就绪项图标 13：与降档字号(--text-meta)同步收小，视觉重量才真的轻
+        // ——16 的线稿图标配 12px 文字会头重脚轻（issue #72）。
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: ready ? 16 : 13 }),
         label
       ]
     },
@@ -13694,7 +13696,7 @@ function Sidebar({
       // 后者没落 —— 这里补上，并采用同一份记录里方案 (a) 认可的「重组而不是隐藏」：
       // 6 项一个不少地留在主导航里，只是排成两段，组内顺序不变。
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-title", children: "即将开放" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-title", children: "规划中" }),
         NAV_ITEMS$1.filter((item) => !item.ready).map(renderNavItem)
       ] })
     ] }),
@@ -15081,22 +15083,41 @@ function OnboardingChecklist({
       }
     ) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide", role: "status", children: [
-      rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(row.done ? IconCheck : row.icon, { size: 15 }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: row.label }),
-        !row.done && /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "button",
-          {
-            type: "button",
-            className: "mini-btn",
-            onClick: row.go,
-            children: [
-              row.action,
-              " →"
-            ]
-          }
-        )
-      ] }, row.key)),
+      rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          /* 整行可点（issue #72）：未完成行点击 = 该行 go 的同一动作——静态状态
+             下「这是清单还是按钮」的模糊由此消除。已完成行没有去处，不挂。
+             key 仍走 jsx runtime 的第三参（maybeKey），children 留在 config 里。 */
+          className: `home-guide-row${row.done ? "" : " home-guide-row-action"}`,
+          role: row.done ? void 0 : "button",
+          tabIndex: row.done ? void 0 : 0,
+          onClick: row.done ? void 0 : row.go,
+          onKeyDown: row.done ? void 0 : (event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              row.go();
+            }
+          },
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(row.done ? IconCheck : row.icon, { size: 15 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: row.label }),
+            !row.done && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "button",
+              {
+                type: "button",
+                className: "mini-btn",
+                onClick: row.go,
+                children: [
+                  row.action,
+                  " →"
+                ]
+              }
+            )
+          ]
+        },
+        row.key
+      )),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconShieldSecured, { size: 15 }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text home-guide-note", title: "ZeroWork 是本地优先应用：工作空间文件、会话记录、偏好与 API Key 都只存在这台电脑的磁盘上，不经过任何第三方服务器（模型请求直接发往你在设置里配置的服务商）。", children: "本地优先 · 对话、文件与配置都在这台机器上" })

@@ -2036,9 +2036,28 @@ textarea:focus-visible {
 
 .home-guide-icon {
 	display: flex;
-	/* 图标是提示性的，不参与主文字层级（同 §3.4 行内 icon 用次文色）。 */
+	/* 图标是提示性的，不参与主文字层级（同 §3.4 行内 icon 用次文色）。
+	   未完成行例外见 .home-guide-row-action .home-guide-icon（issue #72）。 */
 	color: var(--text-secondary);
 	flex: none;
+}
+
+/* ── 上手清单的整行可点（issue #72）────────────────────────────────
+ * 静态状态下「清单还是按钮」的模糊靠三样一起消除：整行 hover 底、
+ * 指针、未完成行的图标用 --accent（可点标识的既有语义位——链接/路径
+ * 徽章同源，不是新造颜色用途）。已完成行不加（没有去处，挂了就是谎言）。 */
+.home-guide-row-action {
+	cursor: pointer;
+	border-radius: var(--radius-sm);
+}
+
+.home-guide-row-action:hover {
+	background: var(--bg-hover);
+}
+
+.home-guide-row-action .home-guide-icon {
+	/* 未完成步骤的行动指示：--accent 是全站「可点」的颜色语义。 */
+	color: var(--accent);
 }
 
 /* 三条待办：全页最实的一档正文，但**低于输入卡**。
@@ -9896,6 +9915,12 @@ textarea:focus-visible {
 .nav-item-pending,
 .nav-item:disabled {
 	color: var(--text-secondary);
+	/* 2026-10-02 减重（issue #72）：字号降一档（--text-meta）+ 行高收紧
+	   （block 方向 --space-1）。颜色**不动**——§2.1 的教训（降两档读作
+	   「图标没加载出来」）在上一轮刚沉淀过；这轮减的是字号与行高，
+	   视觉重量轻下来而灰度语义保持「降一档」。 */
+	font-size: var(--text-meta);
+	padding: var(--space-1) var(--space-3);
 	cursor: default;
 }
 
