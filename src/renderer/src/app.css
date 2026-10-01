@@ -1638,13 +1638,23 @@ textarea:focus-visible {
 	align-items: center;
 	justify-content: center;
 	width: 100%;
-	/* 案例槽预留。 */
-	padding-bottom: 220px;
+	/* 案例槽预留。英雄区在「扣掉这块预留」的区域内垂直居中，所以这个值同时
+	   决定上下游的空白配比（留得越多，英雄区越往上；留得越少，越贴案例区）。
+
+	   2026-10-01 由 220 改为 252。两个原因：
+	   · 案例区因为标题允许折两行而长高了 22px（`.case-title` 的 line-clamp），
+	     预留必须跟着长，否则矮窗口下英雄区会压到案例卡上；
+	   · 顺带把配比调平。实测 220 时是「标题上方 58px / 输入卡与案例间 25px」，
+	     上面松下面挤；252 让两侧都落在 41px 上下
+	     （案例区实测高 197 + 底距 56 = 253，取 4 的倍数 252）。 */
+	padding-bottom: 252px;
 }
 
 .home-title {
-	/* 首页标题原值：30px/42px/600/90% 黑（=--primary）/无字距。 */
-	margin: 0 0 var(--space-5);
+	/* 首页标题原值：30px/42px/600/90% 黑（=--primary）/无字距。
+	   下间距 2026-10-01 由 --space-5 收到 --space-4：标题与场景胶囊是一个头部单元
+	   （胶囊是标题的作用域限定），取主列最小的一档 12（docs/DESIGN.md §3.8）。 */
+	margin: 0 0 var(--space-4);
 	font-size: var(--text-display);
 	line-height: 42px;
 	font-weight: 600;
@@ -1762,8 +1772,13 @@ textarea:focus-visible {
 	padding: 2px;
 	background: var(--bg-raised);
 	border-radius: var(--radius-full);
-	/* 场景 pills 与下方 composer 的间距原值 64px。 */
-	margin-bottom: 64px;
+	/* 与下方能力 chip 行的间距。原值 64px，2026-10-01 收到 --space-4（docs/DESIGN.md §3.8）。
+	   这个 64 原本是给「场景胶囊 → 输入卡」标定的，但 chip 行后来被插进了这段空白里，
+	   64 却从没重新分配 —— 结果是主列最长的一段空白落在两个本该挨着的控件之间
+	   （实测胶囊底 → chip 顶 64、chip 底 → 清单顶 0），节奏因此读不出关系。
+	   现在按语义分：胶囊与 chip 同属一个控制簇（chip 是选中场景的下钻），
+	   故取同一档 --space-4；控制簇与任务区之间的 24 由 .capability-row 承担。 */
+	margin-bottom: var(--space-4);
 }
 
 .mode-tab {
@@ -1809,14 +1824,22 @@ textarea:focus-visible {
 	flex-wrap: nowrap;
 	overflow-x: auto;
 	scrollbar-width: none;
-	/*，与输入卡同宽。 */
+	/* 左对齐起排、整行撑满主列 —— 与输入卡同宽（同一列的对齐基准）。 */
 	justify-content: flex-start;
 	width: 100%;
 	gap: var(--space-3);
 	align-items: center;
 	min-height: 32px;
-	/* 与输入卡的间距 =
-	margin-bottom: var(--space-4);
+	/* 与下方「主题带 / 清单」的间距，走首页主列的垂直节奏（docs/DESIGN.md §3.8）。
+	   2026-10-01 由 --space-4 提到 --space-6：这一段是「控制簇结束、任务区开始」，
+	   是主列里最大的一档。
+	   【2026-10-01 修】这条注释此前**丢了收尾符**，从 `margin-bottom` 起的声明、
+	   本规则的收尾括号、下面的 ::-webkit-scrollbar 规则、以及 .capability-chip 的
+	   **整条选择器**全被它吃进注释里 —— 后果是 chip 的基础样式整体落到了
+	   .capability-row 上（整行渲染成一条 800px 的白胶囊），chip 自身反而无样式。
+	   括号数是配平的（吃掉一个 { 也吃掉一个 }），任何配平式检查都发现不了。
+	   识别方法见 .trellis/spec/renderer/index.md。 */
+	margin-bottom: var(--space-6);
 }
 
 .capability-row::-webkit-scrollbar {
@@ -1912,32 +1935,39 @@ textarea:focus-visible {
 
 /*
  * 首页上手清单（原「还不能开始对话」引导条泛化而来，spec: 首页引导）。
- * 走 docs/DESIGN.md §3.3 的**卡片级别**（不是新开一个组件级别）：底 --bg、
- * 1px --border、圆角 --radius-md、内边距 --space-4，内部文字按「卡片标题
- * --text-body + 600 / meta --text-meta + --text-secondary」两档。
  * 常驻在输入卡上方，不遮不挡（判据不成立时组件返回 null，元素不存在）。
  *
- * 三条待办各占一行，所以外层从「一行」改成「一列」：行间距沿用原来那一档
- * --space-3，行内仍是原来那套「图标 + 文字 + 右侧按钮」。
+ * 【2026-10-01 视觉重做】三处改动，都是为了把它与输入卡解耦
+ * （docs/DESIGN.md §3.8 / §3.9）：
  *
- * 末尾那句「本地优先」也走同一行结构、同一档文字（--text-body + 600）。
- * 它是**说明**不是待办，本该用上面写的 meta 档，但没有既有的 meta 类可复用，
- * 而 design 明确要求这一句「不新增样式档位」——两害相权取复用，故未新开类名。
+ * ① **底由 --bg 改为 --bg-raised，并去掉那 1px --border。**
+ *    它此前与输入卡是「两张同款白底细边卡、中间只隔 8px」——
+ *    像素上是「1px 边 + 8px 白 + 2px 灰槽 + 0.5px 边」，眼睛读作**一张卡中间一条分隔线**，
+ *    于是「清单被塞进了输入卡内部」。改用 --bg-raised 的依据是 token 自己的注释：
+ *    「抬升面：**次级卡片**、选中底、代码块底」——清单是次级辅助面，不是内容卡。
+ *    去掉边框之后，首页主列只剩输入卡一个盒子（§3.9 的盒子预算），
+ *    输入卡才成为真正唯一的视觉重点。
+ *
+ * ② **与输入卡的间距 --space-3(8) → --space-5(16)。**
+ *    必须大于清单**内部**的行距（仍是 --space-3），否则两者读成同一块。
+ *
+ * ③ **文字降一档**（见 .home-guide-text / .home-guide-note）。
+ *    此前三行待办是 14px/600/纯黑，比输入卡的 15px 占位符还重 ——
+ *    抢重点的是清单而不是输入卡，这才是「整体没有视觉重点」的成因。
  */
 .home-guide {
 	display: flex;
 	flex-direction: column;
 	align-items: stretch;
 	gap: var(--space-3);
-	margin-bottom: var(--space-3);
+	margin-bottom: var(--space-5);
 	padding: var(--space-4);
-	background: var(--bg);
-	border: 1px solid var(--border);
+	background: var(--bg-raised);
 	border-radius: var(--radius-md);
 }
 
 /* 清单的每一行：图标（完成态换成对勾 —— 形态而非颜色承担「做完了」）+
-   一句说明 + 可点的去处。间距沿用卡片原来那一档 --space-3。 */
+   一句说明 + 可点的去处。行距保持 --space-3。 */
 .home-guide-row {
 	display: flex;
 	align-items: center;
@@ -1951,12 +1981,25 @@ textarea:focus-visible {
 	flex: none;
 }
 
+/* 三条待办：全页最实的一档正文，但**低于输入卡**。
+   2026-10-01 由 14px/600/纯黑 收到 13px/纯黑 —— 去掉 600 是关键的
+   那一半：字重才是「谁在说话」的信号，字号只是次要量。 */
 .home-guide-text {
-	font-size: var(--text-body);
-	font-weight: 600;
+	font-size: var(--text-list);
 	/* 文案可能较长，允许收缩到省略，避免把右侧按钮挤出容器。 */
 	flex: 1 1 auto;
 	min-width: 0;
+}
+
+/* 末尾那句「本地优先」是**说明**不是待办，走 meta 档。
+   本条注释的上一个版本写着「它本该用上面写的 meta 档，但没有既有的 meta 类可复用，
+   而 design 明确要求这一句『不新增样式档位』——两害相权取复用」——
+   那个权衡当时是对的，但代价是这句说明与三条待办**同重**，
+   整个清单因此没有一个内部层次。现在补上它本该有的类：
+   只引用既有档位（--text-meta / --text-secondary），没有复制任何视觉值。 */
+.home-guide-note {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
 }
 
 /* 首页输入框的外层渐变槽：
@@ -2768,14 +2811,18 @@ textarea:focus-visible {
 
 
 
-/* 挂件行：固定高 32、gap 4、左右 padding 12、
-   无背景（坐在渐变槽上）；行在槽内，不再有 12px 上外边距。 */
+/* 挂件行：固定高 32、gap 4、无背景（坐在渐变槽上）；行在槽内，无上外边距。
+   水平内边距 2026-10-01 由 --space-4(12) 改为 --space-5(16)：
+   这颗 chip 与卡内的「+」「选择模型」是同一列的控件，但卡的内边距是
+   `var(--space-4) var(--space-5)`（左右 16）—— 两行左缘实测差 4px
+   （卡内内容 x=390、本行 chip x=386），是主列里少数能一眼指认的错位。
+   改齐之后两行共用同一条左缘。 */
 .context-row {
 	display: flex;
 	align-items: center;
 	gap: var(--space-1);
 	height: 32px;
-	padding: 0 var(--space-4);
+	padding: 0 var(--space-5);
 }
 
 /* 挂件按钮基类（.cr-input-footer-item）原值：
@@ -2971,7 +3018,17 @@ textarea:focus-visible {
 }
 
 .case-title {
-	/* __card-title：14/22、400、二级色、居中省略（原 13px 左对齐带 padding）。 */
+	/* __card-title：14/22、400、二级色、居中（原 13px 左对齐带 padding）。
+	   2026-10-01：由**单行省略**改为**最多两行**（-webkit-line-clamp）。
+	   原因：列宽固定 194px，14px 中文一行只放得下约 13 字，而真实案例标题到 18 字
+	   （「八十二亿之后：全球人口结构与趋势图志」），必被截断 —— 案例区是全页信息
+	   密度最低的一块，标题再被削掉就等于只剩封面。
+	   为什么是 clamp 而不是砍成 3 列：4 列是既有的参照物取值（见 .case-grid 注释），
+	   且一页正好 4 条，改 3 列会让第 4 条换行、案例区被撑成两行。
+	   标题仍是卡片里**最后一个**元素，高度不一不会影响封面与网格的对齐。 */
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
 	padding: 0;
 	font-size: var(--text-body);
 	line-height: 22px;
@@ -2979,7 +3036,6 @@ textarea:focus-visible {
 	color: var(--text-secondary);
 	overflow: hidden;
 	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 
 /* ── 扫光（全局唯一「进行中」视觉语言）──────────────────────────── */
@@ -9718,10 +9774,21 @@ textarea:focus-visible {
    「状态不只靠颜色」：形态要能独立表达。现按 disabled 补齐指针；
    hover / active 两条已在各自规则上用 :not(:disabled) 让开。
    （`.nav-item-pending` 是历史类名，保留作为显式 hook；真正的判据是
-   `:disabled` —— 未就绪项在渲染层挂了这个属性，也一并不进 Tab 序列。） */
+   `:disabled` —— 未就绪项在渲染层挂了这个属性，也一并不进 Tab 序列。）
+
+   【2026-10-01 视觉重做】灰度由 --text-faint(30%) 提到 --text-secondary(50%)。
+   两条依据：
+   ① §2.1 的要求是「停用态用**降一档**灰度」，而三档是
+      --text(100%) / --text-secondary(50%) / --text-faint(30%) ——
+      「降一档」= 50%。此前的 30% 是**降了两档**。
+   ② 30% 让 16px / 1.8 描边的线稿图标只剩一点灰影。未开放的 4 项与已就绪项
+      在侧栏里交替排列，读起来像「一半图标没加载出来」而不是「一组还没开放的功能」。
+      本轮把这 4 项收成**连续一组**并加了组标题「即将开放」（app.js 的侧栏渲染）——
+      状态改由「位置 + 文字 + disabled」三样独立承担之后，颜色不必再淡到看不见。
+   组标题的样式复用既有 .section-title（12px/600/50%），没有新造类名。 */
 .nav-item-pending,
 .nav-item:disabled {
-	color: var(--text-faint);
+	color: var(--text-secondary);
 	cursor: default;
 }
 
