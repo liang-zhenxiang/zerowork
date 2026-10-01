@@ -201,6 +201,8 @@ async function probeEndpoint() {
 	return { endpoint };
 }
 
+/** A 条：默认档下命令被拒绝执行（安全性质，只在**没有命令沙箱**的平台上可观察）。 */
+const LABEL_DEFAULT_BLOCKED = "沙箱不可用时：默认档拒绝执行命令（不静默无约束执行）";
 /** B 条的两半：**平台无关**的那半 / **命令真的执行**的那半（非 Windows 上跳过）。 */
 const LABEL_TOOL_REACHED = "完全访问档下：命令请求真的走到工具层（工具结果不是「被拦下」）";
 const LABEL_COMMAND_EXECUTED = "完全访问档下：命令真的执行、输出回传到工具结果";
@@ -248,7 +250,7 @@ const NO_POWERSHELL_REASON =
  */
 const NEEDS_MODEL = [
 	"配置真实模型并切换工作区",
-	"沙箱不可用时：默认档拒绝执行命令（不静默无约束执行）",
+	LABEL_DEFAULT_BLOCKED,
 	LABEL_TOOL_REACHED,
 	LABEL_COMMAND_EXECUTED,
 	LABEL_RESTRICTED_REFUSED,
@@ -435,7 +437,7 @@ async function runWithModel(endpoint) {
 
 	// ── A. 默认档：沙箱不可用 ⇒ 拒绝执行（安全性质）─────────────
 
-	await h.check("沙箱不可用时：默认档拒绝执行命令（不静默无约束执行）", async () => {
+	await h.check(LABEL_DEFAULT_BLOCKED, async () => {
 		// 先确认本机确实没有沙箱 —— 有沙箱的机器（Windows）上这条用例的前提不成立
 		const sb = await win.evaluate(async () => {
 			const p = await globalThis.kami.getPermissions();
@@ -516,8 +518,12 @@ async function runWithModel(endpoint) {
 		if (process.platform === "win32") {
 			// Windows 上有命令沙箱，这条断言的前提不成立。
 			// 原来这里只打一行日志 —— 报告里看不出来，现在显式记成跳过。
-			h.skip("默认档下命令被拦下并写审计", "本机是 Windows —— 有命令沙箱，该前提不成立");
-			return;
+			//
+			// `h.skip` 在 check 回调里会**抛出哨兵中止这条 check**，由 h.check 改记为
+			// SKIP（不再并列记一条 PASS），所以这里不需要 `return` —— 后面的断言到不了。
+			// label 必须与外层 `h.check` 的一致（否则 h.skip 直接报错）：这样同一条 check
+			// 在 Windows 与「端点不可用」两条路径下，报告里的名字是同一个。
+			h.skip(LABEL_DEFAULT_BLOCKED, "本机是 Windows —— 有命令沙箱，该前提不成立");
 		}
 
 		// 审计已被本用例清空过（催过则是在催问前清的）——读到的都该是**这一轮**写的。
@@ -740,8 +746,10 @@ async function runWithModel(endpoint) {
 			// 所以「被拒绝」这个前提不成立。这条性质只在**没有命令沙箱**的平台上
 			// 可观察 —— 与其写一条本机验不了的断言（那正是这次要修的毛病），
 			// 不如显式跳过，和 A 在 Windows 上的处理保持一致。
+			//
+			// `h.skip` 在这里会**抛哨兵中止这条 check**，由 h.check 改记为 SKIP，
+			// 所以后面不需要 `return`（断言到不了）。label 与外层 check 是同一个常量。
 			h.skip(LABEL_RESTRICTED_REFUSED, "本机是 Windows —— 有命令沙箱，受限档下命令在沙箱内执行而非被拒，该前提不成立");
-			return;
 		}
 
 		// 审计已被本用例清空过，读到的都是**本轮**写的；审批日志同理。

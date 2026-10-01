@@ -20,6 +20,18 @@
  *
  * ⚠️ **这个文件自己的前提是「有断言通过」**：它全是同步的纯函数调用，
  * 所以永远有 PASS，不会掉进它自己规定的「无信号」档。
+ *
+ * ## 后来补上的：`h.check` 内部的 `h.skip` 会**抵消**上面那道防线
+ *
+ * 「无信号」那一档的判据是 `passed === 0`，所以只要有一条 check 记成 PASS，
+ * 它就进不去。而在 `h.check` 回调里写 `h.skip(...)` 再 `return`，此前会**同时**
+ * 记一条 `[PASS]` 与一条 `[SKIP]` —— 于是一段**一条断言都没跑**的代码
+ * 反而把 `passed` 顶到 1，退出码回到 `0`，正好绕开那道防线。
+ *
+ * 修法是让「跳过」成为一条能中止 check 的控制流（`h.skip` 抛 `SkipSignal`，
+ * `h.check` 捕获后把这一条**改记为 SKIP**）。下面这组用例把三件事钉死：
+ * 只记 SKIP 不记 PASS、因此所有 check 都被跳过时退出码是 `2`、
+ * 以及 `h.skip` 在 check **外面**调用时行为不变（不能误伤整轮跳过那 7 个脚本）。
  */
 import { describe, it, expect } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -133,6 +145,99 @@ describe("finish() 真的用上了这套判定（反向验证的自动化版）"
 				await h.check("夹具通过", () => {});
 				h.skip("夹具跳过", "夹具：这条只是被跳过");
 			`);
+			expect(r.stdout).toContain("通过 1/2（跳过 1）");
+			expect(r.status).toBe(EXIT_OK);
+		},
+		30_000,
+	);
+});
+
+// ── 在 check 内部跳过：只记 SKIP，不记 PASS ─────────────────────────
+//
+// 这一组是「无信号」那道防线的补丁。修之前，回调里的 `h.skip(...) + return`
+// 会同时产出 `[PASS]` 与 `[SKIP]`，把 `passed` 顶成 1，退出码回到 0 ——
+// 一段一条断言都没跑的代码，在门禁上是绿的。
+describe("在 check 里跳过 → 只记 SKIP（不是 PASS 与 SKIP 并列）", () => {
+	it(
+		"回调里 h.skip 之后：那条只记 SKIP、不记 PASS，且所有 check 都被跳过 → 退出码 2",
+		() => {
+			const r = runFixture(`
+				await h.check("夹具断言", async () => {
+					h.skip("夹具断言", "夹具：这条被跳过");
+					return;
+				});
+			`);
+			expect(r.stdout).toContain("[SKIP] 夹具断言");
+			// 这是缺口本身：修之前这里会出现一条 [PASS]
+			expect(r.stdout).not.toContain("[PASS]");
+			expect(r.stdout).toContain("通过 0/1（跳过 1）");
+			expect(r.stdout).toContain("一条断言都没通过");
+			expect(r.status).toBe(EXIT_NO_SIGNAL);
+		},
+		30_000,
+	);
+
+	it(
+		"被跳过的 check 不计入 passed：它是 1 条跳过 + 1 条通过，不是 2 条通过",
+		() => {
+			const r = runFixture(`
+				await h.check("夹具跳过", async () => {
+					h.skip("夹具跳过", "夹具：这条被跳过");
+				});
+				await h.check("夹具通过", () => {});
+			`);
+			expect(r.stdout).toContain("通过 1/2（跳过 1）");
+			expect(r.stdout).toContain("[SKIP] 夹具跳过");
+			expect(r.stdout).toContain("[PASS] 夹具通过");
+			expect(r.status).toBe(EXIT_OK);
+		},
+		30_000,
+	);
+
+	it(
+		"h.skip 会中止整条 check —— 它后面的断言不跑，也不会把这条判成 PASS",
+		() => {
+			const r = runFixture(`
+				await h.check("夹具断言", async () => {
+					h.skip("夹具断言", "夹具：跳过");
+					throw new Error("这行不该被执行");
+				});
+			`);
+			// 若哨兵没生效，抛出的普通异常会被记成 FAIL（退出码 1）
+			expect(r.stdout).not.toContain("[FAIL]");
+			expect(r.stdout).toContain("[SKIP] 夹具断言");
+			expect(r.status).toBe(EXIT_NO_SIGNAL);
+		},
+		30_000,
+	);
+
+	// 「宁可拒绝，也不静默降级」：两个名字指同一条 check，正是这次要消灭的混乱。
+	// 与其默默丢掉一个标签，不如当场报错。
+	it(
+		"回调里的 h.skip 用了别的 label → 记成 FAIL 而不是静默换个名字",
+		() => {
+			const r = runFixture(`
+				await h.check("夹具断言", async () => {
+					h.skip("另一个名字", "夹具：标签对不上");
+				});
+			`);
+			expect(r.stdout).toContain("[FAIL] 夹具断言");
+			expect(r.stdout).toContain("必须是外层 check 的 label");
+			expect(r.status).toBe(EXIT_FAILED);
+		},
+		30_000,
+	);
+
+	// 反向对照：check **外面**的 h.skip 仍是独立的一条 SKIP（那 7 个整轮跳过的
+	// 脚本靠的就是这条路径，语义不能变）。
+	it(
+		"check 外面的 h.skip 行为不变：独立记一条 SKIP，不影响任何 check",
+		() => {
+			const r = runFixture(`
+				h.skip("夹具外面的跳过", "夹具：与 check 无关的一条");
+				await h.check("夹具通过", () => {});
+			`);
+			expect(r.stdout).toContain("[SKIP] 夹具外面的跳过");
 			expect(r.stdout).toContain("通过 1/2（跳过 1）");
 			expect(r.status).toBe(EXIT_OK);
 		},
