@@ -1964,6 +1964,57 @@ textarea:focus-visible {
  *    此前三行待办是 14px/600/纯黑，比输入卡的 15px 占位符还重 ——
  *    抢重点的是清单而不是输入卡，这才是「整体没有视觉重点」的成因。
  */
+/* ── 首页「最近会话」───────────────────────────────────────────────
+ * 与 home-guide 同族：--bg-raised 次级面、无边框（§3.7）、行距 --space-3。
+ * 行是 button（整行可点、键盘可达），hover 走唯一 hover 底色 --bg-hover。
+ * 标题/时间两档文字（--text-list 主 / --text-meta 次），不引入新档。
+ * 与清单的间距同「清单→输入卡」的 --space-5：两块都是输入卡上方的次级面，
+ * 节奏一致；内部行距 --space-3 与清单行距一致。 */
+.home-recent {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin-bottom: var(--space-5);
+	padding: var(--space-4);
+	background: var(--bg-raised);
+	border-radius: var(--radius-md);
+}
+
+.home-recent-head {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.home-recent-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-3);
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-list);
+	color: var(--text);
+	text-align: left;
+	transition: background-color var(--dur-fast) var(--ease-standard);
+}
+
+.home-recent-row:hover {
+	background: var(--bg-hover);
+}
+
+.home-recent-title {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.home-recent-time {
+	flex: none;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
 .home-guide {
 	display: flex;
 	flex-direction: column;

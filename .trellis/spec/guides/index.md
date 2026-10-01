@@ -30,10 +30,16 @@
 
 | 位置 | 做什么 |
 | --- | --- |
-| `src/shared/ipc.js` | 定义常量（**唯一的字符串字面量来源**） |
-| `src/preload/index.js` | 通过 contextBridge 暴露 |
+| `src/shared/ipc.js` | 定义常量（主进程 import 的那份） |
+| `src/preload/index.js` | **自己持有一份 `INVOKE` 常量表 +** 通过 contextBridge 暴露 |
 | `src/main/index.js` | `registerIpc()` 里路由 |
 | 消费方（daemon / renderer） | 使用 |
+
+**⚠️ preload 的表是手工同步的副本，不是 import**（preload 构建为独立产物、
+不引 shared 模块是既有架构）。**加通道时两张表都要写**——只写 shared 那份时，
+preload 侧 `INVOKE.xxx` 是 `undefined`，报错形态是
+`Error processing argument at index 1, conversion failure from undefined`
+（2026-10-02 加主题通道时踩过：报错指向「参数序列化」，极易误判为 handler 侧问题）。
 
 **任何一处用了裸字符串而不是常量引用，都是一颗定时炸弹** ——
 改名时不会报错，只会静默失效。
