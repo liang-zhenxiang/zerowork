@@ -147,6 +147,47 @@
 
 ---
 
+## 四·补、GitHub 访问时断时续：先诊断，再开关（别凭印象切）
+
+**现象**：`gh api` / `git push` 间歇性报 `EOF` / `TLS handshake timeout` /
+`unexpected EOF` —— 同一条命令这次成功下次失败，CI 操作（issue 编辑、merge、
+check 轮询）被拖慢或中断。
+
+**为什么会这样**：到 GitHub 的网络路径不稳（直连抖动、或本地代理节点抖动，
+**两者都可能**）。哪条路更稳**因人、因时段而异**——有人必须走代理才能访问，
+有人直连更快而代理节点反而丢包。所以不要把「开代理」或「关代理」
+当成本仓库的固定结论，**当次实测当次定**。
+
+**诊断三步**（一条轻量命令连测三次，比较成功率与耗时）：
+
+```bash
+for i in 1 2 3; do time gh api repos/liang-zhenxiang/zerowork --jq '.full_name'; done
+```
+
+分别在「当前环境」「开代理」「关代理」三种状态下各测一轮，**哪个稳用哪个**。
+（本机若有 `proxy` / `unproxy` 这类 alias 可直接用；**那是个人配置，不是每个人都
+有** —— 没有的同事按自己的方式设置 `https_proxy` 环境变量即可，不要依赖别名。）
+
+**两条环境注意**：
+
+1. 若要开代理跑本仓库的测试：`no_proxy` 必须排除本地回环与内网段
+   （至少 `127.0.0.1,localhost`），否则 e2e 的 mock 模型服务
+   （`127.0.0.1` 随机端口）会被劫持进代理，用例成片假失败。
+2. npm 已配置国内镜像的机器上，`npm audit` 仍要显式
+   `--registry=https://registry.npmjs.org/`（AGENTS.md 既有规则，同属
+   「环境差异不要写死进流程」这一族）。
+
+**都不稳时的兜底**：给 gh/git 命令包一层重试，而不是人盯着手动重敲——
+
+```bash
+for i in 1 2 3; do gh issue edit 21 --body-file /tmp/roadmap.md && break; sleep 30; done
+```
+
+判定成败**永远看命令退出码之后的远端真实状态**（`gh pr view --json state`），
+不要看有没有报错文本——这与 AGENTS.md「merge/push 之后必须复核远端」是同一条。
+
+---
+
 ## 五、与 Trellis 任务流程的关系
 
 - **一个任务 = 一个分支 = 一个 PR**
