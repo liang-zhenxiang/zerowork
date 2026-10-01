@@ -93,6 +93,14 @@ jobs:
       - name: 校验首次运行指引
         run: npm run check:release-notes
 
+      # `src/renderer/src/vendor-*.js` 是随安装包分发的预打包 bundle，但**不在 npm 依赖图里**：
+      # 它们不是依赖、原包已移出生产依赖、Dependabot 里还被 ignore，而且升级 package.json
+      # 根本不改变随包的字节。于是「清单有没有腐烂」成了唯一的防线 —— 新引入一份 vendored
+      # bundle 而不登记、或清单里的版本与 bundle 内的版本标记对不上，这条就会红。
+      # 不查漏洞数据库（那会让门禁依赖网络），见 scripts/check-vendored-deps.mjs
+      - name: 校验 vendored 依赖清单一致性
+        run: npm run check:vendored-deps
+
       - name: 校验随包内容完整性
         run: npm run check:resources
 

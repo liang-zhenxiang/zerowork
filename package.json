@@ -73,6 +73,7 @@
     "check:commit-msg": "node scripts/check-commit-msg.mjs",
     "check:docs": "node scripts/check-docs.mjs",
     "check:design-exceptions": "node scripts/check-design-exceptions.mjs",
+    "check:vendored-deps": "node scripts/check-vendored-deps.mjs",
     "check:resources": "node scripts/check-resources.mjs",
     "check:line-endings": "node scripts/check-line-endings.mjs",
     "check:renderer-assets": "node scripts/check-renderer-assets.mjs",
