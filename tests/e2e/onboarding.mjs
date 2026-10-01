@@ -150,6 +150,24 @@ const card = await win.evaluate(() => {
 // 拿界面上的卡片标题回查数据 —— 断的是「界面上这一张」，不是「数据里的某一张」
 const cardData = CASES.find((c) => c.title === card?.title);
 
+await h.check("清单未完成行整行可点（issue #72：指针/role/Tab）", async () => {
+	const r = await win.evaluate(() => {
+		const row = document.querySelector(".home-guide-row-action");
+		if (row === null) return { found: false };
+		const style = getComputedStyle(row);
+		return {
+			found: true,
+			cursor: style.cursor,
+			role: row.getAttribute("role"),
+			tabIndex: row.getAttribute("tabindex"),
+		};
+	});
+	assert.ok(r.found, "找不到未完成的可点行（.home-guide-row-action）——整行可点没接上？");
+	assert.equal(r.cursor, "pointer", `可点行的指针是 ${r.cursor}`);
+	assert.equal(r.role, "button", "整行应挂 role=button（键盘可达性）");
+	assert.notEqual(r.tabIndex, "-1", "整行应可 Tab 聚焦");
+});
+
 await h.check("案例卡对应 cases.json 里的一条真实数据，且它绑定了专家", () => {
 	assert.ok(card !== null, "首页没有渲染出任何 .case-card");
 	assert.ok(cardData !== undefined, `界面上的案例「${card?.title}」在 cases.json 里找不到`);
