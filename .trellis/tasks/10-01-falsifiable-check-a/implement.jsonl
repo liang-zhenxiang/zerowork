@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "第 5 条：无法证伪的断言；第 4 条：竞态"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "沙箱/权限档位设计，以及「提权必须严格变宽」的语义"}
