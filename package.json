@@ -75,6 +75,7 @@
     "check:resources": "node scripts/check-resources.mjs",
     "check:line-endings": "node scripts/check-line-endings.mjs",
     "check:renderer-assets": "node scripts/check-renderer-assets.mjs",
+    "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:package-size": "node scripts/check-package-size.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
     "test:gui:bridge": "node tests/e2e/bridge-rest.mjs",

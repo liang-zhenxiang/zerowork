@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：反向验证、断言不得削弱"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "检查对外文字是否符合中文要求"}

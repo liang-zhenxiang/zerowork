@@ -16,6 +16,7 @@
 - [自动化设施一览](#自动化设施一览)
 - [测试分层](#测试分层)
 - [随包依赖的取舍](#随包依赖的取舍)
+- [安装包签名：为什么没有，以及为什么先不申请](#安装包签名为什么没有以及为什么先不申请)
 - [日常维护](#日常维护)
 - [处理 Issue](#处理-issue)
 - [审查 PR](#审查-pr)
@@ -459,6 +460,92 @@ Contents/Resources/app/out     27 MB   渲染层产物
 
 ---
 
+## 安装包签名：为什么没有，以及为什么先不申请
+
+安装包**既不签名也不公证**（`electron-builder.yml` 的 `mac.identity: null`、
+CI 里的 `CSC_IDENTITY_AUTO_DISCOVERY: "false"`）。代价是用户第一次打开会被系统拦下，
+所以**三处必须写明怎么打开** —— 这不是可选的礼貌，是打包决策的一部分。
+
+### 三处指引的落点
+
+| 位置 | 为什么是这里 |
+| --- | --- |
+| `release.yml` 组装发布说明的**最前面** | **最重要的一处**。用户是从 Release 页下载的，装完打不开时回到的也是这个页面；他要的答案只有一个 ——「为什么打不开、我该怎么办」 |
+| `README.md` / `README.en.md` 的「用安装包」 | 从仓库首页进来的人 |
+| `docs/USAGE.md` 的开头 | 从文档进来的人 |
+
+**顺序是契约，不是排版偏好**：指引必须在 PR 清单**之前**。
+v0.3.0 及以前它被放在发布说明**最末尾**，结果用户没翻到，直接来问
+「有一个装完打不开，是正常的吗？」。
+
+守卫是 `scripts/check-release-notes.mjs`（`npm run lint:all` 与 CI 的静态检查都跑）。
+它**按能力断言，不按措辞断言**：改文案不会让它变红，删掉任一能力（未签名说明 /
+「这是正常的」/ macOS 的打开方式 / Windows 的打开方式）才会。
+
+### `codesign` 报 `Identifier=Electron`？那不影响任何事
+
+`Info.plist` 里的 `CFBundleIdentifier` 是 `io.github.liang-zhenxiang.zerowork`，
+但 `codesign -dv` 报 `Identifier=Electron`。**本条实测过，结论是「不修」**：
+
+- **来源**：它来自上游 Electron 预编译二进制自带的 linker-signed adhoc 签名。
+  实测 `node_modules/electron/dist/Electron.app/Contents/MacOS/Electron` 与打包后的
+  `ZeroWork`，两者的 CodeDirectory 逐字节相同（`size=392 flags=0x20002(adhoc,linker-signed)`）。
+  `identity: null` 意味着 electron-builder **全程不做签名**，于是改名（`Electron` → `ZeroWork`）
+  与重写 `Info.plist` 都不会碰到它，所以还多了个 `Info.plist=not bound`。
+  上游 Electron 自己也是 `CFBundleIdentifier=com.github.Electron` 配 `Identifier=Electron`，
+  即这个错位不是本仓库引入的。
+- **能不能修**：能。实测 `codesign --force --sign - --identifier io.github.liang-zhenxiang.zerowork`
+  之后 `Identifier` 就对了（并且补上了 `Info.plist entries=32`、
+  `Sealed Resources version=2 rules=13 files=16812`）。
+- **为什么仍然不修**：**Gatekeeper 的判据是「有没有 Developer ID 证书链 + 有没有公证票据」，
+  `Identifier` 字符串不参与。** 实测改完后 `spctl --assess` 依然拒绝，
+  用户看到的现象一模一样。而 ad-hoc 签名**无论标识对不对都没有稳定的
+  Designated Requirement**（DR 就是 cdhash，每次构建都变），
+  所以 TCC 授权也不会因此跨版本保留。
+  换言之：成本是给构建加一个 `afterPack` 重签步骤（而 `identity: null` 本来就是为了跳过它），
+  换来用户可见的变化是零 —— 为「看起来整洁」引入一个发布路径上的新失败点，不值得。
+- 另外实测确认：`codesign --verify` 在**上游原封不动的 Electron.app** 上同样报
+  `code has no resources but signature indicates they must be present`
+  （源自 `Electron Framework.framework` 那个 linker-signed 签名）。
+  这是 Electron 未签名构建的基线，不是本项目的打包缺陷。
+
+### 评估过、但**没有做**的：申请证书 + 公证
+
+**收益**：macOS 上双击即可打开（没有 Gatekeeper 弹窗）；Windows 上 SmartScreen
+的声誉仍要下载量积累，不是签了就好。
+
+**成本**（这是决定不做的主因，按量级从大到小）：
+
+1. **要 Apple Developer Program 会员资格**（个人 99 美元/年；组织还需要 D-U-N-S 编号）。
+   这是**持续支出**，不是一次性的
+2. **CI 要多管三组密钥**：证书 p12 及其密码、Apple ID + App 专用密码（或 App Store Connect
+   API Key）、Team ID。多一组长期凭据就多一条泄露面，也要求 `SECURITY.md` 的威胁模型同步更新
+3. **必须开 hardened runtime**，而它对本项目不是「打开开关」这么简单：
+   daemon 走 `utilityProcess.fork`、沙箱用 `koffi` 加载原生模块、`asar: false`
+   让代码以真实文件落盘 —— 这些都要靠 entitlements
+   （`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation` …）
+   逐项放行，每一项都要在**真实的 Windows/macOS 用户路径**上验证。放行错了的表现是
+   「签了名反而跑不起来」，而那时距离发布只差一步
+4. **公证是发布路径上的新单点**：`notarytool` 要联网、要排队（分钟级），
+   失败会阻断发布。而当前的发布设计是「文案出问题不该阻断发布」，
+   引入一个会阻断的环节要重新想清楚降级策略
+
+**结论：现在不做。** 依据是投入产出比 —— 项目处于 0.x、**只有 Windows 是完整支持的平台**、
+macOS 上命令执行本来就受限，因此「macOS 首次打开多一步」是当前阶段可以接受的代价；
+而上面四项成本是持续的、且第 3 项有真实的回退风险。
+
+**但代价必须如实说出来**：所以「安装包没有代码签名」写在了**下载页（发布说明最前面）**、
+README 与使用指南三处，而不是留一句「介意的话请从源码构建」。
+信任缺口的另一半由**构建溯源证明**补上（`build-installers.yml` 用 OIDC 签发，
+`gh attestation verify` 可验证）—— 它替代不了签名，但把「无法验证来源」变成了「可验证」。
+
+> 🚫 **不做自签名脚本，也不教用户绕过 Gatekeeper。** 那是在教用户绕过系统安全机制，
+> 而且会让「未签名」这件事显得可以糊弄过去。给用户的路径只有两条：
+> **按系统提示正常放行**（右键打开 / 仍要运行），或者**从源码构建**。
+> 这条边界写在这里，是为了让「用户嫌麻烦」时的下一次讨论不用从零开始。
+
+---
+
 ## 日常维护
 
 ### 每周（约 10 分钟）
@@ -583,11 +670,16 @@ git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
 ```
 
-推送 tag 后 `release.yml` 会自动生成三段式发布说明并附上安装包：
+推送 tag 后 `release.yml` 会自动生成发布说明并附上安装包。
+**四段的顺序是契约**（`scripts/check-release-notes.mjs` 守着，见[安装包签名](#安装包签名为什么没有以及为什么先不申请)）：
 
-1. **发布摘要**（配了 `ANTHROPIC_API_KEY` 才有；没有则跳过，不影响发布）
-2. **本版本的变更内容**（从 `CHANGELOG.md` 对应段落提取）
-3. **变更清单**（GitHub 原生 `releases/generate-notes`：PR 列表、贡献者、对比链接）
+1. **首次运行指引** —— 未签名说明 + 两个平台各自怎么打开。**必须最靠前**
+2. **发布摘要**（配了 `ANTHROPIC_API_KEY` 才有；没有则跳过，不影响发布）
+3. **本版本的变更内容**（从 `CHANGELOG.md` 对应段落提取）
+4. **变更清单**（自己拼的中文 PR 列表 + 对比链接）
+
+> 「变更清单」**不再用** GitHub 原生的 `releases/generate-notes` ——
+> 它返回的是英文骨架，而本项目的对外文字一律中文（见 `.trellis/spec/workflow/`）。
 
 ### 发布幂等
 
