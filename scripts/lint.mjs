@@ -15,6 +15,7 @@
  * | --- | --- |
  * | eslint、prettier、tsc | **提交信息规范** —— CI 校的是 PR 标题，而标题在 PR 建立之前根本不存在。本地全绿不等于 commit-messages 会绿 |
  * | 文档链接、随包内容、行尾、渲染层产物契约 | **端到端 GUI 测试** —— 需要真实图形环境，CI 在 macOS 上跑 |
+ * | 随包体积与依赖契约（需先 `dist:dir`，否则跳过） | |
  * | actionlint、yamllint、zizmor（工作流） | **安装包构建** —— 见 .github/workflows/build-installers.yml |
  *
  * 三条如实说明：
@@ -124,6 +125,17 @@ function main() {
 			'渲染层产物契约',
 			'out/renderer/assets 不存在（尚未构建）',
 			'npm run build && npm run check:renderer-assets',
+		);
+	}
+
+	// 随包体积契约：需要先**打包**（不只是构建）。没打包就明确跳过，不假装通过。
+	if (existsSync(path.join(ROOT, 'release'))) {
+		runCheck('随包体积与依赖契约', process.execPath, ['scripts/check-package-size.mjs']);
+	} else {
+		skipCheck(
+			'随包体积与依赖契约',
+			'release/ 不存在（尚未打包）',
+			'npm run dist:dir && npm run check:package-size',
 		);
 	}
 
