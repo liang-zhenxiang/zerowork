@@ -18,3 +18,13 @@
   中文文档改动后必须立即跑 U+FFFD 扫描（本次 USAGE.md 险些带伤合入，扫描抓回）。
 - 测试资产：check-theme-tokens（静态契约）、gui-theme（8 例含亮度差断言+反向验证 0/8）、
   gui-recent（5 例）。taskList 尚 in_progress：B 部分剩 P1-2 专注模式、P1-3 widget 成品感。
+
+## 2026-10-02 续：issue 驱动的体验批次（PR #75-#78）
+
+- 调研结论转成 5 个 issue（#70-74）并挂进 Roadmap 计划中——后续开发跟着 issue 走。
+- #76 专注模式：折叠能力（按钮/过渡/a11y）早已存在，缺的只是键盘路径——改动极小。
+  CI 抓到本地看漏的 eslint（合成 KeyboardEvent 的 no-undef），改走 Playwright 真实键盘。
+- #77 widget 徽标：rebase 时 #76 已 squash 合入，旧提交用 rebase --skip 跳过。
+- #74 核验完成：公式渲染缺位确认，接入评估（体积/离线字体/双主题）落 issue 评论，
+  按「先核验再定范围」不冒然背上三件套依赖。
+- 剩余：#73 会话分组（中）、#74 接入（中）。
