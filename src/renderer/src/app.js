@@ -14975,6 +14975,30 @@ function guideText(readiness) {
   }
   return { title: "还没有选定要用哪个模型", action: "去选一个模型" };
 }
+/*
+ * 首页「最近会话」——把「第二次打开」的路径从两跳（会话列表 → 找）缩成一跳。
+ * 显示条件与上手清单互补：有历史会话就出现（老用户的首页不再只有静态引导）；
+ * 新用户看不到它，只看到清单。视觉语言与 home-guide 一致（--bg-raised 次级面、
+ * 无边框——§3.7 次级辅助面不带边框），行是列表不是内容卡。
+ */
+function HomeRecentSessions({ sessions, onResume }) {
+  if (sessions.length === 0) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-recent", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-recent-head", children: "最近会话" }),
+    sessions.map((task) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        className: "home-recent-row",
+        onClick: () => onResume(task.path),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-recent-title", children: task.title === void 0 || task.title === "" ? "未命名会话" : task.title }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-recent-time", children: formatMessageTime(task.modifiedAt, Date.now()) })
+        ] },
+      task.id
+    ))
+  ] });
+}
 function OnboardingChecklist({
   modelId,
   cwd: cwd2,
@@ -15075,7 +15099,7 @@ function OnboardingChecklist({
       ] }, row.key)),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconShieldSecured, { size: 15 }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text home-guide-note", children: "本地优先 · 对话、文件与配置都在这台机器上" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text home-guide-note", title: "ZeroWork 是本地优先应用：工作空间文件、会话记录、偏好与 API Key 都只存在这台电脑的磁盘上，不经过任何第三方服务器（模型请求直接发往你在设置里配置的服务商）。", children: "本地优先 · 对话、文件与配置都在这台机器上" })
       ] })
     ] })
   ] });
@@ -15792,6 +15816,8 @@ function HomeView({
   sceneId,
   welcome,
   modelId,
+  recentSessions,
+  onResumeSession,
   thinkingLevel,
   availableThinkingLevels,
   cwd: cwd2,
@@ -15932,6 +15958,14 @@ function HomeView({
             onOpenSettings,
             onOpenWorkspace: () => setWsPickerOpen(true),
             onFocusComposer: () => composerRef.current?.focus()
+          }
+        ),
+        /* 放清单正下方：老用户三步全绿后清单自动收起，这块顶上来成为输入卡上方的主体。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          HomeRecentSessions,
+          {
+            sessions: recentSessions,
+            onResume: onResumeSession
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
@@ -67770,6 +67804,16 @@ function App() {
     setPendingPrefill("帮我创建一个 XXX 专家，擅长 XXXXX。我的经验是：[请补充你的行业背景、相关经验]");
     setView("home");
   }, []);
+  /*
+   * 首页「最近会话」的数据源：taskList 按 modifiedAt 倒序取前 3。
+   * 排序复用侧栏分组用的 byModifiedDesc（同一口径：谁最近动过谁靠前），
+   * 不在这里另写比较器。当前会话也在列表里——从首页点它等于「回到刚才那屏」，
+   * 与侧栏行为一致，不特判剔除。
+   */
+  const recentForHome = reactExports.useMemo(
+    () => [...taskList ?? []].sort(byModifiedDesc).slice(0, 3),
+    [taskList]
+  );
   const resumeSeqRef = reactExports.useRef(0);
   const resumeTask = reactExports.useCallback(
     (path2) => {
@@ -68091,7 +68135,9 @@ function App() {
         onWorkspaceChanged: resyncSnapshot,
         onOpenSkills: () => openSkillsAt("skills"),
         onOpenConnectors: () => openSkillsAt("connectors"),
-        onTodo: showTodo
+        onTodo: showTodo,
+        recentSessions: recentForHome,
+        onResumeSession: resumeTask
       }
     ),
     view === "chat" && /* @__PURE__ */ jsxRuntimeExports.jsx(
