@@ -34,6 +34,27 @@
  *   失败时反而什么都留不下 —— 这是本项目真实踩过的
  * - **失败时自动补拍**：`finish()` 在有任何 FAIL 时会再截一张 `_failure.png`，
  *   哪怕用例自己忘了截图
+ *
+ * ## 退出码是三档，不是一个布尔值
+ *
+ * `finish()` 结束时不再只回答「绿/红」，而是分三种情形（判定逻辑集中在
+ * `classifyRun()`，单测钉在 `tests/unit/harness-exit-code.test.mjs`）：
+ *
+ * | 退出码 | 含义 | 触发条件 |
+ * | --- | --- | --- |
+ * | `0` | 通过 | 至少有一条 PASS，且没有 FAIL、没有渲染层未捕获异常 |
+ * | `1` | 失败 | 有 FAIL，或有渲染层未捕获异常 |
+ * | `2` | **无信号** | 一条都没通过：整轮跳过，或压根没记过任何断言 |
+ *
+ * 为什么要单分出 `2`：**一个永远跳过的测试，和一个不存在的测试，在门禁上
+ * 没有区别** —— 两者提供的信号都是零。把它们混进「失败」会让 CI 日志误导人
+ * （看起来像断言挂了），所以刻意给不同的码：`1` 是「有东西坏了」，
+ * `2` 是「什么都没验」。
+ *
+ * **注意 `2` 是刻意的，不是 bug**：本仓库有若干脚本依赖本机 `~/.claude/settings.json`
+ * 的模型端点，端点在 CI 上永远探不到 —— 于是它们在 CI 上永远拿 `2`。
+ * 那正是事实：**这些文件在 CI 上没有信号**。正确处置是别把它们当成 CI 的覆盖，
+ * 而不是把这里的判定调松。
  */
 
 import { _electron as electron } from 'playwright';
@@ -51,6 +72,57 @@ const green = (t) => paint('32', t);
 const red = (t) => paint('31', t);
 const yellow = (t) => paint('33', t);
 const dim = (t) => paint('2', t);
+
+/**
+ * 退出码。**三档，不是一个布尔值** —— 语义见文件头的表。
+ *
+ * - `EXIT_OK`（0）：至少一条 PASS，且没有 FAIL / 渲染层异常
+ * - `EXIT_FAILED`（1）：有东西坏了（断言挂了、渲染层抛了）
+ * - `EXIT_NO_SIGNAL`（2）：什么都没验（整轮跳过，或没记过任何断言）
+ *
+ * 刻意不复用 `1`：`1` 在 CI 日志里的意思是「断言失败」，而「全跳过」不是
+ * 断言失败 —— 混成一个码会让人去查一个根本不存在的缺陷。
+ */
+export const EXIT_OK = 0;
+export const EXIT_FAILED = 1;
+export const EXIT_NO_SIGNAL = 2;
+
+/**
+ * 依据一轮运行的计数判定退出码。**纯函数** —— 判定逻辑单独可测
+ * （`tests/unit/harness-exit-code.test.mjs`），不依赖真的启动 Electron。
+ *
+ * ## 为什么「一条都没通过」要单独成一档
+ *
+ * 回到那个问题：**一个永远跳过的测试，和一个不存在的测试，区别是什么？**
+ *
+ * 在门禁这一层，**没有区别** —— 两者都没有让任何断言真的跑过，提供的信号都是零。
+ * 既然「不在 CI 里跑的测试等于没有测试」（见 `.trellis/spec/testing/` 第 10 条），
+ * 那么「跑了但一条都没通过」同样是零信号，**不能算绿**。
+ *
+ * 这条规则严格落在「**没有一条通过**」上，而不是「有跳过」上：
+ * `passed > 0 && skipped > 0`（例如 5 通过 / 1 跳过）仍然是绿 ——
+ * 有跳过本身不是问题，**跳过掩盖了「什么都没验」才是**。
+ *
+ * 优先级：失败 > 无信号 > 通过。有 FAIL 时先报 FAIL，因为那才是可行动的缺陷。
+ *
+ * ⚠️ **`skipped` 刻意不作为判定输入**。判定只看「有没有通过」，不看「跳过了几条」：
+ * 「跳过了 N 条」可以是完全正常的（平台不适用、上游没产出），拿它当失败条件是误伤；
+ * 真正致命的只有「一条都没通过」。所以调用方传不传 `skipped` 都不影响结果，
+ * 它只是报告里的一个数字。
+ *
+ * @param {{passed: number, failed: number, pageErrors?: number}} counts
+ * @returns {{code: number, kind: 'ok' | 'failed' | 'no-signal'}}
+ */
+export function classifyRun({ passed, failed, pageErrors = 0 }) {
+	// 有失败就是失败 —— 哪怕同时也有跳过
+	if (failed > 0) return { code: EXIT_FAILED, kind: 'failed' };
+	// 渲染层未捕获异常同样算失败（界面出问题最直接的信号）
+	if (pageErrors > 0) return { code: EXIT_FAILED, kind: 'failed' };
+	// 一条都没通过：整轮跳过（passed 0 / skipped N）或压根没记断言（0/0/0）。
+	// 两者都与「本文件不存在」等价，不能算绿。
+	if (passed === 0) return { code: EXIT_NO_SIGNAL, kind: 'no-signal' };
+	return { code: EXIT_OK, kind: 'ok' };
+}
 
 /**
  * 轮询等待条件成立。
@@ -403,7 +475,7 @@ export function createHarness(opts) {
 			}
 			const summary = `通过 ${passed.length}/${results.length}`;
 			process.stdout.write(
-				`\n${failed.length === 0 ? green(summary) : red(summary)}` +
+				`\n${failed.length === 0 && passed.length > 0 ? green(summary) : red(summary)}` +
 					(skipped.length > 0 ? dim(`（跳过 ${skipped.length}）`) : '') +
 					`\n截图: artifacts/${name}/\n`,
 			);
@@ -431,14 +503,36 @@ export function createHarness(opts) {
 				);
 			}
 
-			// 断言失败与「渲染层抛了未捕获异常」都要让退出码非零 ——
-			// 后者是界面出问题最直接的信号，不能只记不报
-			const exitCode = failed.length === 0 && pageErrors.length === 0 ? 0 : 1;
+			// 退出码三档，判定集中在 classifyRun()（单测钉住它，本函数只负责打印与 exit）。
+			//
+			// 断言失败、渲染层未捕获异常、以及「一条都没通过」都要非零 ——
+			// 最后这条是本轮补上的：全跳过的运行此前退出码是 0，于是**一个一条都没跑的
+			// 测试文件在 CI 上表现为绿色**。它和「文件不存在」没有区别，不能算绿。
+			const verdict = classifyRun({
+				passed: passed.length,
+				failed: failed.length,
+				pageErrors: pageErrors.length,
+			});
+
 			if (failed.length === 0 && pageErrors.length > 0) {
 				process.stdout.write(red(`\n渲染层有 ${pageErrors.length} 个未捕获异常，判为失败\n`));
 				for (const e of pageErrors) process.stdout.write(`  ${e}\n`);
 			}
-			process.exit(exitCode);
+
+			if (verdict.kind === 'no-signal') {
+				// 说清「为什么非零」与「这不是失败」——退出码 2 与 1 的含义不同，
+				// 混为一谈会让人去查一个不存在的缺陷
+				process.stdout.write(
+					red(`\n一条断言都没通过（通过 ${passed.length} / 跳过 ${skipped.length}）—— 判为「无信号」\n`) +
+						dim(
+							`  全跳过的运行与「本文件不存在」在门禁上没有区别：都没有让任何断言真的跑过。\n` +
+								`  这不是本文件的断言失败（那不是退出码 1），而是**本文件在当前环境没有信号** ——\n` +
+								`  跳过原因见上面每一条 [SKIP]。若不是有意为之，请修复它依赖的前置条件。\n`,
+						),
+				);
+			}
+
+			process.exit(verdict.code);
 		},
 	};
 
