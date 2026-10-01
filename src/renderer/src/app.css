@@ -4803,6 +4803,43 @@ textarea:focus-visible {
 	flex: 0 0 auto;
 }
 
+/* ── 产物徽标与定稿入场（issue #71，登记见 DESIGN.md §10.3）──────── */
+.widget-artifact-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	flex: 0 0 auto;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.widget-artifact-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	/* 品牌绿：与侧栏「已就绪」状态点同一语义位——「完成」，不是装饰
+	   （DESIGN.md 对 --brand 使用位的扩展论证见组件侧注释）。 */
+	background: var(--brand);
+}
+
+/* 定稿入场：成品落定的那一帧给一次 4px 上浮淡入（animation 语义，
+   时长 --dur-base、曲线 --ease-out，登记进 DESIGN.md §10.3）。
+   只在 .widget-finalized 挂上时触发；流式中的卡不闪。 */
+.widget-card.widget-finalized .widget-body {
+	animation: widget-finalized-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes widget-finalized-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
 .widget-status.ok {
 	color: var(--ok);
 }
@@ -11134,6 +11171,7 @@ button.agent-row {
 	.thinking-body,
 	.preview-menu,
 	.task-diag-fold-body,
+	.widget-card.widget-finalized .widget-body,
 	.ws-popover,
 	.settings-card,
 	.pop-menu,

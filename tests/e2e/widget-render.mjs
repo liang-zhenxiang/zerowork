@@ -214,6 +214,27 @@ await h.check("可视化卡片渲染到界面上（.widget-card + 标题）", as
 	console.log(`      卡片标题「${r.titleText}」，含 frame ✓`);
 });
 
+await h.check("定稿后有产物徽标与入场动效（issue #71）", async () => {
+	const r2 = await waitForFound(
+		"产物徽标出现",
+		() => {
+			const badge = document.querySelector(".widget-artifact-badge");
+			const card = document.querySelector(".widget-card");
+			if (badge === null || card === null) return { found: false };
+			const dot = badge.querySelector(".widget-artifact-dot") !== null;
+			const finalized = card.classList.contains("widget-finalized");
+			const anim = getComputedStyle(card.querySelector(".widget-body")).animationName;
+			return { found: dot && finalized, dot, finalized, anim, sample: badge.textContent };
+		},
+		{ timeout: 20_000 },
+	);
+	assert.ok(r2.dot, "徽标里没有品牌绿状态点");
+	assert.ok(r2.finalized, "卡片没挂 widget-finalized（入场动效的触发态）");
+	// 动画在动效正常的环境应播放（名称非 none）；reduced-motion 的关停由 smoke 的
+	// 减弱动效用例族覆盖，这里不重复断言。
+	assert.notEqual(r2.anim, "none", `定稿入场动画没生效：animationName=${r2.anim}`);
+});
+
 await h.check("最终回复也渲染出来（工具调用后模型继续说话）", async () => {
 	const r = await waitForFound(
 		"界面上出现最终回复",

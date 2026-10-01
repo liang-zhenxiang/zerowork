@@ -254,6 +254,10 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 - **分类色板只有 6 槽** —— 超出的分类走比 system 更弱一档的中性灰，
   区分靠行名与数字，不靠色相
 - **空会话首条消息的入场时机** —— 只在空会话出第一条消息时播
+- **widget 定稿入场**（2026-10-02，issue #71）—— `.widget-card.widget-finalized
+  .widget-body` 的 4px 上浮淡入，`--dur-base` + `--ease-out`；只在内容成功定稿
+  （finalized）的那一帧触发，流式中的空壳不入场闪；曲线用 `--ease-out`（animation
+  入场默认曲线，§3.2），已加入 §10.3.1 的 reduced-motion 关停清单
 
 ### §10.3.1 减弱动态效果（`prefers-reduced-motion: reduce`）
 
