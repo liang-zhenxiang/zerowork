@@ -23,6 +23,21 @@
 档位不够用时，先改本文档并写明理由，再改 Token —— 不许在组件里加第 8 个间距档。
 数值相同但**语义**不同时必须各开一个语义名，不能因为「值一样」就复用。
 
+### §2.0 主题：双块同构，属性驱动
+
+Token 真源有两块：`:root`（亮色基准）与 `[data-theme="dark"]`（暗色，2026-10-02 起接线生效）。
+**两块必须同构**——亮色块里所有随主题变化的 token（颜色 / 阴影 / 遮罩 / 分类板），
+暗色块都要有对应覆盖；间距 / 字号 / 圆角 / 时长等档位类**不随主题变**，只在 `:root` 定义。
+这条由 `scripts/check-theme-tokens.mjs`（`npm run check:theme-tokens`，已收编 lint:all）守护：
+加新颜色 token 忘配暗色会在静态检查就红，不用等暗色截图。
+
+驱动方式是**单一路线**：渲染层挂载前同步设 `documentElement` 的 `data-theme` 属性
+（`app.js` 的 `initTheme`；三档 `light` / `dark` / `system`，`system` 档由 JS 求值成显式的
+`light` / `dark`——app.css **没有** prefers-color-scheme 版暗色块，widget 的 CSS 才有双路）。
+防闪变的两级：主进程建窗口前按偏好设 `nativeTheme.themeSource`（决定渲染层媒体查询取值
+与 `backgroundColor` 首帧底色），渲染层用 localStorage 镜像同步初值。持久化真源是
+`preferences.json` 的 `theme` 字段（daemon 写），**缺省 `light`**——存量用户升级后界面不变。
+
 ### §2.1 文字色三级
 
 主文字 / 次文字 / 弱文字共三级。停用态用「降一档灰度」表达，不新造颜色。
@@ -282,7 +297,7 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 | --- | --- | --- |
 | 文件类型分色 | 9 个选择器、7 个色值：`.doc-file-pdf` `#c94f4f`、`.doc-file-word` / `.file-icon-code` `#4a7bc8`、`.doc-file-excel` / `.file-icon-markdown` `#4b9e6b`、`.doc-file-ppt` `#d98a3d`、`.file-icon-config` `#b7903d`、`.file-icon-image` `#8b6bc8`、`.file-icon-media` `#c85a8f` | 按**族**分色（族来自 `shared/doc-formats.ts` 的 `docBadgeOf`），**信息性**不是状态。`--cat-*` 只有 6 槽，塞不下；且这组色要能与各主题共存，塞进分类槽会挤掉真正的分类语义 |
 | 专家头像底 | 8 色（`EXPERT_AVATAR_COLORS`，`app.js`） | 由名字哈希取色、只为「同屏可区分」，**没有语义**。走 token 反而会暗示它有语义 |
-| 档外阴影（6 处声明） | `.capability-chip` `0 12px 32px -8px rgba(0, 0, 0, .02)`；`.preview-panel.fullscreen` `-8px 0 24px rgb(0 0 0 / 6%)`；`.preview-menu` `0 8px 24px rgb(0 0 0 / 18%)`；`.preview-pdf-body .react-pdf__Page` 与 `.office-docx .docx-wrapper>section.docx` 的纸张阴影 `0 1px 4px rgb(0 0 0 / 15%)`（同值两处）；`.mcp-switch-thumb` / `.skill-switch-thumb` `0 1px 3px rgb(0 0 0 / 20%)` | 都是**场景值**：能力 chip 的极淡抬升、全屏面板向左的投影、预览菜单、「纸」的抬升、开关滑块的贴边投影。归 `--shadow-sm/md` 会让轻的变重、重的变轻 —— 收编的代价大于收益 |
+| 档外阴影（5 处声明） | `.preview-panel.fullscreen` `-8px 0 24px rgb(0 0 0 / 6%)`；`.preview-menu` `0 8px 24px rgb(0 0 0 / 18%)`；`.preview-pdf-body .react-pdf__Page` 与 `.office-docx .docx-wrapper>section.docx` 的纸张阴影 `0 1px 4px rgb(0 0 0 / 15%)`（同值两处）；`.mcp-switch-thumb` / `.skill-switch-thumb` `0 1px 3px rgb(0 0 0 / 20%)` | 都是**场景值**：全屏面板向左的投影、预览菜单、「纸」的抬升、开关滑块的贴边投影。归 `--shadow-sm/md` 会让轻的变重、重的变轻 —— 收编的代价大于收益。（原第 6 处 `.capability-chip` 的 `0 12px 32px -8px rgba(0,0,0,.02)` 已于 2026-10-02 收编为 `--shadow-sm`：浅色下两值几乎等值，而暗色下 2% 黑完全不可见——暗色主题接线后这处不再成立，是收编的直接动因） |
 
 > **中性面阶梯的已知倒挂（登记在案，不为了「统一」去改值）**：白底上的等效值是
 > `--bg` 255 → `--bg-raised` 247 → `--bg-hover` 242 → `--bg-chip` 240 → `--border` 230。
@@ -292,7 +307,9 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 > 正确的动作是让 `--bg-hover` 成为最深的**交互**面（非静态面），
 > 并逐个复核把 `--bg-chip` 当基线用的组件。
 
-> 这 6 处**没有暗色版**（暗色变量块只覆写 `--shadow-sm/md/lg/input`），
-> 它们是黑基阴影、落在自带亮底的元素上（纸、滑块、卡片），暗色下依然成立。
-> 若将来暗色主题真的接线（见本文件开头对暗色变量「无实测依据」的说明），
-> 这一行要重新审。
+> 这 5 处**没有暗色版**（暗色变量块只覆写 `--shadow-sm/md/lg/input`）。
+> 暗色主题已于 2026-10-02 接线（设置 → 通用 → 外观，三档；`data-theme` 属性驱动，
+> 持久化在 `preferences.json` 的 `theme` 字段，缺省 `light`）。接线时的复审结论：
+> 纸张与开关滑块的 3 处落在**自带亮底**的元素上（纸永远是白纸、滑块有自绘底），暗色下依然成立；
+> 预览菜单与全屏面板的 2 处在暗色下的分层由底色差与边框承担（`--bg` 对 `--bg-raised`），
+> 阴影弱化可接受——若暗色实测中发现分层不足，优先给这两处补暗色版而不是动档位。
