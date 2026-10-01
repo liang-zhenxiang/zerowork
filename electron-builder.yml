@@ -132,7 +132,15 @@ mac:
       arch: [arm64, x64]
   # 不签名。没有 Developer ID 证书，签名与公证都做不到 ——
   # 这不是配置问题，是证书问题，文档里必须如实告诉用户怎么打开
-  # （见 release.yml 附在发布说明末尾的那段提示）。
+  # （见 release.yml 组装发布说明时的开头那段提示；三处指引的落点与
+  # 「为什么不去申请证书」的结论写在 .trellis/tasks/10-01-first-run-guidance/）。
+  #
+  # 顺带说明 `Identifier=Electron`：那不是本配置写错的标识，而是**上游 Electron
+  # 预编译二进制自带的 linker-signed adhoc 签名**残留 —— `identity: null` 意味着
+  # electron-builder 全程不做签名，于是那个签名原样留了下来（所以 `Info.plist=not bound`）。
+  # 实测 `codesign --force --sign - --identifier <正确标识>` 能把它改对，
+  # 但那**不影响 Gatekeeper 判定**（判据是证书链与公证票据），没有意义。
+  # 完整实测记录见 docs/MAINTAINER_GUIDE.md 的「安装包签名」一节。
   identity: null
   hardenedRuntime: false
   gatekeeperAssess: false
