@@ -68,6 +68,38 @@
  * `sandbox_permissions` 参数，完全访问档下会被「提权必须严格变宽」**正确**拒掉、
  * 审计**理应**多一条 blocked（实测抓到过）。详见 B1 处的注释。
  *
+ * ## check C 验的到底是什么（含「沙箱拒绝 vs powershell 不存在」的区分）
+ *
+ * C 原先的判据是「审批请求里有 powershell」**或**「审计里有 blocked」，
+ * 两个都不成立（Issue #55）：
+ *
+ *   - `asked` **恒为 false** —— C 跑的时候档位还停在 **B 留下的 `danger-full-access`**
+ *     （C 自己从不切档），而该档的判定直接 `{kind:"allow"}`、按设计不问审批；
+ *   - `blocked` **恒为 true** —— 判据读的是**审计**，而那条记录是 **check A 留下的**
+ *     （A 开头 `auditClear()` 过，C 没清）。
+ *
+ * 于是它验的其实是「A 写过一条 blocked」：**把「受限档拒绝执行」这条链路整个删掉，
+ * 它照样绿**。现在 C **自己切到受限档、自己清审计与审批日志、开新会话跑一轮**，
+ * 只认本轮新增的副作用 —— 工具卡与审计记录。
+ *
+ * ### 沙箱拒绝 vs powershell 不存在（两者在本机都可能出现，语义相反）
+ *
+ * 本机（macOS）没有 powershell.exe，所以「结果不是 ok」**不能**当作判据 ——
+ * 它既可能是「安全约束生效了」，也可能只是「环境里没有这个可执行文件」。
+ * 两者实测可区分（判据来源见 `command-exec.js`）：
+ *
+ * | | 沙箱拒绝（要守的性质） | powershell 不存在（环境缺失） |
+ * | --- | --- | --- |
+ * | 发生在 | **执行之前**（`refuseCommand`） | 执行之中（`spawn` ENOENT） |
+ * | 工具返回值 | `{blocked:true, category:"sandbox-unavailable"}` | **抛错**（`spawnFailureText`） |
+ * | 卡片 `outcome` | `blocked`（按 `details.blocked` 判出） | `error`（按 `isError` 判出） |
+ * | 卡片正文 | 「命令未执行：**本机的命令沙箱不可用**（…）」 | 「**无法启动 powershell.exe**：spawn … ENOENT…」 |
+ * | 沙箱审计 | 多一条 `outcome:"blocked"`，detail 以「**沙箱不可用，命令未执行**」开头 | **不写** |
+ *
+ * 所以 C 同时钉三件事：卡片 `outcome` 是 `blocked`、卡片正文带沙箱拒绝的标记、
+ * 本轮审计里有那条 `sandbox/blocked` 记录。三条标记都是文案常量，
+ * 集中在文件上半部分的 `SANDBOX_REFUSAL_CARD_MARK` 一处。
+ *
  * ## check A 的等待条件（原先也被丢弃了）
  *
  * 原实现是 `await askModelToRun(promptText)`：等的同样是「模型的那段文字」，
@@ -151,6 +183,35 @@ async function probeEndpoint() {
 /** B 条的两半：**平台无关**的那半 / **命令真的执行**的那半（非 Windows 上跳过）。 */
 const LABEL_TOOL_REACHED = "完全访问档下：命令请求真的走到工具层（工具结果不是「被拦下」）";
 const LABEL_COMMAND_EXECUTED = "完全访问档下：命令真的执行、输出回传到工具结果";
+/** C 条：受限档下命令被拒绝执行（安全性质，只在**没有命令沙箱**的平台上可观察）。 */
+const LABEL_RESTRICTED_REFUSED = "命令执行：受限档下绝不静默执行（沙箱不可用时命令被拒绝）";
+
+/**
+ * 「命令被**沙箱**拒绝」与「本机没有 powershell.exe」是两件事，判据必须分开。
+ *
+ * 两者在本机（macOS）上都可能出现，而语义完全相反 —— 前者是**要守的安全性质**
+ * （沙箱不可用 ⇒ 宁可不执行），后者只是**环境缺失**（换台 Windows 就没有）。
+ * 如果只用「结果不是 ok」当判据，就会把「环境里没有 powershell」当成
+ * 「安全约束生效了」，这正是本条用例此前**无法证伪**的一部分。
+ *
+ * 判定依据（源码位置，实测输出见文件头）：
+ *   - **沙箱拒绝**：`createSandboxedRunner` 在**执行之前**调 `refuseCommand`
+ *     （`command-exec.js` 的 `probe.available === false` 分支）→ 工具返回
+ *     `{blocked:true, category:"sandbox-unavailable"}`，卡片的 `outcome` 由
+ *     `ledger.js` 的 `toolOutcomeFrom` 按 `details.blocked` 判成 **"blocked"**；
+ *     卡片正文以「命令未执行：本机的命令沙箱不可用」开头；
+ *     审计里同时多一条 `category:"sandbox" / outcome:"blocked"` 的记录。
+ *   - **powershell 不存在**：`danger-full-access` 分支绕过沙箱、直接
+ *     `spawn("powershell.exe")`，ENOENT 让 `runCommand` **抛错**
+ *     （`spawnFailureText`）→ 工具是**抛异常**退出，卡片是 **"error"** 而不是
+ *     "blocked"，正文写「无法启动 powershell.exe：…」，**且不写沙箱审计**。
+ *
+ * 所以两者可以区分：`outcome` 不同（blocked vs error）、文案不同、审计有无不同。
+ * 下面的断言把这条区分钉死成三条标记。
+ */
+const SANDBOX_REFUSAL_CARD_MARK = "本机的命令沙箱不可用";
+const SANDBOX_REFUSAL_AUDIT_MARK = "沙箱不可用，命令未执行";
+const POWERSHELL_MISSING_MARK = "无法启动 powershell.exe";
 
 /** 非 Windows 上跳过「命令真的执行」的理由：要说清**为什么本机验不了**。 */
 const NO_POWERSHELL_REASON =
@@ -169,7 +230,7 @@ const NEEDS_MODEL = [
 	"沙箱不可用时：默认档拒绝执行命令（不静默无约束执行）",
 	LABEL_TOOL_REACHED,
 	LABEL_COMMAND_EXECUTED,
-	"命令执行：受限档下绝不静默执行（要么走审批、要么被拦下）",
+	LABEL_RESTRICTED_REFUSED,
 ];
 
 /** 逐条上报跳过：报告里要出现「跳过 N」，而不是一片伪装出来的全绿。 */
@@ -483,23 +544,136 @@ async function runWithModel(endpoint) {
 		h.skip(LABEL_COMMAND_EXECUTED, NO_POWERSHELL_REASON);
 	}
 
-	await h.check("命令执行：受限档下绝不静默执行（要么走审批、要么被拦下）", async () => {
-		// ⚠️ 这条断言的是**可移植的安全性质**，不是「一定有权限弹窗」。
-		// 档位与审批的关系（见 command-exec.js:295 与 createSandboxedRunner 的分支顺序）：
-		//   - `danger-full-access` → 判定直接 `{kind:"allow"}`，**按设计不问**
-		//     （该档的语义就是「用户已明示授权、无约束」）；
-		//   - 受限档 → 本机沙箱不可用，**在审批之前就拒了**，所以也不会问。
-		// 于是「必须有弹窗」在本机永远不成立 —— 起初就是这么写的，假失败了一次。
-		// 真正该守的是：受限档下命令**不得静默跑掉** —— 要么有审批请求，要么审计里有拦截记录。
+	// ── C. 受限档：命令被拒绝执行（安全性质）────────────────────
+	//
+	// ⚠️ 这一条此前**验的不是它标题里说的东西**（本轮修复，Issue #55）：
+	//
+	//   - `asked` **恒为 false** —— C 跑的时候档位还停在 **B 留下的
+	//     `danger-full-access`**（C 自己从不切档），而该档的判定直接
+	//     `{kind:"allow"}`、**按设计不问审批**（见 `decideUnderMode`）；
+	//   - `blocked` **恒为 true** —— 判据是 `audit.includes("blocked")`，而那条
+	//     记录是 **check A 留下的**（`auditClear()` 也在 A 里，C 没清）。
+	//
+	// 也就是说它实际验的是「A 写过一条 blocked」，与「受限档」无关：
+	// **把「受限档拒绝执行」这条链路整个删掉，它照样绿。**
+	//
+	// 现在：**自己切到受限档 → 清空审计与审批日志 → 开新会话 → 跑一轮 →
+	// 只认本轮新增的证据**（工具卡 + 审计两条都落在可观察副作用上）。
+	await h.check(LABEL_RESTRICTED_REFUSED, async () => {
+		// ① 自己切档，并**开新会话**：上一轮刚以完全访问档跑过，模型留着那段上下文
+		//    可能直接复述结果而不动手（那就取不到本轮的判据了）。切档 + 清上下文
+		//    才是干净的一次尝试 —— 与 B1 同样的理由。
+		await win.evaluate(
+			async ({ ws }) => {
+				await globalThis.kami.setPermissions({ sandbox: "workspace-write", approval: "ask" });
+				await globalThis.kami.newTask(ws);
+				// ② 审计与审批日志一起清零：下面的「被拦下」「问过审批」都必须是
+				//    这一轮写下的。读存量正是旧写法无法证伪的病根。
+				await globalThis.kami.auditClear();
+				globalThis.__zwPermLog = [];
+			},
+			{ ws: WORKSPACE_DIR },
+		);
+
+		// ③ 提示词点名命令，并**明确别带提权参数**（与 B 的第二次催问同一个理由）：
+		//    模型若自作主张带 `sandbox_permissions`，受限档下那是一次**合法**的提权
+		//    申请（严格变宽），会交给审批通道 —— 本测试的审批处理器一律 allow，
+		//    于是这一轮走的是「用户明示授权到完全访问」，不再是「受限档拒绝」的
+		//    证据。拿它判红就是为**正确行为**判红。这里先把模型的决策空间收掉。
+		const restrictedPrompt =
+			`请用 powershell 工具在我的工作区（${WORKSPACE_DIR}）里执行一条命令，把文本 ${MARK} 打印出来，` +
+			`然后告诉我这条命令的实际输出是什么。不要传 sandbox_permissions / justification 参数。`;
+
+		/** 本轮的卡是不是**要的那份证据**：沙箱拒绝执行。 */
+		const isRefusal = (r) =>
+			r.card !== undefined && String(r.card.detail).includes(SANDBOX_REFUSAL_CARD_MARK);
+
+		let round = await runOneCommandRound(restrictedPrompt);
+		// 再催一次的唯一情形：这一轮没取到**能当判据的**证据。有四种可能，都不是判据：
+		//   ① 模型压根没动手（没有本轮的卡）；
+		//   ② 提权被批准后绕过了沙箱那条路（卡片是 ENOENT 的 error）——
+		//      那是「环境缺失 + 用户明示授权」，不是「受限档拒绝」；
+		//   ③ 提权被拒（卡片 blocked，但理由是「提权申请被拒」而不是沙箱）；
+		//   ④ 别的形状（都不该被当成「受限档拒绝」）。
+		// 它们**既不该拿来临绿**（旧写法就是这么假的），**也不该拿来临红**——
+		// 拿一个合法场景把用例判红，等于换一种方式失去信号。第二次明确收窄指令。
+		// 残余风险（如实记下）：两轮都提权成功的话，判据仍不是沙箱拒绝 ——
+		// 本机实测模型确实会自作主张带参数（跑这个文件时抓到过两次），
+		// 但两轮都带、且本机没有 powershell 时才会判红；真撞上时看现场的卡片正文
+		// 是「无法启动 powershell.exe」还是「本机的命令沙箱不可用」，一眼能分辨。
+		if (!isRefusal(round)) {
+			round = await runOneCommandRound(
+				`现在权限档是受限档（workspace-write）。不需要也不要传 sandbox_permissions / justification 参数 —— 直接调用 powershell 工具执行：echo ${MARK}。只做这一件事。`,
+			);
+		}
+
+		// 先截图后断言：本该被拒没拒成时，这一屏就是现场
+		await h.shoot("restricted-refused");
+
+		if (process.platform === "win32") {
+			// Windows 上有真沙箱：受限档下 `echo` 这类命令**在沙箱里正常执行**
+			// （权限门对它的裁定是 allow，见 `decideUnderMode`，本来也不问审批），
+			// 所以「被拒绝」这个前提不成立。这条性质只在**没有命令沙箱**的平台上
+			// 可观察 —— 与其写一条本机验不了的断言（那正是这次要修的毛病），
+			// 不如显式跳过，和 A 在 Windows 上的处理保持一致。
+			h.skip(LABEL_RESTRICTED_REFUSED, "本机是 Windows —— 有命令沙箱，受限档下命令在沙箱内执行而非被拒，该前提不成立");
+			return;
+		}
+
+		// 审计已被本用例清空过，读到的都是**本轮**写的；审批日志同理。
+		const audit = await readSandboxAudit();
 		const perm = await win.evaluate(() => ({ log: globalThis.__zwPermLog ?? [] }));
-		const audit = await win.evaluate(async () => {
-			const a = await globalThis.kami.auditList("sandbox");
-			return (a?.records ?? []).map((x) => x.outcome);
-		});
 		const asked = perm.log.some((x) => x.toolName === "powershell");
-		const blocked = audit.includes("blocked");
-		assert.ok(asked || blocked, `受限档下命令既没走审批、也没被拦下 —— 静默执行了？审批: ${JSON.stringify(perm.log).slice(0, 160)}`);
-		console.log(`      审批请求 ${perm.log.length} 次（含 powershell: ${asked}）；审计里被拦下: ${blocked}`);
+		console.log(
+			`      审批请求 ${perm.log.length} 次（含 powershell: ${asked}）；本轮沙箱审计: ${JSON.stringify(audit).slice(0, 200)}`,
+		);
+
+		// 失败信息里带上现场：工具卡（动手了没有、工具怎么说的）+ 回复尾部
+		const scene =
+			`本轮工具卡：${round.card === undefined ? "无（模型没动手）" : `outcome=${round.card.outcome} / ${String(round.card.detail).replace(/\s+/g, " ").slice(0, 160)}`}；` +
+			`${round.note}回复尾部: ${String(round.tail).replace(/\s+/g, " ").slice(-140)}`;
+
+		// ④ 模型得真的动过手：**没取到证据 ≠ 没执行**，不能拿它当通过。
+		assert.ok(
+			round.card !== undefined,
+			`受限档下没取到本轮的 powershell 工具卡 —— 模型没动手，这条用例就没有判据（不等于「没静默执行」）。${scene}`,
+		);
+
+		// ⑤ **命令没有执行**这个可观察副作用：卡片到了终态，且是「被拦下」。
+		//    （`outcome` 由 daemon 按工具真实返回值的 `details.blocked` 判出，
+		//     模型复述不出来 —— 见文件头「B 条的验收」。）
+		assert.equal(
+			round.card.outcome,
+			"blocked",
+			`受限档下命令没有被拦下（工具结果 outcome=${round.card.outcome}）—— 静默执行了？${scene}`,
+		);
+
+		console.log(
+			`      受限档下本轮工具卡: ${round.card.label} / outcome=${round.card.outcome} / ${String(round.card.detail).replace(/\s+/g, " ").slice(0, 140)}`,
+		);
+
+		// ⑥ 拦下它的是**沙箱**，不是「本机没有 powershell.exe」。
+		//    两者语义完全相反，判定依据集中在文件头的「沙箱拒绝 vs powershell 不存在」；
+		//    这里两条一起钉：文案里有沙箱拒绝的标记，且没有 ENOENT 的标记。
+		assert.ok(
+			String(round.card.detail).includes(SANDBOX_REFUSAL_CARD_MARK),
+			`受限档下命令是被拦下了，但理由不是「沙箱不可用」（工具结果里找不到「${SANDBOX_REFUSAL_CARD_MARK}」）—— 拦下它的可能是别的东西：${String(round.card.detail).replace(/\s+/g, " ").slice(0, 240)}`,
+		);
+		assert.ok(
+			!String(round.card.detail).includes(POWERSHELL_MISSING_MARK),
+			`受限档下这一轮的失败是「本机没有 powershell.exe」而不是「被沙箱拒绝」—— 执行绕过了沙箱那条路？${String(round.card.detail).replace(/\s+/g, " ").slice(0, 240)}`,
+		);
+
+		// ⑦ 审计里也要有**本轮**那条「沙箱不可用 ⇒ 命令未执行」的记录：
+		//    卡片证的是「工具没跑这条命令」，审计证的是「这次拒绝被如实记了账」，
+		//    两个角度都要，且都不复用存量（审计在本用例开头被清空过）。
+		const blocked = audit.filter((x) => x.outcome === "blocked");
+		assert.ok(
+			blocked.some((x) => x.detail.includes(SANDBOX_REFUSAL_AUDIT_MARK)),
+			`受限档下审计里没有本轮新增的「${SANDBOX_REFUSAL_AUDIT_MARK}」记录 —— 本轮的拒绝没被记账？` +
+				`（审计已在用例开头清空，读到的都该是本轮的）实际: ${JSON.stringify(audit).slice(0, 240)}。${scene}`,
+		);
+		console.log(`      本轮的拦截记录: ${JSON.stringify(blocked.find((x) => x.detail.includes(SANDBOX_REFUSAL_AUDIT_MARK))).slice(0, 200)}`);
 	});
 
 	await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
