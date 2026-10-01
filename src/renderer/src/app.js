@@ -31163,7 +31163,9 @@ function postToFrame(frame, message) {
   frame?.contentWindow?.postMessage(message, "*");
 }
 function hostTheme() {
-  return "light";
+  // 读属性而不是 matchMedia：data-theme 是应用侧唯一真源（显式档会覆写
+  // 系统求值，见挂载前的 initTheme），widget 推送要与宿主页面一致。
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 }
 const LOADING_ROTATE_MS = 1400;
 const HEIGHT_DEBOUNCE_MS = 100;
@@ -31223,6 +31225,13 @@ function WidgetView({ card }) {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [scheduleHeight]);
+  // 主题切换要让已挂的 widget 跟着换装：zw:theme-changed 触发重渲染，
+  // 下面那个依赖 [frameReady, theme] 的 effect 会自动向 iframe 重推。
+  const [, forceThemeTick] = reactExports.useReducer((n) => n + 1, 0);
+  reactExports.useEffect(() => {
+    window.addEventListener("zw:theme-changed", forceThemeTick);
+    return () => window.removeEventListener("zw:theme-changed", forceThemeTick);
+  }, []);
   const theme = hostTheme();
   reactExports.useEffect(() => {
     if (!frameReady) return;
@@ -62010,6 +62019,57 @@ function SelectField({ value, options, onChange, disabled, ariaLabel, placeholde
     }
   );
 }
+const THEME_LABELS = {
+  light: "浅色",
+  dark: "深色",
+  system: "跟随系统"
+};
+function AppearanceSection({ busy }) {
+  const [pref, setPref] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  const refresh = reactExports.useCallback(async () => {
+    try {
+      setPref((await window.kami.getThemePreference()).theme);
+      setError(void 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  const change = (next) => {
+    const prev = pref;
+    if (prev === next) return;
+    setPref(next);
+    void setThemePreference(next).catch((e) => {
+      setPref(prev);
+      void refresh();
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "外观" }) }),
+    pref === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取外观设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "界面配色" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SelectField,
+          {
+            ariaLabel: "外观",
+            value: pref,
+            disabled: busy,
+            options: THEME_PREFS.map((option) => ({ value: option, label: THEME_LABELS[option] })),
+            onChange: (value) => change(value)
+          }
+        )
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "深色适合夜间与深色桌面；跟随系统会在系统切换时自动换装。选择会立即生效并保持到重启之后。" })
+    ] })
+  ] });
+}
 function ThinkingLevelSection({ busy }) {
   const [level, setLevel] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
@@ -62317,6 +62377,8 @@ function TeamSection({ busy }) {
 }
 function GeneralSection({ busy }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    // 外观放通用分组第一位：主题是最高频的个性化设置（同类产品均置顶）。
+    /* @__PURE__ */ jsxRuntimeExports.jsx(AppearanceSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingLevelSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(WebSearchSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(DefaultWorkspaceSection, { busy }),
@@ -68251,6 +68313,65 @@ class ErrorBoundary extends reactExports.Component {
     return this.props.children;
   }
 }
+/*
+ * ── 主题接线（外观三档：light / dark / system）────────────────────────
+ * 路线 A：`documentElement` 的 data-theme 属性是暗色 token 块
+ * （app.css `[data-theme="dark"]`）的**唯一驱动**——app.css 没有
+ * prefers-color-scheme 版暗色块（那是 widget 的 CSS 才有），所以系统跟随
+ * 必须由 JS 把档位求值成显式属性。
+ * 防闪变：这段在 React 挂载**前**同步执行。localStorage 镜像是上次会话的
+ * 选择（每次设置时同步写），首次无镜像默认 light（与 daemon 缺省同口径，
+ * 存量用户升级后界面不变）；随后 getThemePreference 异步纠偏——只在
+ * 镜像缺失或与偏好文件不一致时发生，最多一次。
+ * 持久化分工：preferences.json 是真源（daemon 写），localStorage 只是
+ * 渲染层首帧的同步快照，两处不一致时以偏好文件为准。
+ */
+const THEME_STORAGE_KEY = "zw:theme-pref";
+const THEME_PREFS = ["light", "dark", "system"];
+let themePreference = null;
+function resolveTheme(pref) {
+  if (pref === "system") {
+    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return pref;
+}
+function applyTheme(pref) {
+  themePreference = pref;
+  document.documentElement.setAttribute("data-theme", resolveTheme(pref));
+}
+function initTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  applyTheme(THEME_PREFS.includes(stored) ? stored : "light");
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    // 仅 system 档的求值会因系统切换而变；显式档重求值结果不变，无副作用。
+    if (themePreference !== null) {
+      document.documentElement.setAttribute("data-theme", resolveTheme(themePreference));
+      window.dispatchEvent(new CustomEvent("zw:theme-changed"));
+    }
+  });
+  void window.kami.getThemePreference().then(({ theme }) => {
+    // 纠偏：镜像缺失（新用户）或与偏好文件不一致（镜像被清）时对齐真源。
+    if (THEME_PREFS.includes(theme) && theme !== localStorage.getItem(THEME_STORAGE_KEY)) {
+      localStorage.setItem(THEME_STORAGE_KEY, theme);
+      applyTheme(theme);
+      window.dispatchEvent(new CustomEvent("zw:theme-changed"));
+    }
+  }).catch(() => {
+  });
+}
+/*
+ * 设置 UI 调这里换档：属性立即生效（乐观）、镜像同步写、偏好文件经 IPC
+ * 落盘（主进程在同一次 invoke 里设 nativeTheme.themeSource，system 档的
+ * 媒体查询跟随由此生效——渲染层 matchMedia 的取值源头就是它）。
+ */
+function setThemePreference(pref) {
+  if (!THEME_PREFS.includes(pref)) return Promise.reject(new Error(`未知的外观档位：${String(pref)}`));
+  localStorage.setItem(THEME_STORAGE_KEY, pref);
+  applyTheme(pref);
+  window.dispatchEvent(new CustomEvent("zw:theme-changed"));
+  return window.kami.setThemePreference(pref);
+}
+initTheme();
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root 不存在");
 clientExports.createRoot(root).render(

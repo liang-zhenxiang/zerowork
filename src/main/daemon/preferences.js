@@ -44,6 +44,19 @@ function isSkillEnabled(name, overrides) {
   return overrides?.[name] !== "off";
 }
 
+const THEMES = [
+  "system",
+  "light",
+  "dark"
+];
+
+// 外观主题档位判定（严格枚举 + 严格类型）：与 ledger 的 isThinkingLevel 同构。
+// 非法值一律 false——读侧（readPreferences）据此丢弃、写侧（handler）据此拒绝，
+// 两头共用这一份枚举，不会出现「写入时合法、读回时被丢」的口径漂移。
+function isThemePreference(value) {
+  return typeof value === "string" && THEMES.includes(value);
+}
+
 function filterEnabledSkills(skills, overrides) {
   return skills.filter((skill) => isSkillEnabled(skill.name, overrides));
 }
@@ -74,6 +87,7 @@ function readPreferences() {
     } : void 0;
     const permissions = readPermissions(record.permissions);
     const thinkingLevel = isThinkingLevel(record.thinkingLevel) ? record.thinkingLevel : void 0;
+    const theme = isThemePreference(record.theme) ? record.theme : void 0;
     const styleId = typeof record.styleId === "string" ? record.styleId : void 0;
     const memoryEnabled = typeof record.memoryEnabled === "boolean" ? record.memoryEnabled : void 0;
     const agentTeamsEnabled = typeof record.agentTeamsEnabled === "boolean" ? record.agentTeamsEnabled : void 0;
@@ -106,6 +120,7 @@ function readPreferences() {
       ...permissions !== void 0 ? { permissions } : {},
       ...defaultWorkspacePath !== void 0 ? { defaultWorkspacePath } : {},
       ...thinkingLevel !== void 0 ? { thinkingLevel } : {},
+      ...theme !== void 0 ? { theme } : {},
       ...styleId !== void 0 ? { styleId } : {},
       ...memoryEnabled !== void 0 ? { memoryEnabled } : {},
       ...agentTeamsEnabled !== void 0 ? { agentTeamsEnabled } : {},
@@ -209,6 +224,7 @@ export {
 	getEffectiveWorkspaceRoot,
 	getPath$1,
 	isSkillEnabled,
+	isThemePreference,
 	readPermissions,
 	readPreferences,
 	readRuntimePrefs,

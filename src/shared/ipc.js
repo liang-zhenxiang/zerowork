@@ -291,6 +291,18 @@ const INVOKE = {
   getStyle: "settings:get-style",
   /** 写回复风格。传空串 = 关闭风格注入；只影响之后的新 run，不回溯既有会话。 */
   setStyle: "settings:set-style",
+  /* ── 外观（主题三档） ─────────────────────────────────────────── */
+  /**
+   * 读外观主题档位（"system" | "light" | "dark"）。未配置时 daemon 回 "light"
+   * 而不是 "system"：存量用户升级后界面保持浅色不变，「跟随系统」作为
+   * 设置项里的显式选择（任务 design.md §6 的保守取舍）。
+   */
+  getThemePreference: "settings:get-theme",
+  /**
+   * 写外观主题档位。daemon 只负责校验与落盘——nativeTheme.themeSource 与
+   * 渲染层 data-theme 的生效联动在 main / renderer（daemon 不碰 Electron API）。
+   */
+  setThemePreference: "settings:set-theme",
   /* ── 记忆（spec: add-memory-system） ─────────────────────────── */
   /** 读记忆系统开关。未配置时 daemon 回 true（缺省开启）。 */
   getMemoryEnabled: "settings:get-memory-enabled",

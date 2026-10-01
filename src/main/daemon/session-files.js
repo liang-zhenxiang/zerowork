@@ -119,6 +119,7 @@ import {
 	filterEnabledSkills,
 	getEffectiveWorkspaceRoot,
 	isSkillEnabled,
+	isThemePreference,
 	readPreferences,
 	writePreferences,
 } from "./preferences.js";
@@ -4432,6 +4433,22 @@ const handlers = {
       throw new Error(`未知的回复风格：${String(styleId)}`);
     }
     writePreferences({ ...readPreferences(), styleId });
+  },
+  /* ── 外观主题 ─────────────────────────────────────────────────── */
+  // 未配置回 light（不是 system）：存量用户升级后界面保持浅色不变，
+  // 「跟随系统」作为设置项里的显式选择，而不是升级即换脸（design.md §6 的
+  // 保守取舍）。缺省语义收在这一个出口（读偏好处不填默认值，同 thinkingLevel）。
+  [INVOKE.getThemePreference]: async () => ({
+    theme: readPreferences().theme ?? "light"
+  }),
+  // 只校验与落盘，不在此生效：nativeTheme.themeSource 与渲染层 data-theme
+  // 的联动在 main / renderer——daemon 是无界面内核，不 import electron。
+  // 读改写不丢其他键（同 setStyle 的口径）。
+  [INVOKE.setThemePreference]: async ([theme]) => {
+    if (!isThemePreference(theme)) {
+      throw new Error(`未知的外观档位：${String(theme)}`);
+    }
+    writePreferences({ ...readPreferences(), theme });
   },
   /* ── 记忆开关（spec: add-memory-system） ──────────────────────── */
   // 未配置回 true（缺省开启）：偏好文件保持「没写就是没写」，
