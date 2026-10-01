@@ -20,7 +20,9 @@
  *     这一点骗过去的。
  *
  * 于是本测试断言两件相反的事，两件都必要：
- *   A. **默认档下拒绝执行**，且审计里留下 `sandbox/blocked` 痕迹（安全性质）；
+ *   A. **默认档下拒绝执行** —— 判据落在「**沙箱拒绝**」这个可观察副作用上
+ *      （工具卡 `outcome` + 卡片正文里的沙箱标记 + 本轮审计里那条沙箱记录），
+ *      并且**不**为「模型合法提权」这个正确行为判红（详解见「check A 的判据」一节）；
  *   B. **切到完全访问档后命令真的跑起来**（功能性质）—— 但见下面两节，
  *      这条在本机（macOS）上**不成立**，必须显式跳过而不是假通过。
  *
@@ -100,13 +102,32 @@
  * 本轮审计里有那条 `sandbox/blocked` 记录。三条标记都是文案常量，
  * 集中在文件上半部分的 `SANDBOX_REFUSAL_CARD_MARK` 一处。
  *
- * ## check A 的等待条件（原先也被丢弃了）
+ * ## check A 的判据（含「模型合法提权」这个正确行为）
  *
- * 原实现是 `await askModelToRun(promptText)`：等的同样是「模型的那段文字」，
- * 而且返回值被丢弃（等没等到都不影响结论）。那段文字在这里只是**同步点**
- * （等这一轮跑完再切档），不是断言对象 —— 但用「模型复述」当同步点不可靠：
- * 模型不复述就只能干等到 90s 超时。现在等的是**真的动手了没有**
- * （本轮 powershell 工具卡真的出现），失败信息里也带上了现场。
+ * A 原先只断言「审计里有 blocked 记录」，这一条有**两处**不成立：
+ *
+ *   1. **会为正确行为判红**（Issue #58）。模型若在该轮自带 `sandbox_permissions`
+ *      + justification：受限档（workspace-write）→ 完全访问是**严格变宽**，
+ *      属于**合法**提权（`permissions.js` 的 `canEscalate`），会走审批通道；
+ *      本测试的审批处理器一律 allow，于是这一轮按「用户明示授权」绕过沙箱，
+ *      最终以 `spawn("powershell.exe")` 的 ENOENT 收场 —— **产品行为完全正确**，
+ *      审计里却一条 blocked 都没有。
+ *      （可达性有实测支撑：跑这个文件时模型**两次**在 C 的第一轮里自作主张带了
+ *      提权参数，审计里能看到「用户批准本次提权到「danger-full-access」」。）
+ *   2. **判据太宽**：「提权申请被拒」同样会写一条 blocked（`planExecution`），
+ *      拿它当证据等于把「提权被拒」误当成「受限档拒绝沙箱」。
+ *
+ * 现在与 C 用同一套手法：**收窄提示词**（明确不要传提权参数）+ **证据不是要找的
+ * 那条就再催一次**（而不是干等到 90s 超时），判据落在**沙箱拒绝**这个可观察
+ * 副作用上 —— 上面那张判别表的三行（卡片 `outcome`、卡片正文、审计 detail），
+ * 而不是「审计里有没有 blocked」。
+ *
+ * 等待条件同样修过：原实现是 `await askModelToRun(promptText)` ——
+ * 等的同样是「模型的那段文字」，而且返回值被丢弃（等没等到都不影响结论）。
+ * 那段文字在这里只是**同步点**（等这一轮跑完再切档），不是断言对象 ——
+ * 但用「模型复述」当同步点不可靠：模型不复述就只能干等到 90s 超时。
+ * 现在等的是**真的动手了没有**（本轮 powershell 工具卡真的出现），
+ * 失败信息里也带上了现场。
  *
  * 迁移说明（共享 harness）：骨架（隔离目录、启动并等到就绪、check 收集器、
  * 末尾报告与退出码）全部来自 `./lib/harness.mjs`。启动不再固定等 9 秒 ——
@@ -399,7 +420,18 @@ async function runWithModel(endpoint) {
 		});
 	}
 
-	const promptText = `请用 powershell 工具在我的工作区（${WORKSPACE_DIR}）里执行一条命令，把文本 ${MARK} 打印出来，然后告诉我这条命令的实际输出是什么。`;
+	/**
+	 * A 的提示词，**点名命令 + 明确不要传提权参数**（收窄模型的决策空间）。
+	 *
+	 * 后半句是 Issue #58 的修法（与 C 的提示词同一句）：模型若自作主张带
+	 * `sandbox_permissions` + justification，受限档下那是一次**合法**的提权申请
+	 * （严格变宽），本测试的审批处理器一律 allow —— 于是这一轮走的是
+	 * 「用户明示授权到完全访问」，不再是「受限档拒绝」的证据。
+	 * 详见文件头「check A 的判据」。
+	 */
+	const promptText =
+		`请用 powershell 工具在我的工作区（${WORKSPACE_DIR}）里执行一条命令，把文本 ${MARK} 打印出来，` +
+		`然后告诉我这条命令的实际输出是什么。不要传 sandbox_permissions / justification 参数。`;
 
 	// ── A. 默认档：沙箱不可用 ⇒ 拒绝执行（安全性质）─────────────
 
@@ -418,7 +450,11 @@ async function runWithModel(endpoint) {
 			await globalThis.kami.auditClear();
 		});
 
-		// ⚠️ 这一步同时是**下一段的前提**：等模型把这一轮走完再切档，
+		/** 这一轮拿到的，是不是**要找的那份证据**：被沙箱拒绝执行。 */
+		const isSandboxRefusal = (r) =>
+			r.card !== undefined && String(r.card.detail).includes(SANDBOX_REFUSAL_CARD_MARK);
+
+		// ⚠️ 这一段同时是**下一段的前提**：等模型把这一轮走完再切档，
 		// 否则这一轮的残留会落进 B 的判定里（B 会开新会话，但没跑完就切档的场面是
 		// 两轮叠在一起，B 取到的工具卡可能不是它那一轮的）。
 		//
@@ -426,11 +462,53 @@ async function runWithModel(endpoint) {
 		// 连它的返回值都丢掉了（`void r`：等没等到都不影响结论）。这里等的是
 		// 「模型真的动手了」这个信号（本轮的 powershell 工具卡真的出现），
 		// 模型没动手时 `note` 会被下面的失败信息带出来，不会被静默吞掉。
-		const round = await runOneCommandRound(promptText);
+		let round = await runOneCommandRound(promptText);
 
-		// 关键断言：审计里留下「沙箱不可用 ⇒ 拦下」的痕迹。
-		// 用审计而不是模型复述 —— 拒绝对不对是**产品行为**，不该依赖弱模型转述准确。
-		const audit = await readSandboxAudit();
+		// 再催一次的唯一情形：这一轮没取到**能当判据的**证据（与 C 同一手法）。
+		// 三种可能，都不是判据：
+		//   ① 模型压根没动手（没有本轮的 powershell 工具卡）；
+		//   ② 模型自作主张带了 `sandbox_permissions` + justification —— 受限档 → 完全访问
+		//      是**严格变宽**（`permissions.js` 的 `canEscalate`），属**合法**提权，会走审批；
+		//      本测试的审批处理器一律 allow，于是这一轮按「用户明示授权」绕过了沙箱，
+		//      最终失败在「本机没有 powershell.exe」——**产品行为完全正确**，
+		//      拿它判红正是这条用例此前会犯的错（Issue #58）；
+		//   ③ 别的形状（提权被拒、工具异常）—— 同样不是「受限档拒绝」的证据。
+		// 它们**既不该拿来临绿**（旧写法只要审计里有 blocked 就绿），
+		// **也不该拿来临红**（拿一个合法场景判红，等于换一种方式失去信号）。
+		// 催问前**开新会话**：上一轮模型已经收到了那条命令的结果（「本机没有 powershell」），
+		// 留在同一段上下文里它多半只复述结论而不再动手（B1 处同一条理由）；
+		// 顺带把审计清零，让下面的判据只认**催问这一轮**。
+		// 残余风险（如实记下）：**两轮**都带提权参数时，判据仍不是沙箱拒绝，A 会判红。
+		// 这是小概率（本文件实测：模型只在 C 的第一轮里自发带过两次），且失败信息里
+		// 会打出「第一轮不是「沙箱拒绝」」与现场的卡片正文 —— 是「本机没有
+		// powershell.exe」还是「本机的命令沙箱不可用」，一眼能分辨。
+		let retried = false;
+		if (!isSandboxRefusal(round)) {
+			retried = true;
+			// 先解释「为什么这一轮不算数」并**留下这一轮的审计**（下面的清空会把它抹掉）：
+			// 模型合法提权时，那条「用户批准本次提权到「danger-full-access」」就在里面，
+			// 是这类轮次唯一的直接证据。
+			const why =
+				round.timedOut
+					? "整轮超时"
+					: round.card === undefined
+						? "模型没动手（没有本轮的卡）"
+						: String(round.card.detail).includes(POWERSHELL_MISSING_MARK)
+							? "执行绕过了沙箱、败在「本机没有 powershell.exe」（提权被批准？）"
+							: `卡片 outcome=${round.card.outcome}`;
+			const firstAudit = await readSandboxAudit();
+			console.log(`      第一轮不是「沙箱拒绝」（${why}），开新会话催问一次；该轮沙箱审计: ${JSON.stringify(firstAudit).slice(0, 240)}`);
+			await win.evaluate(
+				async ({ ws }) => {
+					await globalThis.kami.newTask(ws);
+					await globalThis.kami.auditClear();
+				},
+				{ ws: WORKSPACE_DIR },
+			);
+			round = await runOneCommandRound(
+				`现在权限档是受限档（workspace-write），不需要也不要传 sandbox_permissions / justification 参数 —— 直接调用 powershell 工具执行：echo ${MARK}。只做这一件事。`,
+			);
+		}
 
 		// 先截图后断言：万一「本该被拦下」没成立，这一屏就是现场
 		await h.shoot("sandbox-blocked");
@@ -441,15 +519,61 @@ async function runWithModel(endpoint) {
 			h.skip("默认档下命令被拦下并写审计", "本机是 Windows —— 有命令沙箱，该前提不成立");
 			return;
 		}
-		// 失败信息里带上现场：工具卡（模型动手了没有、工具怎么说的）+ 回复尾部
-		const scene =
-			`本轮工具卡：${round.card === undefined ? "无（模型没动手）" : `outcome=${round.card.outcome} / ${round.card.detail.slice(0, 120)}`}；` +
-			`${round.note}回复尾部: ${String(round.tail).replace(/\s+/g, " ").slice(-140)}`;
-		assert.ok(
-			audit.some((x) => x.outcome === "blocked"),
-			`本机没有命令沙箱，默认档下命令应被拦下并写审计，实际审计: ${JSON.stringify(audit).slice(0, 250)}（${scene}）`,
+
+		// 审计已被本用例清空过（催过则是在催问前清的）——读到的都该是**这一轮**写的。
+		// 判据是「沙箱拒绝」而不是「模型复述」，也不用「有没有 blocked」：
+		// 拒绝对不对是**产品行为**，不该依赖弱模型转述准确，也不该被别的 blocked 冒名顶替。
+		const audit = await readSandboxAudit();
+		const blocked = audit.filter((x) => x.outcome === "blocked");
+		console.log(
+			`      沙箱审计 ${audit.length} 条（blocked ${blocked.length} 条）: ${JSON.stringify(audit).slice(0, 200)}`,
 		);
-		console.log(`      审计: ${JSON.stringify(audit.find((x) => x.outcome === "blocked"))?.slice(0, 160)}`);
+
+		// 失败信息里带上现场：工具卡（模型动手了没有、工具怎么说的）+ 回复尾部 + 催过没有
+		const scene =
+			`本轮工具卡：${round.card === undefined ? "无（模型没动手）" : `outcome=${round.card.outcome} / ${String(round.card.detail).replace(/\s+/g, " ").slice(0, 160)}`}；` +
+			`${round.note}${retried ? "（第一轮没取到沙箱拒绝的证据，已催问一次）" : ""}` +
+			`回复尾部: ${String(round.tail).replace(/\s+/g, " ").slice(-140)}`;
+
+		// ① 模型得真的动过手：**没取到证据 ≠ 没执行**，不能拿它当通过。
+		assert.ok(
+			round.card !== undefined,
+			`默认档下没取到本轮的 powershell 工具卡 —— 模型没动手，这条用例就没有判据（不等于「没静默执行」）。${scene}`,
+		);
+
+		// ② **命令没有执行**这个可观察副作用：卡片到了终态，且是「被拦下」。
+		//    （`outcome` 由 daemon 按工具真实返回值的 `details.blocked` 判出，
+		//     模型复述不出来 —— 见文件头「B 条的验收」。）
+		assert.equal(
+			round.card.outcome,
+			"blocked",
+			`默认档下命令没有被拦下（工具结果 outcome=${round.card.outcome}）—— 静默执行了？${scene}`,
+		);
+
+		// ③ 拦下它的是**沙箱**，不是「本机没有 powershell.exe」。两者语义完全相反，
+		//    判定依据集中在文件头的「沙箱拒绝 vs powershell 不存在」；这里两条一起钉。
+		assert.ok(
+			String(round.card.detail).includes(SANDBOX_REFUSAL_CARD_MARK),
+			`默认档下命令是被拦下了，但理由不是「沙箱不可用」（工具结果里找不到「${SANDBOX_REFUSAL_CARD_MARK}」）—— 拦下它的可能是别的东西：${String(round.card.detail).replace(/\s+/g, " ").slice(0, 240)}${scene}`,
+		);
+		assert.ok(
+			!String(round.card.detail).includes(POWERSHELL_MISSING_MARK),
+			`默认档下这一轮的失败是「本机没有 powershell.exe」而不是「被沙箱拒绝」—— 执行绕过了沙箱那条路？${String(round.card.detail).replace(/\s+/g, " ").slice(0, 240)}${scene}`,
+		);
+
+		// ④ 审计里也要有**本轮**那条「沙箱不可用 ⇒ 命令未执行」的记录：
+		//    卡片证的是「工具没跑这条命令」，审计证的是「这次拒绝被如实记了账」，两个角度都要。
+		//    ⚠️ 判据从「有没有 blocked」收窄成「blocked 里有没有沙箱那条」：
+		//    「提权申请被拒」同样会写一条 blocked（`planExecution`），
+		//    它不是「受限档拒绝沙箱」的证据，此前会被误当成证据。
+		assert.ok(
+			blocked.some((x) => x.detail.includes(SANDBOX_REFUSAL_AUDIT_MARK)),
+			`默认档下审计里没有本轮新增的「${SANDBOX_REFUSAL_AUDIT_MARK}」记录 —— 本轮的拒绝没被记账？` +
+				`（审计已在本轮开头清空，读到的都该是本轮的）实际: ${JSON.stringify(audit).slice(0, 250)}。${scene}`,
+		);
+		console.log(
+			`      本轮的拦截记录: ${JSON.stringify(blocked.find((x) => x.detail.includes(SANDBOX_REFUSAL_AUDIT_MARK)))?.slice(0, 200)}`,
+		);
 	});
 
 	// ── B. 完全访问档：命令真的跑起来（功能性质）────────────────
