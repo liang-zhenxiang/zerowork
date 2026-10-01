@@ -36,6 +36,54 @@ files:
   - out/**
   - package.json
   - "!**/*.map"
+  # -------------------------------------------------------------------------
+  # 下面五条排除规则（四类）排除的是**我们用不到、但会被依赖树捎带进来**的东西。
+  #
+  # ⚠️ 每一条**都不是洁癖，也不是省事的优化** —— 每一条都对应一个明确的判断，
+  #    改之前请先读 `docs/MAINTAINER_GUIDE.md` 的「随包依赖的取舍」一节。
+  #
+  # ① tesseract.js / tesseract.js-core（约 50 MB）
+  #    来自 `officeparser → tesseract.js`，只在 **OCR 扫描件识别**时才会被加载。
+  #    而本项目**不做 OCR**（Roadmap 的「不做」清单；`src/main/daemon/doc-extract.js`
+  #    对没有文本层的 PDF 直接抛 `scanned` 错误，从不对 PDF 走 OCR）。
+  #    officeparser 侧是**懒加载**（`await import("tesseract.js")` 在
+  #    `utils/ocrUtils.js` 的 `createAndRunWorker` 里，且 `defaults.js` 的
+  #    `ocr: false` 是默认值，我们调用 `parseOffice(path)` 时没传选项），
+  #    所以删掉它不会影响任何**我们真正走**的代码路径。
+  #
+  #    ⚠️ 代价（有意接受）：万一将来有人开启 OCR，报错会是
+  #    「Cannot find module 'tesseract.js'」—— 这是**响亮的失败**，不是静默降级。
+  #    真要恢复 OCR，请连同 Roadmap 的「不做」条目一起改。
+  #
+  # ② @napi-rs/canvas（约 27 MB）
+  #    是 `pdfjs-dist` 的 **optionalDependencies**（Node 端把页面渲染成 canvas 用）。
+  #    我们只调 `page.getTextContent()` 取文本，**从不渲染**。
+  #    实测（去掉该包后跑 pdfjs 取文本）正文照常取出，只多出两条
+  #    「Cannot polyfill DOMMatrix / Path2D，rendering may be broken」警告 ——
+  #    警告是**渲染**路径的事，与取文本无关。
+  #    pdfjs 自己对它的加载就是 try/catch + warn，缺了不报错。
+  #
+  # ③ officeparser 的浏览器构建（约 30 MB）
+  #    `dist/officeparser.browser*.mjs/.iife.js` 五个文件，是给**浏览器**用的
+  #    （package.json 的 `exports` 里挂在 `browser` 条件下）。Node 侧入口
+  #    `dist/index.js` 只 require 同目录的 `./OfficeParser.js` 等五个 .js，
+  #    全包内**没有任何一处**引用 browser 那五个文件名（已 grep 核实）。
+  #    Electron 主进程走的是 Node 解析，`browser` 条件不参与 —— 这五个文件
+  #    在产物里是纯占位。
+  #
+  # ④ pdfjs-dist 的**非 legacy** 构建（约 6.7 MB）
+  #    我们只 import `pdfjs-dist/legacy/build/pdf.mjs` 与 `.../pdf.worker.mjs`
+  #    （见 src/main/daemon/doc-extract.js），另加 `pdfjs-dist/package.json`
+  #    用于定位 cmaps / standard_fonts。`build/`（非 legacy）没有任何引用点，
+  #    legacy 那两份产物也不 import 它（已核实内部无相对 import）。
+  #    ⚠️ 改这里之前请重新 grep 一遍 `out/main`：
+  #       grep -rhoE "pdfjs-dist[/\"'][^\"')]*" out/main/*.mjs | sort -u
+  # -------------------------------------------------------------------------
+  - "!node_modules/tesseract.js/**"
+  - "!node_modules/tesseract.js-core/**"
+  - "!node_modules/@napi-rs/**"
+  - "!node_modules/officeparser/dist/officeparser.browser*"
+  - "!node_modules/pdfjs-dist/build/**"
 
 # ---------------------------------------------------------------------------
 # resources/ 必须在 asar 之外

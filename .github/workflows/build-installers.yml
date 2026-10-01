@@ -74,6 +74,12 @@ jobs:
       - name: 列出产物
         run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
 
+      # 随包体积与依赖契约。**必须在这里跑**：`lint:all` 在 CI 上没有 release/，
+      # 这条检查会被跳过 —— 而它是唯一能挡住「安装包重新胖回去」的关口
+      # （948 MB / 22016 个文件的事故只有打包之后才看得见）。
+      - name: 检查随包体积与依赖
+        run: npm run check:package-size
+
       # ---------------------------------------------------------------------
       # 构建溯源证明（SLSA provenance）
       #
@@ -161,6 +167,10 @@ jobs:
       - name: 列出产物
         shell: bash
         run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
+
+      # 与 macOS job 同一个理由：体积契约只有打包之后才验得了，见那边 step 上的注释
+      - name: 检查随包体积与依赖
+        run: npm run check:package-size
 
       # ---------------------------------------------------------------------
       # 构建溯源证明（SLSA provenance）

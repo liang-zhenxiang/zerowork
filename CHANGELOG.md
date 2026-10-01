@@ -26,6 +26,35 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+### 修复
+
+- **安装包从 948 MB 降到 583 MB，随包文件数从 22016 降到 15098** ——
+  修的是用户下载 v0.3.0 后反馈的「安装要很久、打开要很久、电脑很卡」。
+
+  此前错在哪：`electron.vite.config.mjs` 用的是**无参数**的 `externalizeDepsPlugin()`，
+  它把 `package.json` 的**全部** `dependencies` 外置，再由 electron-builder
+  原样装进安装包。可其中大半（`monaco-editor` 108 MB、`react-pdf` 44 MB、
+  `echarts` 25 MB…）是**渲染层专用**的 —— 渲染层早被 Vite 打包进 `out/renderer`，
+  而 sandbox 渲染进程根本 `require` 不到 node_modules。这些随包是纯粹的重复。
+
+  现在：渲染层专用依赖移入 `devDependencies`（渲染层源码 chunk 是预打包的
+  vendored bundle，没有任何裸 import，因此对构建零影响）；OCR 链
+  （`tesseract.js` + `tesseract.js-core`，约 50 MB）、`@napi-rs/canvas`（约 27 MB）、
+  `officeparser` 的浏览器构建（约 30 MB）与 `pdfjs-dist` 的非 legacy 构建（约 7 MB）
+  从产物中排除。
+
+  **功能没有减少**：PDF 文本提取与 DOCX/XLSX/PPTX 解析照常工作（已在**打包产物
+  自己的 `node_modules`** 上逐包验证，并实际启动打包后的应用确认界面与 daemon
+  正常）。被排除的都是「本项目声明不做」或「Node 侧根本走不到」的代码路径。
+
+  ⚠️ `@napi-rs/canvas` 移除后，解析 PDF 时控制台会多出几条
+  `Cannot polyfill DOMMatrix / Path2D, rendering may be broken` 警告 ——
+  那是**渲染**路径的提示，我们只做文本提取，可以忽略。
+
+- **`package-lock.json` 的版本号跟上 `package.json`** —— 此前停在 `0.2.1`，
+  v0.3.0 发布时漏改了它。不影响构建（`npm ci` 只校验依赖分区），
+  但会让「版本号的单一真源」出现两个不一致的值。
+
 ## [0.3.0] - 2026-10-01
 
 本轮主题：**让项目能自我验证**。
