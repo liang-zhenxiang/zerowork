@@ -115,7 +115,7 @@
 | 模型诱导执行危险命令 | 独立于模型的权限判定（`permission-rules.js`）+ 沙箱层 |
 | 沙箱不可用时静默放行 | **宁可不执行，也不静默地无约束执行** —— 受限档下直接拒绝并给出逃生指引 |
 | MCP 配置解析被注入 | `expandEnvVars` 处理不受信任输入，相关改动需特别审查（见下） |
-| 恶意文档解析 | 解析库在 daemon 进程内，与界面隔离（**但解析库自身的漏洞是一个开放问题，见下文**） |
+| 恶意文档解析 | daemon 侧的解析库在独立进程内，与界面隔离（`officeparser` 读 pdf / docx / xlsx / pptx）；渲染侧的预览解析（vendored SheetJS）跑在**沙箱渲染进程**内。两条路径上「**解析库自身的漏洞**」都是开放问题，见下文 |
 | 工作流拿到不该有的权限 | 所有工作流显式最小 `permissions`；`uses:` pin 到 commit SHA；zizmor 扫描基线 0 findings |
 | 审计记录被悄悄清空 | 「擦除审计日志」这个动作本身也会留一条记录 |
 
@@ -123,9 +123,21 @@
 
 写在这里而不是藏起来 —— 一个诚实的威胁模型比一个看起来完整的更有用。
 
-- **文档解析库存在未修复的漏洞。** `officeparser` 依赖的 `decompress` 有 Zip Slip 类公告，
-  `xlsx` 有原型污染与 ReDoS 公告且 npm 上没有修复版本。这两条都在**运行时**路径上
-  （它们正是用来读用户文件的）。跟踪在
+- **随包的 vendored 依赖带已知高危漏洞，而审计工具看不到它。**
+  `src/renderer/src/vendor-xlsx.js` 是 SheetJS 0.18.5 的预打包产物，**随安装包分发**，
+  带原型污染（[GHSA-4r6h-8v6p-xvw6](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)）与
+  ReDoS（[GHSA-5pgg-2g8v-p4x9](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)）
+  两个 high 公告，二者**都没有 npm 上的修复版本**（`xlsx` 停在 0.18.5）。
+  触发条件正是**解析用户提供的表格文件** —— 本产品的核心功能。
+  当前状态：**已知、未修、有跟踪**（[Issue #61](https://github.com/liang-zhenxiang/zerowork/issues/61)）。
+  **这一条的要点不是「有一个漏洞」，而是「有一类代码没有任何工具在盯」** ——
+  为什么审计工具看不见、以及全部 `vendor-*.js` 的清单，见下文
+  「随包的 vendored 依赖：审计盲区」。
+- **仓库根的生产依赖有 1 条 high 未修**（`brace-expansion`，由
+  `@earendil-works/pi-coding-agent` 传递引入，`npm audit fix` 可修）。
+  作为对照：`officeparser` 早年依赖的 `decompress` 曾有一条 Zip Slip 类 critical，
+  已随 officeparser 迁移到 8.x（改用 `fflate`）自行消失 —— 那一类**会随升级消失**，
+  上面那条 vendored 盲区**不会**。跟踪在
   [依赖安全 Issue](https://github.com/liang-zhenxiang/zerowork/issues/17)。
 - **随包第三方内容的授权状态尚未完全确认。** 见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
   这不是技术漏洞，但它决定了「分发这个软件」这件事本身是否成立。
@@ -187,3 +199,88 @@ npm audit --registry=https://registry.npmjs.org/
 
 Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**的依赖 ——
 `resources/` 下随包分发的第三方模板不代其升级（理由见 `.github/dependabot.yml` 的注释）。
+
+**但上面这套机制有一处结构性覆盖不到的地方**，见下一节。
+
+### 随包的 vendored 依赖：审计盲区
+
+`src/renderer/src/*.js` 是**预打包的 vendored bundle**：依赖在入库前就已被内联完毕，
+文件里没有任何裸 import，Vite 只把它们原样搬运成同名产物
+（详见 `docs/MAINTAINER_GUIDE.md` 的「渲染层现状」）。`vendor-*.js` 是其中
+**按来源命名**的那一批。它们**随安装包分发给用户**，却落在所有审计工具的视野之外。
+
+**盲区由四层原因叠加而成：**
+
+1. **它们不是 npm 依赖。** Dependabot 与 `npm audit` 只读 `package.json` /
+   `package-lock.json`，不会去读源码树里的 `.js` 文件。
+2. **原包已移出生产依赖。** 瘦身（#49）把 `xlsx` 这类渲染层专用包移进了
+   `devDependencies`，于是 `npm audit --omit=dev`（也就是「随包究竟发了什么」那一档）
+   不再报它 —— 现状看起来像「已经修好了」。
+3. **Dependabot 里还显式 `ignore` 了 `xlsx`。** 那条 ignore 本身有据可依
+   （npm 上 0.18.5 之后没有新版本，让它一直弹「无法修复」的告警只会造成告警疲劳，
+   见 `.github/dependabot.yml`）—— 但副作用是**唯一可能提到它的通道也静默了**。
+4. **升级 `package.json` 不改变随包的字节。** bundle 是冻结在 git 里的产物，
+   仓库里**没有重新生成它们的脚本**，只有有人手工重打包时才会更新。
+   这一条最要紧：它意味着第 2、3 条不是「还没修」，而是**修了也不会生效**。
+
+**当前清单（全部 `vendor-*.js`）**
+
+| 文件 | 库 | 版本 | 如何被加载 |
+| --- | --- | --- | --- |
+| `src/renderer/src/vendor-xlsx.js` | SheetJS Community Edition（npm 包名 `xlsx`） | 0.18.5 | `office-xlsx.js` 的 `XlsxPreview` 在预览 `.csv` / `.xls` 时**动态 import 懒加载** |
+| `src/renderer/src/vendor-lodash.js` | lodash | 4.18.1 | 被 `workspace.js` / `office-xlsx.js` / `office-pptx.js` **静态 import** |
+| `src/renderer/src/vendor-jszip.js` | JSZip | 3.10.2 | 被 `workspace.js` / `office-docx.js` / `office-pptx.js` **静态 import** |
+| `src/renderer/src/vendor-jszip-2.js` | JSZip —— 打包器拆出的**再导出薄壳**（244 字节，自身无版本号） | 3.10.2（同 `vendor-jszip.js`） | 被 `office-docx.js` / `office-pptx.js` 静态 import 取默认导出 |
+
+> **版本号取自 bundle 内的版本标记，不是猜的**：`vendor-xlsx.js` 的
+> `XLSX.version = "0.18.5"`、`vendor-lodash.js` 的 `var VERSION = "4.18.1"`、
+> `vendor-jszip.js` 的 `n.version = "3.10.2"`。
+> `scripts/check-vendored-deps.mjs` 会逐字核对**这张表与 bundle 里的版本标记**，
+> 并保证新出现的 `vendor-*.js` 必须先登记在册。
+>
+> **这四个里目前只有 SheetJS 带已知公告。** 列出其余三个不是为了凑数 ——
+> 「当前没问题」与「有人在盯」是两件事，而这里缺的正是后者。
+
+**已识别的风险：SheetJS 0.18.5**
+
+| 公告 | 严重度 | 修在 |
+| --- | --- | --- |
+| [Prototype Pollution in sheetJS](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)（CVE-2023-30533） | high | 0.19.3 |
+| [SheetJS Regular Expression Denial of Service](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)（CVE-2024-22363） | high | 0.20.2 |
+
+- **触发条件**：预览 **`.csv` / `.xls`** 文件时，`XlsxPreview` 动态加载
+  `vendor-xlsx.js`，并用 `XLSX.read()` 解析该文件的字节（`office-xlsx.js:104969-104974`）——
+  即**用户提供的不受信内容**。精确的边界是：SheetJS 在这条路径上只承担
+  「把 csv / xls 转成 xlsx」，随后的渲染交给 fortune-sheet；
+  **`.xlsx` 的预览不走 SheetJS**，daemon 侧读表格走的是 `officeparser` 8.x + `fflate`。
+  缩小触发面不等于风险可忽略 —— 它仍在「打开用户文件」这条核心路径上。
+- **影响面**：两条公告都发生在**沙箱化的渲染进程**内（CSP 亦由主进程收紧），
+  不会直接触达文件系统、命令执行或主进程。这是对**后果范围**的说明，
+  不是对风险等级的否定：原型污染与拒绝服务都会破坏本应用对「不可信输入」的处置假设。
+  （公告原文对原型污染那条另有一句限定：*workflows that do not read arbitrary files
+  are unaffected*，即「不读任意文件的工作流不受影响」—— 本项目**恰好就是**
+  读任意文件的那一类。）
+- **修复版本不在 npm 上**：`npm view xlsx version` → `0.18.5`。SheetJS 已迁到
+  `cdn.sheetjs.com` 自有分发，升级意味着**引入一个新的、非 npm 的依赖源** ——
+  这是供应链决策，需单独讨论。故当前状态为：**已知、未修、有跟踪**
+  （[Issue #61](https://github.com/liang-zhenxiang/zerowork/issues/61)）。
+
+**同类盲区的范围不止 `vendor-*.js`**
+
+`office-pptx.js`、`office-xlsx.js`、`code-preview.js`、`pdf.worker.js` 等同样是
+预打包 bundle，分别来自 `pptx-preview`、fortune-sheet（`@fortune-sheet/react` /
+`@corbe30/fortune-excel`）、`monaco-editor`、`pdfjs-dist` —— 但它们内部**没有
+`XLSX.version` 那样可直接读取的版本号**，仓库里也没有记录它们各自由哪个版本打出。
+其中至少一个当前带开放公告：`office-pptx.js` 所来自的 `pptx-preview`（在
+`devDependencies` 里）传递依赖了 `echarts`（XSS）与 `uuid`（缓冲区边界检查），
+在 `npm audit` 里是 moderate。
+
+**这份清单以「已确认」为准，不声称穷尽** —— 而这正是本节的结论。
+
+**复查落点**
+
+`scripts/check-vendored-deps.mjs` 把上面那张表变成机器可查的：新出现的
+`vendor-*.js` 不登记会失败，表里的版本与 bundle 里的版本标记不一致也会失败。
+它**故意不联网** —— 查漏洞数据库会让一个静态门禁变成网络依赖
+（理由同 `scripts/check-docs.mjs` 的「不做的事」），所以
+「版本与公告状态的比对」仍是**定期的人工事项**，跟踪在 Issue #61。
