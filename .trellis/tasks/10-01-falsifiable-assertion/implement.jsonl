@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "第 4、5 条：竞态写法与「无法证伪的断言」——本任务的核心判据"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "沙箱与权限判定的既有设计（宁可拒绝也不静默降级）"}
