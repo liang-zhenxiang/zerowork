@@ -69,6 +69,48 @@
 - **`--bg-chip`(6%) 比 `--bg-hover`(5%) 还深** —— 静态底比悬停底还重，方向是反的。
   改它会牵动全站 chip 的悬停表现，登记在 `docs/DESIGN.md` §10.3.2，本轮不动。
 
+### 变更
+
+- **发布说明把「首次运行指引」挪到了最前面**（此前在整页的最末尾）。
+
+  此前错在哪：用户从 Release 页下载安装包，装完打不开时回到的还是这个页面，
+  而「安装包没有代码签名，macOS 要右键打开、Windows 要点仍要运行」这段
+  被排在整页最末尾 —— 用户没翻到，于是来问「有一个装完打不开，是正常的吗？」
+  现在这段排在发布说明的第一屏，并在**变更清单之前**；
+  macOS / Windows 两个平台各自怎么打开都写在同一段里。
+
+  同一份指引也补齐到了 [README](README.md)、[README.en.md](README.en.md) 与
+  [使用指南](docs/USAGE.md) 的开头，并新增 `npm run check:release-notes`
+  （进 `lint:all` 与 CI）防止某次改版把它删掉或挪回去。
+
+### 修复
+
+- **安装包从 948 MB 降到 583 MB，随包文件数从 22016 降到 15098** ——
+  修的是用户下载 v0.3.0 后反馈的「安装要很久、打开要很久、电脑很卡」。
+
+  此前错在哪：`electron.vite.config.mjs` 用的是**无参数**的 `externalizeDepsPlugin()`，
+  它把 `package.json` 的**全部** `dependencies` 外置，再由 electron-builder
+  原样装进安装包。可其中大半（`monaco-editor` 108 MB、`react-pdf` 44 MB、
+  `echarts` 25 MB…）是**渲染层专用**的 —— 渲染层早被 Vite 打包进 `out/renderer`，
+  而 sandbox 渲染进程根本 `require` 不到 node_modules。这些随包是纯粹的重复。
+
+  现在：渲染层专用依赖移入 `devDependencies`（渲染层源码 chunk 是预打包的
+  vendored bundle，没有任何裸 import，因此对构建零影响）；OCR 链
+  （`tesseract.js` + `tesseract.js-core`，约 50 MB）、`@napi-rs/canvas`（约 27 MB）、
+  `officeparser` 的浏览器构建（约 30 MB）与 `pdfjs-dist` 的非 legacy 构建（约 7 MB）
+  从产物中排除。
+
+  **功能没有减少**：PDF 文本提取与 DOCX/XLSX/PPTX 解析照常工作（已在**打包产物
+  自己的 `node_modules`** 上逐包验证，并实际启动打包后的应用确认界面与 daemon
+  正常）。被排除的都是「本项目声明不做」或「Node 侧根本走不到」的代码路径。
+
+  ⚠️ `@napi-rs/canvas` 移除后，解析 PDF 时控制台会多出几条
+  `Cannot polyfill DOMMatrix / Path2D, rendering may be broken` 警告 ——
+  那是**渲染**路径的提示，我们只做文本提取，可以忽略。
+
+- **`package-lock.json` 的版本号跟上 `package.json`** —— 此前停在 `0.2.1`，
+  v0.3.0 发布时漏改了它。不影响构建（`npm ci` 只校验依赖分区），
+  但会让「版本号的单一真源」出现两个不一致的值。
 
 ## [0.3.0] - 2026-10-01
 

@@ -37,6 +37,9 @@ reading and writing files, parsing documents, running commands, and executing ta
 > ⚠️ This project is at **0.x**, and **Windows is the only fully supported platform** —
 > the command sandbox relies on Windows-specific system calls. On macOS everything except
 > command execution works; Linux is not adapted. See [Platform support](#platform-support).
+>
+> ⚠️ The installers are **unsigned**, so the first launch is blocked by the OS — that is
+> expected. See [Installer](#installer) for how to open them.
 
 ## Features
 
@@ -57,11 +60,17 @@ reading and writing files, parsing documents, running commands, and executing ta
 
 Download from [Releases](https://github.com/liang-zhenxiang/zerowork/releases).
 
-> ⚠️ **The installers are unsigned.** On macOS, right-click → **Open** for the first launch
-> (double-clicking will be blocked). On Windows, SmartScreen will warn you — click
-> "More info" → "Run anyway". This is the unavoidable consequence of shipping without a
-> code-signing certificate, not a packaging error. See the
-> [troubleshooting guide](docs/TROUBLESHOOTING.md#安装包被系统拦下) (Chinese).
+> ⚠️ **The installers are unsigned — being blocked on first launch is expected, not a
+> corrupt download.** There is no code-signing certificate, so both macOS Gatekeeper and
+> Windows SmartScreen will stop you the first time:
+>
+> | Platform | What you will see | How to open it |
+> | --- | --- | --- |
+> | **macOS** | "is damaged and can't be opened" or "cannot verify the developer" | Right-click the icon → **Open**, then click **Open** again in the dialog. If it is still blocked: **System Settings → Privacy & Security**, then click **Open Anyway** |
+> | **Windows** | SmartScreen: "Windows protected your PC" | Click **More info** → **Run anyway** |
+>
+> The **arm64 and x64 dmgs must each be allowed once** — approving one does not approve the other.
+> See the [troubleshooting guide](docs/TROUBLESHOOTING.md#安装包被系统拦下) (Chinese).
 
 ### From source
 

@@ -15,6 +15,8 @@
 - [仓库配置清单](#仓库配置清单)
 - [自动化设施一览](#自动化设施一览)
 - [测试分层](#测试分层)
+- [随包依赖的取舍](#随包依赖的取舍)
+- [安装包签名：为什么没有，以及为什么先不申请](#安装包签名为什么没有以及为什么先不申请)
 - [日常维护](#日常维护)
 - [处理 Issue](#处理-issue)
 - [审查 PR](#审查-pr)
@@ -313,6 +315,237 @@ npm run test:e2e  # ②–㉒ 全部端到端（⑯ 起需要本机有可用模�
 
 ---
 
+## 随包依赖的取舍
+
+### 出过什么事
+
+v0.3.0 发布后用户反馈「安装要很久、打开要很久、电脑很卡」。实测（mac-arm64，
+`npm run dist:dir`）：
+
+| | v0.3.0 | 现在 |
+| --- | --- | --- |
+| `ZeroWork.app` | **948 MB** | 583 MB |
+| `Resources/app/node_modules` | **554 MB** | 189 MB |
+| 随包文件数 | **22016** | 15098 |
+
+根因是一行**看起来最正常**的配置：
+
+```js
+main: { plugins: [externalizeDepsPlugin()] }   // 无参数
+```
+
+无参数的 `externalizeDepsPlugin()` 把 `package.json` 的**全部** `dependencies` 外置。
+这些包于是不进 `out/`，而由 electron-builder **原样装进安装包**。问题在于其中大半是
+**渲染层专用**的（`monaco-editor`、`react-pdf`、`echarts`…）—— 渲染层早已被 Vite
+打包进 `out/renderer`，而 sandbox 渲染进程**根本 `require` 不到 node_modules**。
+这些随包纯属重复。
+
+### 认哪条线
+
+> **`dependencies` = 主进程运行时真的会 `import` 的包。渲染层专用的进 `devDependencies`。**
+
+渲染层不需要 node_modules，原因值得记牢：`src/renderer/src/*.js` 是**预打包的
+vendored bundle**（`vendor-xlsx.js`、`office-pptx.js`、`code-preview.js`…），
+里面**没有任何裸 import**，Vite 只是把它们原样搬运成同名产物。所以渲染层依赖放在
+哪个分区**对构建没有影响** —— 放进 `devDependencies` 只是让 electron-builder 不装它。
+
+> ⚠️ **核实「谁用到了某个包」时，不要 grep `src/renderer/src/` 的 import。**
+> 那些是打包产物，import 早被内联掉了，grep 不到任何东西 ——
+> 「grep 渲染层发现没人用它，于是删掉」正是这类事故的成因。
+> 要以 `src/main`、`src/preload`、`src/shared` 为准（**含 `await import()`**，
+> 主进程有好几个包是懒加载的，只 grep 静态 import 会漏）。
+
+主进程当前需要这 11 个（硬编码在 `scripts/check-package-size.mjs`）：
+
+```
+@earendil-works/pi-coding-agent  @modelcontextprotocol/sdk  @mozilla/readability
+jsonc-parser  jszip  koffi  linkedom  officeparser  pdfjs-dist  turndown  typebox
+```
+
+### 有意不带的东西
+
+`electron-builder.yml` 的 `files` 段里有五条排除规则（四类）。
+**每一条都对应一个判断，不是「看着大就删」** —— 改之前请先读那一节的注释：
+
+| 排除 | 省 | 判断 |
+| --- | --- | --- |
+| `tesseract.js` / `tesseract.js-core` | ~50 MB | 只在 OCR 时加载；**本项目不做 OCR**（Roadmap 的「不做」清单），`doc-extract.js` 对无文本层的 PDF 直接抛 `scanned`。officeparser 侧是懒加载，且 `defaults.js` 的 `ocr: false` 是默认值，我们调用时也没传选项 |
+| `@napi-rs/canvas` | ~27 MB | `pdfjs-dist` 的**可选**依赖，Node 端 canvas 渲染用；我们只调 `getTextContent()`。pdfjs 自己对它的加载就是 try/catch + warn |
+| `officeparser` 的浏览器构建 | ~30 MB | 挂在 `exports` 的 `browser` 条件下；Node 入口只 `require` 同目录的五个 `.js`，全包内无一处引用那些文件名 |
+| `pdfjs-dist/build/`（非 legacy） | ~7 MB | 我们只 import `legacy/build/pdf.mjs` 与 `pdf.worker.mjs`；legacy 产物内部无相对 import |
+
+**代价要写清楚**：万一将来有人开启 OCR，报错会是 `Cannot find module 'tesseract.js'`
+—— 这是**响亮的失败**，不是静默降级（符合本项目「宁可拒绝也不降级」的原则）。
+真要恢复 OCR，请连同 Roadmap 的「不做」条目一起改。
+
+### 为什么没做到 Issue 里写的 400 MB
+
+那个目标**不成立**。实测的地板是：
+
+```
+Contents/Frameworks           288 MB   Electron 本体，不可压缩
+Contents/Resources/resources   79 MB   随包内容资源（红线：不动 resources/）
+Contents/Resources/app/out     27 MB   渲染层产物
+                              394 MB   ← 不含任何 node_modules 的地板
+```
+
+再叠加主进程**必须**随包的 `@earendil-works/pi-coding-agent`
+（含其 provider SDK 依赖树，合计约 100 MB）与 `koffi`，583 MB 已接近可达的底部。
+要继续降只能砍掉应用声明要用的运行时依赖（模型 SDK、esbuild…），
+那是**砍功能**，不是优化 —— 不在这条路线上。
+
+同样的理由，文件数「降到 5000 以内」也做不到：光 `@earendil-works` 一棵树就 4920 个文件，
+加 `openai` / `@anthropic-ai` / `zod` / `@smithy` / `@aws-sdk` 已远超 5000。
+**这两个数字都是 Issue 里估的，不是量出来的** —— 以上是量出来的。
+
+### 评估过、但**没有做**的：把主进程纯 JS 依赖打进 `out/main`
+
+`externalizeDepsPlugin({ exclude: [...] })` 可以让 Vite 把这些包**打进** `out/main`，
+而不是原样随包。实测（2026-10-01，把 `officeparser`、`typebox`、`linkedom`、`jszip`、
+`turndown`、`jsonc-parser`、`@mozilla/readability`、`@modelcontextprotocol/sdk`
+八个加进 exclude）：
+
+| | 现状（`du -sh` 口径） | 改后（实测） |
+| --- | --- | --- |
+| `out/main` | 916 KB | **4.5 MB**（+3.6 MB） |
+| 被移出随包的八个包 | 34.6 MB（35380 KB 逐包求和） | 0 |
+| 随包文件数 | 15098 | −2405（八个包分别 474/1408/180/260/48/9/15/11） |
+
+净收益 **约 31 MB / 2405 个文件**（整包 583 → 约 552 MB，**−5%**）。
+功能上是通的：改完 `test:gui:smoke` 22/22、`test:gui:doc` 5/5
+（真实模型跑通 PDF 与 DOCX 提取）。
+
+**结论：不实施。** 三个理由：
+
+1. **收益量级不对**。−5% 不会改变用户抱怨的「安装久、打开久」——
+   同一个 Issue 里的 400 MB 目标本身就不可达（见上一节），
+   再挤 5% 是把复杂度花在看不见的地方
+2. **代价正是本项目刻意买过的**。`minify: false` 的初衷就是
+   「保留原始标识符便于线上定位」。打包后这些包在堆栈里只剩
+   `index-BbXimslP.mjs` 这种名字 —— 换走的是维护者定位问题的时间，
+   换回来的是 5% 的体积
+3. **它带一条脆弱的特例**。officeparser 内部有 `await import("tesseract.js")`，
+   而 `tesseract.js` **不在** `dependencies` 里（它是传递依赖），
+   `externalizeDepsPlugin` 的默认外置集合**不含它** —— 一旦 officeparser 被打包，
+   rollup 就会顺着这条懒 import 去打包 50 MB 的 tesseract。
+   必须额外写一行 `external: ['tesseract.js']` 才拦得住。
+   这类「改别处会静默踩到」的耦合，在这个仓库里的历史都不太好
+
+> ⚠️ **`pdfjs-dist` 无论怎么打包都省不掉** —— 这一条纠正了 Issue 里的估算：
+> `doc-extract.js` 用 `createRequire(import.meta.url).resolve("pdfjs-dist/package.json")`
+> 定位 `cmaps` / `standard_fonts`，**这要求该包在运行时的 node_modules 里真实存在**。
+> 打进 bundle 会让 `getPdfAssetUrls()` 直接抛错、PDF 读取整体失效。
+> 同理 `@earendil-works/pi-coding-agent` 与 `koffi` 带原生 `.node`，必须随包。
+> 所以 R4 实际能省的上界是 **约 35 MB，不是 Issue 里估的 76 MB**。
+
+### 守卫
+
+`scripts/check-package-size.mjs`（`npm run check:package-size`）断言四件事：
+
+1. 渲染层专用依赖**不得**出现在随包 node_modules 里（按名单，**含传递依赖** ——
+   `echarts`/`zrender` 随 `pptx-preview` 走、`codepage` 随 `xlsx` 走，只查直接依赖会漏）
+2. 有意排除的包不得出现
+3. 主进程需要的 11 个包**必须都在**（硬编码，不从 package.json 推导 ——
+   推导的话「把 koffi 挪进 devDependencies」会让名单跟着缩水，检查就自己把自己放过去了）
+4. 体积与文件数不超上限
+
+它接在两个地方：
+
+- `npm run lint:all` —— 本地；没有 `release/` 时**明确跳过**并写明「本次没有验证任何东西」
+- `.github/workflows/build-installers.yml` 的两个 job —— **这里才是关键**：
+  CI 的 `lint:all` 没有 `release/`，会被跳过，而这件事只有打包之后才验得了
+
+> **上调 `LIMITS` 要在 PR 里写明理由。** 这条检查的全部价值就在于它不会自己放宽 ——
+> 真要让某个包随包，应当改 `MAIN_PROCESS_REQUIRED`，而不是改上限。
+
+---
+
+## 安装包签名：为什么没有，以及为什么先不申请
+
+安装包**既不签名也不公证**（`electron-builder.yml` 的 `mac.identity: null`、
+CI 里的 `CSC_IDENTITY_AUTO_DISCOVERY: "false"`）。代价是用户第一次打开会被系统拦下，
+所以**三处必须写明怎么打开** —— 这不是可选的礼貌，是打包决策的一部分。
+
+### 三处指引的落点
+
+| 位置 | 为什么是这里 |
+| --- | --- |
+| `release.yml` 组装发布说明的**最前面** | **最重要的一处**。用户是从 Release 页下载的，装完打不开时回到的也是这个页面；他要的答案只有一个 ——「为什么打不开、我该怎么办」 |
+| `README.md` / `README.en.md` 的「用安装包」 | 从仓库首页进来的人 |
+| `docs/USAGE.md` 的开头 | 从文档进来的人 |
+
+**顺序是契约，不是排版偏好**：指引必须在 PR 清单**之前**。
+v0.3.0 及以前它被放在发布说明**最末尾**，结果用户没翻到，直接来问
+「有一个装完打不开，是正常的吗？」。
+
+守卫是 `scripts/check-release-notes.mjs`（`npm run lint:all` 与 CI 的静态检查都跑）。
+它**按能力断言，不按措辞断言**：改文案不会让它变红，删掉任一能力（未签名说明 /
+「这是正常的」/ macOS 的打开方式 / Windows 的打开方式）才会。
+
+### `codesign` 报 `Identifier=Electron`？那不影响任何事
+
+`Info.plist` 里的 `CFBundleIdentifier` 是 `io.github.liang-zhenxiang.zerowork`，
+但 `codesign -dv` 报 `Identifier=Electron`。**本条实测过，结论是「不修」**：
+
+- **来源**：它来自上游 Electron 预编译二进制自带的 linker-signed adhoc 签名。
+  实测 `node_modules/electron/dist/Electron.app/Contents/MacOS/Electron` 与打包后的
+  `ZeroWork`，两者的 CodeDirectory 逐字节相同（`size=392 flags=0x20002(adhoc,linker-signed)`）。
+  `identity: null` 意味着 electron-builder **全程不做签名**，于是改名（`Electron` → `ZeroWork`）
+  与重写 `Info.plist` 都不会碰到它，所以还多了个 `Info.plist=not bound`。
+  上游 Electron 自己也是 `CFBundleIdentifier=com.github.Electron` 配 `Identifier=Electron`，
+  即这个错位不是本仓库引入的。
+- **能不能修**：能。实测 `codesign --force --sign - --identifier io.github.liang-zhenxiang.zerowork`
+  之后 `Identifier` 就对了（并且补上了 `Info.plist entries=32`、
+  `Sealed Resources version=2 rules=13 files=16812`）。
+- **为什么仍然不修**：**Gatekeeper 的判据是「有没有 Developer ID 证书链 + 有没有公证票据」，
+  `Identifier` 字符串不参与。** 实测改完后 `spctl --assess` 依然拒绝，
+  用户看到的现象一模一样。而 ad-hoc 签名**无论标识对不对都没有稳定的
+  Designated Requirement**（DR 就是 cdhash，每次构建都变），
+  所以 TCC 授权也不会因此跨版本保留。
+  换言之：成本是给构建加一个 `afterPack` 重签步骤（而 `identity: null` 本来就是为了跳过它），
+  换来用户可见的变化是零 —— 为「看起来整洁」引入一个发布路径上的新失败点，不值得。
+- 另外实测确认：`codesign --verify` 在**上游原封不动的 Electron.app** 上同样报
+  `code has no resources but signature indicates they must be present`
+  （源自 `Electron Framework.framework` 那个 linker-signed 签名）。
+  这是 Electron 未签名构建的基线，不是本项目的打包缺陷。
+
+### 评估过、但**没有做**的：申请证书 + 公证
+
+**收益**：macOS 上双击即可打开（没有 Gatekeeper 弹窗）；Windows 上 SmartScreen
+的声誉仍要下载量积累，不是签了就好。
+
+**成本**（这是决定不做的主因，按量级从大到小）：
+
+1. **要 Apple Developer Program 会员资格**（个人 99 美元/年；组织还需要 D-U-N-S 编号）。
+   这是**持续支出**，不是一次性的
+2. **CI 要多管三组密钥**：证书 p12 及其密码、Apple ID + App 专用密码（或 App Store Connect
+   API Key）、Team ID。多一组长期凭据就多一条泄露面，也要求 `SECURITY.md` 的威胁模型同步更新
+3. **必须开 hardened runtime**，而它对本项目不是「打开开关」这么简单：
+   daemon 走 `utilityProcess.fork`、沙箱用 `koffi` 加载原生模块、`asar: false`
+   让代码以真实文件落盘 —— 这些都要靠 entitlements
+   （`allow-jit` / `allow-unsigned-executable-memory` / `disable-library-validation` …）
+   逐项放行，每一项都要在**真实的 Windows/macOS 用户路径**上验证。放行错了的表现是
+   「签了名反而跑不起来」，而那时距离发布只差一步
+4. **公证是发布路径上的新单点**：`notarytool` 要联网、要排队（分钟级），
+   失败会阻断发布。而当前的发布设计是「文案出问题不该阻断发布」，
+   引入一个会阻断的环节要重新想清楚降级策略
+
+**结论：现在不做。** 依据是投入产出比 —— 项目处于 0.x、**只有 Windows 是完整支持的平台**、
+macOS 上命令执行本来就受限，因此「macOS 首次打开多一步」是当前阶段可以接受的代价；
+而上面四项成本是持续的、且第 3 项有真实的回退风险。
+
+**但代价必须如实说出来**：所以「安装包没有代码签名」写在了**下载页（发布说明最前面）**、
+README 与使用指南三处，而不是留一句「介意的话请从源码构建」。
+信任缺口的另一半由**构建溯源证明**补上（`build-installers.yml` 用 OIDC 签发，
+`gh attestation verify` 可验证）—— 它替代不了签名，但把「无法验证来源」变成了「可验证」。
+
+> 🚫 **不做自签名脚本，也不教用户绕过 Gatekeeper。** 那是在教用户绕过系统安全机制，
+> 而且会让「未签名」这件事显得可以糊弄过去。给用户的路径只有两条：
+> **按系统提示正常放行**（右键打开 / 仍要运行），或者**从源码构建**。
+> 这条边界写在这里，是为了让「用户嫌麻烦」时的下一次讨论不用从零开始。
+
+---
+
 ## 日常维护
 
 ### 每周（约 10 分钟）
@@ -437,11 +670,16 @@ git tag -a v0.2.0 -m "v0.2.0"
 git push origin v0.2.0
 ```
 
-推送 tag 后 `release.yml` 会自动生成三段式发布说明并附上安装包：
+推送 tag 后 `release.yml` 会自动生成发布说明并附上安装包。
+**四段的顺序是契约**（`scripts/check-release-notes.mjs` 守着，见[安装包签名](#安装包签名为什么没有以及为什么先不申请)）：
 
-1. **发布摘要**（配了 `ANTHROPIC_API_KEY` 才有；没有则跳过，不影响发布）
-2. **本版本的变更内容**（从 `CHANGELOG.md` 对应段落提取）
-3. **变更清单**（GitHub 原生 `releases/generate-notes`：PR 列表、贡献者、对比链接）
+1. **首次运行指引** —— 未签名说明 + 两个平台各自怎么打开。**必须最靠前**
+2. **发布摘要**（配了 `ANTHROPIC_API_KEY` 才有；没有则跳过，不影响发布）
+3. **本版本的变更内容**（从 `CHANGELOG.md` 对应段落提取）
+4. **变更清单**（自己拼的中文 PR 列表 + 对比链接）
+
+> 「变更清单」**不再用** GitHub 原生的 `releases/generate-notes` ——
+> 它返回的是英文骨架，而本项目的对外文字一律中文（见 `.trellis/spec/workflow/`）。
 
 ### 发布幂等
 

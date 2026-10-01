@@ -81,6 +81,12 @@ jobs:
       - name: 校验文档有效性
         run: npm run check:docs
 
+      # 用户从 Release 页下载安装包，装完打不开时回到的还是那个页面。
+      # 这条守住「为什么打不开、我该怎么办」必须出现在发布说明里（且在 PR 清单之前），
+      # 以及 README / 使用指南三处都写着同一件事 —— 它防的是某次改版把指引删掉。
+      - name: 校验首次运行指引
+        run: npm run check:release-notes
+
       - name: 校验随包内容完整性
         run: npm run check:resources
 

@@ -26,24 +26,33 @@ jobs:
     name: 准备发布说明
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # ⚠️ 这里**曾经是 `contents: write`，现在已经降回只读** —— 说明为什么能降，
+    # 免得后来者以为「写权限是发布必需的」又给加回来。
+    #
+    # 旧实现用 `gh api .../releases/generate-notes` 生成 PR 清单。那是个 **POST** 端点，
+    # 本 job 当时只声明了 `contents: read`，于是拿到过：
+    #
+    #     gh: Resource not accessible by integration (HTTP 403)
+    #     ##[warning]变更清单生成失败，发布说明将不含 PR 列表
+    #
+    # 那时只能补成 `contents: write`（完整经过见 PR #45）。**现在不需要了**：
+    # Issue #48 把 PR 清单改成自己拼（发布说明的对外文字必须是中文），只剩
+    # `GET /repos/{owner}/{repo}/pulls` 与 `git log` / `git tag` —— 全是读操作。
+    # GitHub REST 文档给该端点标的就是「Pull requests: read」。
+    #
+    # 两个必须一起记住的点：
+    #
+    #   · `pull-requests: read` **必须显式写出来**。permissions 块一旦出现，
+    #     没有列到的权限域会被置成 `none`，而不是「沿用默认」——
+    #     漏了它，同样是一次 403。
+    #   · 失败路径仍是**刻意不阻断**（warning 之后继续发布）的。这个设计本身是对的
+    #     （发布不该因为一段文案而失败），代价是它会**静静地退化成两段**。
+    #     所以动过本文件之后**一定要打一个 tag 验证**。
     permissions:
-      # ⚠️ 必须是 write，不能只给 read —— 这一点**踩过**。
-      #
-      # 本 job 用 `gh api .../releases/generate-notes` 生成 PR 清单，而那是
-      # 一个 **POST** 接口，需要 `contents: write`。只给 read 时会 403：
-      #
-      #     gh: Resource not accessible by integration (HTTP 403)
-      #     ##[warning]变更清单生成失败，发布说明将不含 PR 列表
-      #
-      # 当时工作流里写着「gh api 生成变更清单也用同一个只读 token」——
-      # **那个假设是错的**。
-      #
-      # 失败路径刻意设计成不阻断（发布不该因为一段文案而失败），代价是它会
-      # **静静地退化成两段**。v0.2.1 是首个 Release、没有「上一版本」可比，
-      # 压根走不到这段逻辑；v0.3.0 才是第一次真正执行到这里 —— 于是才发现。
-      #
-      # 这正是不验证就永远不知道的那类问题：动过本文件之后**一定要打一个 tag 验证**。
-      contents: write
+      # checkout，以及 `git tag` / `git log` 定位上一个版本
+      contents: read
+      # 列出两个版本之间合并的 PR
+      pull-requests: read
     outputs:
       has-changelog: ${{ steps.changelog.outputs.found }}
       prev-tag: ${{ steps.prs.outputs.prev_tag }}
@@ -110,11 +119,31 @@ jobs:
           fi
 
       # -----------------------------------------------------------------------
-      # ③ 用 GitHub 原生 API 生成变更清单
+      # ③ 生成变更清单（中文）
       #
-      # releases/generate-notes 会返回自上一个 tag 以来的 PR 列表、贡献者，
-      # 以及 Full Changelog 对比链接。自己拼这些既麻烦又容易漏。
-      # 注意这是 POST 端点（gh api 带 -f 时会自动改用 POST）。
+      # **不再用 `releases/generate-notes`**：它返回的是 GitHub 自己那套**英文骨架**
+      # （`## What's Changed`、`* xxx by @user in #N`），而本项目要求对外文字一律中文
+      # （Issue #48）。这里改成自己拼一条中文清单。
+      #
+      # 附带的好处是它顺手把 `contents: write` 也换掉了 —— 见上面 permissions 的说明。
+      #
+      # 下面几处是**比对着真实发布数据定下来的**，别凭直觉改：
+      #
+      #   · 分界点取**上一个 tag 的创建时间**（`%(creatordate:unix)`），而不是它所在
+      #     提交的提交时间。用提交时间会**把上一个版本自己的那个 PR 混进来**：
+      #     tag 打在发布 PR 的合并提交上，而该 PR 的 `merged_at` 比这个提交的
+      #     提交时间还要晚上一两秒。实测 v0.2.1 → v0.3.0：用提交时间会多出一条 #25
+      #     （正是 v0.2.1 自己的发布 PR），换成 creatordate 后与 generate-notes
+      #     的结果**逐条一致**。
+      #     `creatordate` 对附注 tag 就是 tagger 日期、对轻量 tag 退回提交时间 ——
+      #     一条命令覆盖两种情况，不必分叉。
+      #
+      #   · 时间比较一律走 **epoch 秒**，不比 ISO 字符串：`git log --format=%cI`
+      #     带的是 `+08:00` 这类本地偏移，跟 API 返回的 `...Z` 按字典序比会**比错**。
+      #
+      #   · 用**独立的 `jq` 命令**而不是 `gh api --jq`：后者没有 `--arg`，
+      #     只能把变量拼进 jq 程序字符串里；独立 jq 能正经传参。
+      #     （jq 在 GitHub 托管的 runner 上是预装的，本文件下方 AI 摘要那步也在用。）
       # -----------------------------------------------------------------------
       - name: 生成变更清单
         id: prs
@@ -138,16 +167,59 @@ jobs:
           echo "上一个版本：${prev}"
           echo "prev_tag=${prev}" >> "$GITHUB_OUTPUT"
 
-          if ! gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
-              -f tag_name="$TAG" \
-              -f previous_tag_name="$prev" \
-              --jq '.body' > pr-list.md; then
-            echo "::warning::变更清单生成失败，发布说明将不含 PR 列表"
+          # 分界点：上一个 tag 的创建时间（epoch 秒）
+          since="$(git for-each-ref --format='%(creatordate:unix)' "refs/tags/${prev}")"
+          if [[ -z "$since" ]]; then
+            echo "::warning::取不到 ${prev} 的创建时间，发布说明将不含 PR 清单（发布继续）"
+            exit 0
+          fi
+
+          # 失败一律不阻断发布（沿用旧实现的姿态）：发布不该因为一段文案而失败。
+          # 代价是它会**静静地退化成两段**，所以每条失败路径都必须留下 ::warning::。
+          if ! gh api \
+              "repos/${GITHUB_REPOSITORY}/pulls?state=closed&sort=updated&direction=desc&per_page=100" \
+              > pulls.json; then
+            echo "::warning::拉取 PR 列表失败，发布说明将不含 PR 清单（发布继续）"
             : > pr-list.md
             exit 0
           fi
 
-          echo "已生成 $(wc -l < pr-list.md) 行变更清单"
+          # 接口按 updated 倒序返回**一页**（最多 100 条）。取满一页说明后面可能还有，
+          # 这时要**说出来** —— 悄悄漏掉几条 PR 比整段缺失更难发现。
+          fetched="$(jq 'length' pulls.json || echo 0)"
+          if [[ "$fetched" -ge 100 ]]; then
+            echo "::warning::PR 列表取满一页（100 条），变更清单可能不完整"
+          fi
+
+          # 拼中文清单。两个约定：
+          #   · 分界用「严格晚于」，这样上一个版本自己的发布 PR 不会被算进来；
+          #   · 条目格式取自 Issue #48（`- 标题（#N @作者）`）—— 连 `by` 都不留，
+          #     清单里不出现任何英文词（PR 标题本身是维护者写的，原样保留）。
+          if ! jq -r \
+              --argjson since "$since" \
+              --arg prev "$prev" \
+              --arg tag "$TAG" \
+              --arg repo "$GITHUB_REPOSITORY" '
+                [ .[]
+                  | select(.merged_at != null)
+                  | select((.merged_at | fromdateiso8601) > $since)
+                ]
+                | sort_by(.merged_at)
+                | "## 本版合并的 PR",
+                  "",
+                  ( if length == 0
+                    then "本版本没有合并任何 PR。"
+                    else ( .[] | "- \(.title)（[#\(.number)](\(.html_url)) @\(.user.login)）" )
+                    end ),
+                  "",
+                  "**完整变更**：[`\($prev)...\($tag)`](https://github.com/\($repo)/compare/\($prev)...\($tag))"
+              ' pulls.json > pr-list.md; then
+            echo "::warning::变更清单格式化失败，发布说明将不含 PR 清单（发布继续）"
+            : > pr-list.md
+            exit 0
+          fi
+
+          echo "已生成变更清单：$(grep -c '^- ' pr-list.md || true) 条 PR"
 
       # -----------------------------------------------------------------------
       # ④ AI 摘要（可选）
@@ -236,6 +308,15 @@ jobs:
 
       # -----------------------------------------------------------------------
       # ⑤ 组装最终的发布说明
+      #
+      # ⚠️ **下面的段落顺序是契约，不是排版偏好** ——
+      # `scripts/check-release-notes.mjs` 会守住它（`npm run lint:all` 与 CI 都跑）。
+      #
+      # 首次运行指引必须排在**最前面**，且在 PR 清单之前。理由是用户从哪儿来：
+      # 他是从**这个页面**下载安装包的，装完打不开时回到的也是这个页面。
+      # 此刻他要的答案只有一个 ——「为什么打不开、我该怎么办」。
+      # 把它放在 PR 清单之后（v0.3.0 及以前的位置）等于放在页面最底部，
+      # 而真实发生过的事是：用户没翻到那里，直接来问「有一个装完打不开，是正常的吗？」
       # -----------------------------------------------------------------------
       - name: 组装发布说明
         env:
@@ -247,6 +328,33 @@ jobs:
           set -euo pipefail
 
           : > release-notes.md
+
+          # —— 首次运行指引（**必须最靠前**，理由见本 step 上方的注释）——
+          #
+          # 内容的判据只有一条：**用户读完知不知道该怎么做**。它必须同时说清
+          # 「这是正常的」与「两个平台各怎么打开」—— 缺了前半句，用户会以为
+          # 下到了坏文件或恶意软件；缺了后半句，他只能去猜。
+          # 改动这段文字不会让检查变红，**删掉其中任一能力会**。
+          cat >> release-notes.md <<'NOTICE'
+          ### ⚠️ 首次打开会被系统拦下 —— 这是正常的
+
+          安装包**没有代码签名**（项目没有代码签名证书），所以 macOS 与 Windows
+          都会在你第一次打开时拦一下。**文件本身是完好的** —— 不是下坏了，也不是打包出错。
+
+          | 平台 | 会看到什么 | 怎么打开 |
+          | --- | --- | --- |
+          | **macOS** | 双击提示「已损坏，无法打开」或「无法验证开发者」 | **右键点图标 → 打开**，在弹窗里再点「打开」。若仍被拦下：打开**系统设置 → 隐私与安全性**，在「安全性」一栏点**仍要打开** |
+          | **Windows** | SmartScreen 提示「Windows 已保护你的电脑」 | 点**更多信息** → **仍要运行** |
+
+          dmg 的 **arm64 与 x64 两个包要各自放行一次** —— 放行过其中一个，不代表另一个不再被拦。
+
+          介意未签名的话，可以从源码构建 —— 见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+          **平台支持**：只有 Windows 是完整支持的平台 —— 命令沙箱依赖 Windows 专有的系统调用，
+          macOS / Linux 上默认权限档下命令会被拒绝执行。详见
+          [README 的平台支持说明](README.md#平台支持)。
+          NOTICE
+          printf '\n' >> release-notes.md
 
           # —— 摘要 ——
           if [[ -s summary.md ]]; then
@@ -271,32 +379,11 @@ jobs:
             } >> release-notes.md
           fi
 
-          # —— 变更清单（PR / 贡献者 / 对比链接）——
+          # —— 变更清单（PR 列表 / 对比链接，均为中文）——
           if [[ -s pr-list.md ]]; then
             printf '\n---\n\n' >> release-notes.md
             cat pr-list.md >> release-notes.md
           fi
-
-          # —— 安装包的签名状态必须写在发布说明里 ——
-          # 用户看到「已损坏 / 未知发布者」时的第一反应是「下到了恶意软件」，
-          # 把现象、原因、绕过步骤写在最显眼的位置，比放在文档里再被问一次要好。
-          printf '\n---\n\n' >> release-notes.md
-          cat >> release-notes.md <<'NOTICE'
-          ### ⚠️ 关于安装包
-
-          安装包**没有代码签名**。这不是打包出错，是没有代码签名证书时的必然结果：
-
-          - **macOS**：首次打开需要**右键点图标 → 打开**，在弹窗里再点「打开」。
-            直接双击会被 Gatekeeper 拦下，提示「已损坏」或「无法验证开发者」
-          - **Windows**：SmartScreen 会提示「Windows 已保护你的电脑」，
-            点**更多信息** → **仍要运行**
-
-          介意的话可以从源码构建 —— 见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-
-          另外，**只有 Windows 是完整支持的平台**：命令沙箱依赖 Windows 专有的系统调用，
-          macOS / Linux 上默认权限档下命令会被拒绝执行。详见
-          [README 的平台支持说明](README.md#平台支持)。
-          NOTICE
 
           echo "=== 最终发布说明 ==="
           cat release-notes.md
