@@ -1,0 +1,2 @@
+{"file": "docs/DESIGN.md", "reason": "要收口的就是它；§5 的登记表与 §5.1 的禁止项是权威"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范里对「受控例外」的引用，需同步"}

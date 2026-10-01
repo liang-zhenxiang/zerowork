@@ -188,7 +188,8 @@ print('\n'.join(bad) if bad else 'OK')
 ## 常用命令
 
 ```bash
-npm run lint:all        # 本地全量检查（= CI 里本地能跑的那些，11 项）
+npm run lint:all        # 本地全量静态检查（= CI 里本地能跑的那些）
+                        # 不写死项数——它会随检查项增加而漂移，跑一次看输出即可
 npm run test            # 单元测试
 npm run test:gui        # 端到端 GUI 测试（真实启动 Electron）
 npm run test:all        # lint:all + 单元 + 端到端
