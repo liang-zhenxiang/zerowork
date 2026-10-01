@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：反向验证、断言不得削弱"}
+{"file": "docs/DESIGN.md", "reason": "检查编号体系是否自洽、两边是否一一对应"}
