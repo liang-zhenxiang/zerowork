@@ -31323,10 +31323,24 @@ function WidgetView({ card }) {
   } else {
     body = /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "widget-missing", children: "可视化内容缺失" });
   }
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "widget-card", children: [
+  // widget-finalized：内容成功定稿（issue #71 的入场动效挂这个态——流式中的空壳
+  // 不入场闪一下，只有「成品落定」的那一帧才动）。类是条件挂的，动画在类挂上时
+  // 触发一次（reduced-motion 由全局清单一并关掉，见 app.css 的 animation:none 块）。
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `widget-card${finalized ? " widget-finalized" : ""}`, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "widget-head", children: [
       statusIcon,
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "widget-title", title, children: title }),
+      /*
+       * 产物徽标（issue #71）：只在「真的产出了内容」时出现（与绿勾同一判定口径：
+       * 非失败、非流式中、outcome 为 ok）——失败/中止/流式都不配称「产物」。
+       * 品牌绿点 + 「产物」二字，把「这是一件成品」的信号从 hover 才能发现的
+       * 下载键提前到扫读层。品牌绿的扩展使用按 DESIGN.md 论证：此处语义是
+       * 「产品完成了产出」，与状态点同族（完成语义），不是装饰。
+       */
+      !failed && !streaming && card.outcome === "ok" && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "widget-artifact-badge", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "widget-artifact-dot", "aria-hidden": "true" }),
+        "产物"
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "widget-actions", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
