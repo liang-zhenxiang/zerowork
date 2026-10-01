@@ -270,6 +270,16 @@ const INVOKE = {
   getStyle: "settings:get-style",
   /** 写回复风格。传空串 = 关闭风格注入；只影响之后的新 run，不回溯既有会话。 */
   setStyle: "settings:set-style",
+  /* ── 外观（主题三档） ─────────────────────────────────────────── */
+  /**
+   * 读外观主题档位（"system" | "light" | "dark"）。未配置时 daemon 回 "light"：
+   * 存量用户升级后界面保持浅色不变，「跟随系统」是设置项里的显式选择。
+   * 注意：本表与 src/shared/ipc.js 是两份手工同步的副本（preload 不 import
+   * shared 模块的既有架构），改通道名两处都要改。
+   */
+  getThemePreference: "settings:get-theme",
+  /** 写外观档位。落盘（daemon）与 nativeTheme 生效（main）在一次 invoke 内完成。 */
+  setThemePreference: "settings:set-theme",
   /* ── 记忆（spec: add-memory-system） ─────────────────────────── */
   /** 读记忆系统开关。未配置时 daemon 回 true（缺省开启）。 */
   getMemoryEnabled: "settings:get-memory-enabled",
@@ -566,6 +576,10 @@ const bridge = {
   setThinkingLevelDefault: (level) => ipcRenderer.invoke(INVOKE.setThinkingLevelDefault, level),
   getStyle: () => ipcRenderer.invoke(INVOKE.getStyle),
   setStyle: (styleId) => ipcRenderer.invoke(INVOKE.setStyle, styleId),
+  getThemePreference: () => ipcRenderer.invoke(INVOKE.getThemePreference),
+  // 落盘（daemon）与 nativeTheme.themeSource 生效（main）在同一次 invoke 里完成，
+  // 渲染层不需要先 set 再 apply 的两步时序（见任务 design.md §2.3）。
+  setThemePreference: (theme) => ipcRenderer.invoke(INVOKE.setThemePreference, theme),
   getMemoryEnabled: () => ipcRenderer.invoke(INVOKE.getMemoryEnabled),
   setMemoryEnabled: (enabled) => ipcRenderer.invoke(INVOKE.setMemoryEnabled, enabled),
   getAgentTeamsEnabled: () => ipcRenderer.invoke(INVOKE.getAgentTeamsEnabled),

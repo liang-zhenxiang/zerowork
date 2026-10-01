@@ -510,9 +510,13 @@
  *   间距 7 档 / 字号 5 档 / 文字色 3 级 / 圆角 4 档 / 阴影 3 级 / 时长 3 档。
  *   不够用时先改 docs/DESIGN.md 并说明理由，不许在组件里加第 8 档。
  *
- * 主题：`:root` 为亮色（当前唯一生效主题，浅色）。
- * `[data-theme="dark"]` 为暗色预留——应用侧尚无暗色开关与持久化，
- * 变量先定义、不接线，避免半成品主题流出去。
+ * 主题：`:root` 为亮色基准；`[data-theme="dark"]` 为暗色（已接线生效）。
+ * 开关在 设置 → 通用 → 外观（三档：浅色 / 深色 / 跟随系统）。驱动方式：
+ * 渲染层挂载前同步设 `documentElement` 的 data-theme 属性（app.js 的
+ * initTheme；localStorage 镜像防首帧闪变，preferences.json 是持久化真源，
+ * 主进程据此在建窗口前设 nativeTheme.themeSource，system 档的媒体查询
+ * 求值由它决定）。改 token 值时两块都要照顾：亮色在 :root、暗色在下块，
+ * scripts/check-theme-tokens.mjs 会校验暗色块覆盖所有随主题变化的 token。
  */
 
 :root {
@@ -1869,7 +1873,10 @@ textarea:focus-visible {
 	font-weight: 400;
 	color: var(--text-secondary);
 	background: var(--bg);
-	box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.02);
+	/* 2026-10-01 收编：原为直写 rgba(0,0,0,0.02) 的散阴影——浅色下与
+	   --shadow-sm（0.02/0.03 两层）几乎等值，但暗色下 2% 黑完全不可见。
+	   换 token 后浅色视觉不变，暗色自动取档（check-theme-tokens 守护）。 */
+	box-shadow: var(--shadow-sm);
 }
 
 .capability-chip:hover {
@@ -2621,7 +2628,9 @@ textarea:focus-visible {
 /* 删除钮收在缩略图右上角：strip 有 overflow-x 裁切，钮若凸出到 thumb 外会被剪掉。
    底色是缩略图上的小 scrim（55% / hover 78%），语义不是模态背板，故不并入
    --overlay(40%)——归 40% 后白 × 在亮图上会不够清，且 hover 档会与常态撞成同色。
-   登记为 token 例外（见 docs/DESIGN.md）。 */
+   登记为 token 例外（见 docs/DESIGN.md）。
+   暗色主题下语义仍成立：scrim 的职责是压暗缩略图让关闭键浮出来，
+   深色界面里黑色 scrim 压得更深同样达成目的，不需要白 scrim。 */
 .attachment-remove {
 	position: absolute;
 	top: 2px;

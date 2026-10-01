@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, appendFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, delimiter, basename, extname } from "node:path";
-import { app, Menu, BrowserWindow, session, ipcMain, shell, utilityProcess, globalShortcut, dialog } from "electron";
+import { app, Menu, BrowserWindow, session, ipcMain, shell, utilityProcess, globalShortcut, dialog, nativeTheme } from "electron";
 import {
   DEFAULT_GLOBAL_SHORTCUT,
   INVOKE,
@@ -132,7 +132,10 @@ const MAIN_HANDLED = [
   INVOKE.pickSkillDirectory,
   INVOKE.pickInputFiles,
   INVOKE.importProfile,
-  INVOKE.workspaceReveal
+  INVOKE.workspaceReveal,
+  // 主题档位：落盘（daemon）+ 生效（themeSource）要在同一次 invoke 里完成，
+  // 不能走批量转发（那只落盘），所以拆到这里单独注册。
+  INVOKE.setThemePreference
 ];
 let window;
 let daemon;
@@ -258,12 +261,16 @@ function createWindow() {
       titleBarOverlay: {
         height: MENUBAR_HEIGHT,
         color: "#00000000",
-        // 窗口控件图标色。与本文件 `:root` 的 --text 同深（当前只有浅色主题）。
-        symbolColor: "#333333"
+        // 窗口控件图标色：随主题取浅色版 --text(-secondary 档 #333333) 或
+        // 深色版（与暗色块 --text-secondary 的白 55% 相近的可读灰）。
+        // applyInitialTheme 先于 createWindow 执行，此处求值已包含偏好覆写。
+        // 运行中切换由 nativeTheme.on("updated") 联动（见 whenReady 块）。
+        symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f2f2" : "#333333"
       }
     },
-    // 透明 overlay 下露出来的就是它；与 `:root` 的 --bg 一致。
-    backgroundColor: "#ffffff",
+    // 透明 overlay 下露出来的就是它；首帧用主题底色防闪白——
+    // 渲染层挂载前正是它露脸，深色用户若给白色会闪一帧。
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#1c1c1e" : "#ffffff",
     webPreferences: {
       preload: join(import.meta.dirname, "../preload/index.mjs"),
       // renderer 跑的是不可信内容（模型产出的 HTML 会在预览面板里渲染），
@@ -303,6 +310,31 @@ function appendMainEventLog(record) {
     console.error("[main] 事件日志落盘失败:", error);
   }
 }
+/*
+ * ── 主题（外观三档）─────────────────────────────────────────────────
+ * 偏好的唯一写入方是 daemon（settings:set-theme handler）；主进程这里只读不写，
+ * 避免「两处都能写 preferences.json」的双写竞争。
+ * 之所以在主进程再读一次（渲染层 getThemePreference 也能拿到）：渲染层的
+ * data-theme 属性要在首帧前定下来才不闪变，而 IPC 是异步的——所以由主进程在
+ * createWindow 之前设 nativeTheme.themeSource，渲染层首帧的
+ * matchMedia("(prefers-color-scheme: dark)") 求值即已正确（themeSource 会
+ * 覆写整个应用的媒体查询取值）。
+ */
+const THEME_PREFERENCES = ["system", "light", "dark"];
+function applyInitialTheme() {
+  const override = process.env["ZEROWORK_CONFIG_DIR"];
+  const configDir = override !== void 0 && override !== "" ? override : join(homedir(), ".zerowork");
+  try {
+    const record = JSON.parse(readFileSync(join(configDir, "preferences.json"), "utf8"));
+    if (THEME_PREFERENCES.includes(record.theme)) {
+      nativeTheme.themeSource = record.theme;
+    }
+    // theme 缺失或非法：不设 themeSource，保持 Electron 默认（跟随系统）。
+    // 渲染层的 localStorage 镜像兜底（缺省 light），两边缺省口径见 daemon handler。
+  } catch {
+    // 偏好文件不存在 / 损坏都是正常态（首启、手删），daemon 侧同样容错。
+  }
+}
 function setupGlobalShortcut() {
   toggleShortcut = new GlobalToggleShortcutController(
     {
@@ -335,6 +367,14 @@ function registerIpc() {
   }
   ipcMain.handle(INVOKE.daemonStatus, () => daemonStatus);
   ipcMain.handle(INVOKE.globalShortcutStatus, () => globalShortcutStatus);
+  // 主题档位：先落盘（daemon 校验非法值并抛错，themeSource 不会被污染），
+  // 成功后才生效。themeSource 是整个应用 prefers-color-scheme 的权威：
+  // light/dark 为覆写、system 为跟随 OS；渲染层 system 档靠它求值（design.md §2.3）。
+  ipcMain.handle(INVOKE.setThemePreference, async (_event, theme) => {
+    await callDaemon(INVOKE.setThemePreference, [theme]);
+    nativeTheme.themeSource = theme;
+    return null;
+  });
   ipcMain.handle(INVOKE.openArtifact, async (_event, path) => {
     const error = await shell.openPath(path);
     if (error !== "") throw new Error(error);
@@ -451,6 +491,8 @@ if (!app.requestSingleInstanceLock()) {
     // 非 Windows 平台上这是 no-op —— Electron 的文档里标了 `@platform win32`。
     app.setAppUserModelId(APP_ID);
     installCsp(process.env["ELECTRON_RENDERER_URL"] !== void 0);
+    // 建窗口前定主题：渲染层首帧的媒体查询取值由此决定（见 applyInitialTheme 注释）。
+    applyInitialTheme();
     registerIpc();
     startDaemon();
     app.setAboutPanelOptions({
@@ -463,6 +505,21 @@ if (!app.requestSingleInstanceLock()) {
       )
     );
     createWindow();
+    // 窗口控件符号色随主题（overlay 底全透明不变，见 createWindow 注释）。
+    // macOS hiddenInset 的红绿灯是系统控件、自动适配深浅，不在此列。
+    // shouldUseDarkColors 已综合 themeSource 覆写与 OS 偏好，是唯一判据。
+    nativeTheme.on("updated", () => {
+      if (process.platform === "darwin" || window === void 0 || window.isDestroyed()) return;
+      try {
+        window.setTitleBarOverlay({
+          height: MENUBAR_HEIGHT,
+          color: "#00000000",
+          symbolColor: nativeTheme.shouldUseDarkColors ? "#f2f2f2" : "#333333"
+        });
+      } catch {
+        // 窗口正在销毁等瞬态，下一次 updated 会再对齐，不值得报错。
+      }
+    });
     setupGlobalShortcut();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
