@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-03-modal-backdrop/prd.md", "reason": "逐条核对 Acceptance Criteria，特别是「逐个模态回归」与反向验证"}
+{"file": ".trellis/tasks/10-03-modal-backdrop/design.md", "reason": "核对实现与设计一致；design.md 里的影响面表是否已被实测结果替换"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查守卫用例是否可证伪（反向验证做没做）、有没有静默跳过"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "核查 app.css 的注释是否同步更正、有没有改动被禁止的东西"}

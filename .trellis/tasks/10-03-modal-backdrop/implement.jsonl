@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：CSS 陷阱（注释吞规则、括号配平查不出）、token 单一真源、禁止事项"}
+{"file": "docs/DESIGN.md", "reason": "§2 遮罩档位、§5 受控例外、§6 禁止清单 —— 改动必须与登记值一致"}
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e harness 用法、跳过的纪律、反向验证的写法"}
+{"file": ".trellis/tasks/10-03-modal-backdrop/design.md", "reason": "实测影响面清点 + 做法选择（A + 守卫）+ 守卫形状 + 测试设计"}
+{"file": ".trellis/tasks/10-03-modal-backdrop/prd.md", "reason": "需求与验收标准"}
