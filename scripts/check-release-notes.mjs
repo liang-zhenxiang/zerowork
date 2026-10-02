@@ -211,7 +211,7 @@ function checkReleaseNotes(problems) {
 	const blocks = extractAppendedBlocks(script);
 	if (blocks.length === 0) {
 		problems.push(
-			`${RELEASE_NOTES_FILE}：「${RELEASE_NOTES_STEP}」里没有写�� release-notes.md 的指引段落 —— ` +
+			`${RELEASE_NOTES_FILE}：「${RELEASE_NOTES_STEP}」里没有写进 release-notes.md 的指引段落 —— ` +
 				'首次运行指引被删掉了（也可能是它引用的 .md 文件读不到）',
 		);
 		return { checked: false, summary: '' };

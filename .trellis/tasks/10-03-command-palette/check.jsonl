@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "核查新增样式是否只用既有 token、有没有新造档位或复制视觉值、有没有新增受控例外"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查用例是否可证伪（反向验证做没做）、有没有静默跳过、断言是否会被无关信号满足"}
+{"file": "docs/DESIGN.md", "reason": "核查动效登记、reduced-motion 关停清单、§7.6 非颜色状态载体、§6 禁止清单"}
+{"file": ".trellis/tasks/10-03-command-palette/prd.md", "reason": "逐条核对 Acceptance Criteria"}
+{"file": ".trellis/tasks/10-03-command-palette/design.md", "reason": "核对实现与设计是否一致；偏离处要么改设计要么改实现，不允许两者不一致"}

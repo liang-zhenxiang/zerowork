@@ -12987,6 +12987,11 @@ const IconMore = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, chil
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "12", r: "1.2", fill: "currentColor", stroke: "none" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "19", cy: "12", r: "1.2", fill: "currentColor", stroke: "none" })
 ] });
+// 放大镜：命令面板的侧栏入口图标（.new-task 尺寸 16 同档）。
+const IconSearch = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "11", cy: "11", r: "7" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m20 20-4-4" })
+] });
 const IconSend = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 19V5M5 12l7-7 7 7" }) });
 const IconBack = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19 12H5M12 19l-7-7 7-7" }) });
 const IconArrowRight = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5 12h14M12 5l7 7-7 7" }) });
@@ -13263,7 +13268,8 @@ function Sidebar({
   onOpenDiagnostics,
   onOpenStats,
   onOpenSkills,
-  onOpenAutomations
+  onOpenAutomations,
+  onOpenPalette
 }) {
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
@@ -13688,6 +13694,13 @@ function Sidebar({
       // rgb(0,0,0)，与导航项同色 —— 看着浅是笔画细，不是颜色。）
       /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 16 }),
       "新建任务"
+    ] }),
+    // 命令面板的常驻入口：键盘快捷键不能是唯一入口（prd R1）。右侧提示复用
+    // .nav-hint（与 .ac-hint 同一条规则），随平台显示 ⌘K / Ctrl+K。
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "new-task", onClick: onOpenPalette, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 16 }),
+      "搜索或跳转",
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "nav-hint", children: `${PALETTE_MOD}+K` })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "sidebar-nav", children: [
       NAV_ITEMS$1.filter((item) => item.ready).map(renderNavItem),
@@ -29535,6 +29548,7 @@ function gfm(options) {
  * remark-math 原生围栏式（$$ 独立行开闭）。
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
+import { rankEntries, matchRank, KIND_WEIGHT } from "./command-palette-core.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -67519,6 +67533,302 @@ function taskTitle(text2) {
   const oneLine = text2.replace(/\s+/g, " ").trim();
   return oneLine.length > TITLE_MAX ? `${oneLine.slice(0, TITLE_MAX)}…` : oneLine;
 }
+/* ── 命令面板（⌘K）────────────────────────────────────────────────────
+ * 纯渲染层功能，不新增任何 IPC 通道：数据全部来自 App() 已有的 state 与既有
+ * window.kami.*（skillsSnapshot / mcpConfigGet / listAutomations 三项首次打开时
+ * 拉取后缓存）。列表本体复用补全菜单的 .ac-* 类（分组标题 + 行 + 图标位 + 右侧
+ * 提示），所以行样式不复制、不新造；面板只新添「外壳」的样式（见 app.css）。
+ *
+ * 筛选 + 排序 + 截断全在 command-palette-core.js 里（纯函数、可单测）；
+ * 本组件只负责「把结果画出来、把键盘接上」。排序链的知识不要在组件里重写。
+ */
+const PALETTE_LIMIT = 50;
+// 空查询只展示「常用动作 + 最近 N 条会话」——不是把全部实体摊开成一堵墙（prd R3）。
+const PALETTE_IDLE_SESSIONS = 5;
+// 退场时长 = --dur-fast：离场比入场快（docs/DESIGN.md §5.8）。
+const PALETTE_EXIT_MS = 150;
+const PALETTE_LISTBOX_ID = "command-palette-listbox";
+const PALETTE_MOD = navigator.platform.includes("Mac") ? "⌘" : "Ctrl";
+const PALETTE_GROUP_LABELS = {
+  action: "动作",
+  settings: "设置",
+  session: "会话",
+  workspace: "工作空间",
+  expert: "专家",
+  skill: "技能",
+  connector: "连接器",
+  automation: "自动化"
+};
+// 每类条目一个图标（非颜色的可辨识信号之一，docs/DESIGN.md §7.6）。
+const PALETTE_KIND_ICONS = {
+  action: IconArrowRight,
+  settings: IconSettings,
+  session: IconAssistant,
+  workspace: IconWorkspace,
+  expert: IconUser,
+  skill: IconSkill,
+  connector: IconCloud,
+  automation: IconAutomation
+};
+/*
+ * 声明式动作表：每条都是既有入口的「换一个入口」，run 只调用既有 setState 或
+ * 既有 window.kami.*，不新增通道。hint 只写真实存在的快捷键（折叠侧栏是
+ * ⌘./Ctrl+.），没绑键的一律留空 —— 不做假提示（prd R2）。
+ * ctx 由 App() 用当前 state 与回调组装（含随 sidebarOpen 变化的标题）。
+ */
+function paletteActionEntries(ctx) {
+  const actions = [
+    { id: "action:new-task", title: "新建任务", subtitle: "开始一个新对话", keywords: ["新任务", "新对话", "开始", "聊天"], run: ctx.newTask },
+    { id: "action:theme-light", title: "切换外观：浅色", subtitle: "设置 → 通用 → 外观", keywords: ["浅色", "亮色", "主题", "外观", "light"], run: () => ctx.setTheme("light") },
+    { id: "action:theme-dark", title: "切换外观：深色", subtitle: "设置 → 通用 → 外观", keywords: ["深色", "暗色", "主题", "外观", "dark"], run: () => ctx.setTheme("dark") },
+    { id: "action:theme-system", title: "切换外观：跟随系统", subtitle: "设置 → 通用 → 外观", keywords: ["跟随系统", "系统", "主题", "外观", "system"], run: () => ctx.setTheme("system") },
+    { id: "action:toggle-sidebar", title: ctx.sidebarOpen ? "折叠侧栏" : "展开侧栏", keywords: ["侧栏", "折叠", "展开", "sidebar"], hint: `${PALETTE_MOD}+.`, run: ctx.toggleSidebar },
+    { id: "action:check-updates", title: "检查更新", keywords: ["更新", "版本", "升级", "update"], run: ctx.checkForUpdates },
+    { id: "action:diagnostics", title: "打开诊断", keywords: ["诊断", "排错", "日志", "diagnostics"], run: ctx.openDiagnostics },
+    { id: "action:stats", title: "打开统计", keywords: ["统计", "用量", "token", "stats"], run: ctx.openStats },
+    { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
+    { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations }
+  ];
+  // 设置分组各自成条目：标题一律以「设置 · 」开头，输入「设置」即可把 9 个分组一起唤出。
+  const settings = NAV_ITEMS.map((page) => ({
+    id: `settings:${page.id}`,
+    kind: "settings",
+    title: `设置 · ${page.label}`,
+    subtitle: "打开设置分组",
+    keywords: [page.label, page.id, "设置", "偏好"],
+    run: () => ctx.openSettings(page.id)
+  }));
+  return [...actions.map((item) => ({ kind: "action", ...item })), ...settings];
+}
+/*
+ * 分组：先按 kind 归拢，再定组序 —— 先看各组的"最佳匹配质量"（组内最小 rank），
+ * 平手再按 KIND_WEIGHT（动作优先于实体，对应 R3 的类别权重键）。
+ *
+ * 为什么组序要以"最佳 rank"为先而不是直接按类别权重：输入「设置」时，9 个
+ * 「设置 · X」是前缀命中（rank 1），而外观动作只是副标题里含「设置」（rank 4）——
+ * 若按权重硬排，动作组会压在 9 个真正想要的设置项之上。空查询下 rank 全为
+ * null，退化成纯 KIND_WEIGHT（动作在最上，与调用方给的引导顺序一致）。
+ * 组内保持 rankEntries 的顺序（匹配质量已在那里排好，这里不重排）。
+ */
+function paletteGroups(items, query) {
+  const byKind = new Map();
+  for (const item of items) {
+    const list = byKind.get(item.kind);
+    if (list === undefined) byKind.set(item.kind, [item]);
+    else list.push(item);
+  }
+  const groups = [];
+  for (const [kind, list] of byKind) {
+    let best = Number.POSITIVE_INFINITY;
+    for (const item of list) {
+      const rank = matchRank(query, item);
+      if (rank !== null && rank < best) best = rank;
+    }
+    groups.push({ kind, items: list, best });
+  }
+  groups.sort((a, b) => {
+    if (a.best !== b.best) return a.best - b.best;
+    return (KIND_WEIGHT[a.kind] ?? Number.POSITIVE_INFINITY) - (KIND_WEIGHT[b.kind] ?? Number.POSITIVE_INFINITY);
+  });
+  return groups.map((group) => ({ kind: group.kind, items: group.items }));
+}
+function CommandPalette({ open, onClose, entries, idleEntries }) {
+  const [query, setQuery] = reactExports.useState("");
+  const [active, setActive] = reactExports.useState(0);
+  const [mounted, setMounted] = reactExports.useState(open);
+  const [closing, setClosing] = reactExports.useState(false);
+  const composingRef = reactExports.useRef(false);
+  const cardRef = useModalFocus();
+  // 退场：open 转 false 时先播 --dur-fast 的淡出再卸载，「不常驻 DOM」由此保住。
+  reactExports.useEffect(() => {
+    if (open) {
+      setMounted(true);
+      setClosing(false);
+      return void 0;
+    }
+    if (!mounted) return void 0;
+    setClosing(true);
+    const timer = window.setTimeout(() => {
+      setMounted(false);
+      setClosing(false);
+    }, PALETTE_EXIT_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, mounted]);
+  // 组件在关→开之间不卸载，query/active 会留存，每次打开显式清一次。
+  reactExports.useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setActive(0);
+  }, [open]);
+  // 空查询走引导集（常用动作 + 最近会话），有查询才在全集里搜。
+  const source = query === "" ? idleEntries : entries;
+  const { items, total } = reactExports.useMemo(
+    () => rankEntries(source, query, { limit: PALETTE_LIMIT }),
+    [source, query]
+  );
+  const groups = reactExports.useMemo(() => paletteGroups(items, query), [items, query]);
+  const flat = reactExports.useMemo(() => groups.flatMap((group) => group.items), [groups]);
+  const flatLength = flat.length;
+  // 结果集缩小时把选中项夹回范围内（否则 aria-activedescendant 指向不存在的 id）。
+  reactExports.useEffect(() => {
+    setActive((current) => flatLength === 0 ? 0 : Math.min(current, flatLength - 1));
+  }, [flatLength]);
+  const activeIndex = flatLength === 0 ? -1 : active;
+  const activeId = activeIndex >= 0 ? `palette-opt-${activeIndex}` : void 0;
+  reactExports.useEffect(() => {
+    if (!mounted || activeId === void 0) return;
+    document.getElementById(activeId)?.scrollIntoView({ block: "nearest" });
+  }, [activeId, mounted]);
+  const pick = (item) => {
+    if (item === void 0) return;
+    // 先关面板再执行：关闭归还焦点、解除背景 inert，被打开的目标（如设置）才能
+    // 拿到干净的前置状态，避免两个模态互相嵌套（design §7）。首版不支持连续执行。
+    onClose();
+    item.run();
+  };
+  const onCompositionStart = () => {
+    composingRef.current = true;
+  };
+  const onCompositionEnd = () => {
+    composingRef.current = false;
+  };
+  const onKeyDown = (event) => {
+    // 输入法组合期间不响应 Enter / ↑ / ↓（中文产品必需）。composingRef 与
+    // isComposing 两者都判，任一为真即视为组合中（design §7）。
+    if (composingRef.current || event.nativeEvent.isComposing) return;
+    if (event.key === "ArrowDown") {
+      if (flatLength === 0) return;
+      event.preventDefault();
+      setActive((current) => (current + 1) % flatLength);
+    } else if (event.key === "ArrowUp") {
+      if (flatLength === 0) return;
+      event.preventDefault();
+      setActive((current) => (current - 1 + flatLength) % flatLength);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      pick(flat[activeIndex]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    }
+  };
+  if (!mounted) return null;
+  let countText = "";
+  if (query !== "" && total === 0) countText = "无匹配项";
+  else if (query !== "" && total > items.length) countText = `共 ${total} 项，另有 ${total - items.length} 项未显示`;
+  else if (query !== "") countText = `共 ${total} 项`;
+  let cursor = 0;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "div",
+    {
+      className: "modal-backdrop",
+      // 背板关闭用 mousedown（在卡片里拖选文本滑出到背板松开时 click 会误判），
+      // 与设置面板同款。
+      onMouseDown: (event) => {
+        if (event.target === event.currentTarget) onClose();
+      },
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "command-palette",
+          role: "dialog",
+          "aria-modal": "true",
+          "aria-label": "命令面板",
+          "data-closing": closing ? "true" : void 0,
+          ref: cardRef,
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                type: "text",
+                className: "command-palette-input",
+                role: "combobox",
+                "aria-expanded": "true",
+                "aria-controls": PALETTE_LISTBOX_ID,
+                "aria-activedescendant": activeId,
+                "aria-label": "搜索命令与条目",
+                placeholder: "搜索命令、会话、专家……",
+                autoComplete: "off",
+                spellCheck: false,
+                value: query,
+                onChange: (event) => setQuery(event.target.value),
+                onKeyDown,
+                onCompositionStart,
+                onCompositionEnd
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "div",
+              {
+                id: PALETTE_LISTBOX_ID,
+                className: "ac-menu",
+                role: "listbox",
+                "aria-label": "搜索结果",
+                children: flatLength === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "div",
+                  {
+                    className: "ac-item",
+                    role: "status",
+                    children: query === "" ? "输入以搜索命令、会话、专家与技能" : `没有匹配「${query}」的条目，换个说法试试`
+                  }
+                ) : groups.map((group) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "div",
+                  {
+                    className: "ac-group",
+                    role: "group",
+                    "aria-label": PALETTE_GROUP_LABELS[group.kind],
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ac-group-title", "aria-hidden": "true", children: PALETTE_GROUP_LABELS[group.kind] }),
+                      group.items.map((item) => {
+                        const index = cursor++;
+                        const selected = index === activeIndex;
+                        const Icon = PALETTE_KIND_ICONS[item.kind];
+                        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                          "button",
+                          {
+                            type: "button",
+                            id: `palette-opt-${index}`,
+                            role: "option",
+                            tabIndex: -1,
+                            "aria-selected": selected,
+                            className: `ac-item${selected ? " active" : ""}`,
+                            onMouseEnter: () => setActive(index),
+                            onMouseDown: (event) => {
+                              event.preventDefault();
+                              pick(item);
+                            },
+                            children: [
+                              Icon !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 15, className: "ac-icon" }),
+                              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-label", children: item.title }),
+                              item.hint !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-hint", children: item.hint })
+                            ]
+                          },
+                          item.id
+                        );
+                      })
+                    ]
+                  },
+                  group.kind
+                ))
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "div",
+              {
+                className: "command-palette-foot",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "↑↓ 选择　Enter 打开　Esc 关闭" }),
+                  // 结果数单独播报（只播报数量，不播报整列表）。aria-live 只在有查询时有内容。
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-live": "polite", children: countText })
+                ]
+              }
+            )
+          ]
+        }
+      )
+    }
+  );
+}
 function App() {
   const [link2, setLink] = reactExports.useState({ kind: "connecting" });
   const [conversation, dispatch] = reactExports.useReducer(
@@ -67854,6 +68164,49 @@ function App() {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       event.preventDefault();
       setSidebarOpen((v) => !v);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  /*
+   * 命令面板开关（⌘K / Ctrl+K）与它的实体数据缓存。
+   * 快捷键挂法与上面 ⌘. 同款：判修饰键 → 排掉 alt/shift → preventDefault →
+   * 切换。preventDefault 是必需的：部分环境把 ⌘K/Ctrl+K 当浏览器搜索键。
+   * 面板里"再按一次关闭"也走这里（输入框聚焦时同样是 window 收到该组合）。
+   */
+  const [paletteOpen, setPaletteOpen] = reactExports.useState(false);
+  const [paletteExtras, setPaletteExtras] = reactExports.useState({ skills: [], connectors: [], automations: [] });
+  const paletteExtrasLoadedRef = reactExports.useRef(false);
+  /*
+   * 技能 / 连接器 / 自动化三项首次打开面板时拉一次，缓存后不再重取（design §1）。
+   * 用 state 承接是因为 entries 要随数据到达重算；ref 只做"已拉过"的闸门。
+   * 用 allSettled：任一项失败只让它自己留空数组，其余实体照常可搜——
+   * 面板不因某个数据源缺失而整个报警。
+   */
+  const loadPaletteExtras = reactExports.useCallback(() => {
+    paletteExtrasLoadedRef.current = true;
+    void Promise.allSettled([
+      window.kami.skillsSnapshot(),
+      window.kami.mcpConfigGet(),
+      window.kami.listAutomations()
+    ]).then(([skills, connectors, automations]) => {
+      setPaletteExtras({
+        skills: skills.status === "fulfilled" ? skills.value?.skills ?? [] : [],
+        connectors: connectors.status === "fulfilled" ? connectors.value?.servers ?? [] : [],
+        automations: automations.status === "fulfilled" ? automations.value ?? [] : []
+      });
+    });
+  }, []);
+  reactExports.useEffect(() => {
+    if (!paletteOpen || paletteExtrasLoadedRef.current) return;
+    loadPaletteExtras();
+  }, [paletteOpen, loadPaletteExtras]);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key.toLowerCase() !== "k") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      setPaletteOpen((value) => !value);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -68226,6 +68579,99 @@ function App() {
     setReturnView(view === "chat" ? "chat" : "home");
     setView("automations");
   }, [view]);
+  /*
+   * 命令面板条目的数据源。分两套：
+   * - paletteEntries：全集，搜索时用（动作 + 设置分组 + 全部会话/空间/专家/技能/连接器/自动化）
+   * - paletteIdleEntries：空查询的引导集（常用动作 + 最近 N 条会话），避免摊成一堵墙
+   * 未开放的导航项（NAV_ITEMS$1 里 ready:false 的助理/项目/资料库/更多）**不生成条目**——
+   * 把"功能缺失的错觉"从侧栏扩散到面板，是明确要避免的（prd 背景第 4 条、docs/ONBOARDING-RESEARCH.md）。
+   */
+  const changeTheme = reactExports.useCallback((pref) => {
+    void setThemePreference(pref).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error));
+    });
+  }, [showToast]);
+  const toggleSidebar = reactExports.useCallback(() => {
+    setSidebarOpen((value) => !value);
+  }, []);
+  const checkForUpdates = reactExports.useCallback(() => {
+    void Promise.resolve(window.kami.checkForUpdates()).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error));
+    });
+  }, [showToast]);
+  const paletteEntries = reactExports.useMemo(() => {
+    const actions = paletteActionEntries({
+      sidebarOpen,
+      newTask,
+      openSettings,
+      setTheme: changeTheme,
+      toggleSidebar,
+      checkForUpdates,
+      openDiagnostics,
+      openStats,
+      openSkills: () => openSkillsAt("skills"),
+      openAutomations
+    });
+    const sessions = [...taskList ?? []].filter((session) => !session.archived).sort(byModifiedDesc).map((session) => ({
+      id: `session:${session.id}`,
+      kind: "session",
+      title: session.title === void 0 || session.title === "" ? "未命名会话" : session.title,
+      subtitle: "打开会话",
+      keywords: [session.cwd ?? ""],
+      run: () => resumeTask(session.path)
+    }));
+    const spaces = groupMetas.map((meta) => ({
+      id: `workspace:${meta.cwd}`,
+      kind: "workspace",
+      title: meta.displayName?.trim() || basename$2(meta.cwd),
+      subtitle: "在此空间新建任务",
+      keywords: [meta.cwd, "空间"],
+      run: () => newTaskInSpace(meta.cwd)
+    }));
+    const expertEntries = (experts ?? []).map((expert) => ({
+      id: `expert:${expert.name}`,
+      kind: "expert",
+      title: expert.displayName || expert.name,
+      subtitle: expert.profession,
+      keywords: [expert.name, expert.profession, expert.description, expert.displayDescription].filter((value) => typeof value === "string" && value !== ""),
+      run: () => useExpert(expert.name)
+    }));
+    const skillEntries = paletteExtras.skills.map((skill) => ({
+      id: `skill:${skill.name}`,
+      kind: "skill",
+      title: skill.name,
+      subtitle: "技能",
+      keywords: [skill.description ?? ""],
+      run: () => openSkillsAt("skills")
+    }));
+    const connectorEntries = paletteExtras.connectors.map((server) => ({
+      id: `connector:${server.name}`,
+      kind: "connector",
+      title: server.name,
+      subtitle: "连接器",
+      keywords: [server.description ?? ""],
+      run: () => openSkillsAt("connectors")
+    }));
+    const automationEntries = paletteExtras.automations.map((task) => ({
+      id: `automation:${task.id}`,
+      kind: "automation",
+      title: task.name || "未命名自动化",
+      subtitle: "自动化任务",
+      keywords: [task.prompt ?? ""],
+      run: () => openAutomations()
+    }));
+    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries];
+    // 依赖数组**只能靠人维护**：本文件不在 eslint 的覆盖内（eslint.config.mjs 的
+    // ignores 列了 "src/renderer/src/**"），react-hooks/exhaustive-deps 根本不加载，
+    // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
+    // 而是**面板搜到过期数据**——结果悄悄不对，界面上没有任何失败信号。
+    // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
+  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openSkillsAt, openAutomations, resumeTask, newTaskInSpace, useExpert]);
+  const paletteIdleEntries = reactExports.useMemo(() => {
+    const actions = paletteEntries.filter((entry) => entry.kind === "action");
+    const recent = paletteEntries.filter((entry) => entry.kind === "session").slice(0, PALETTE_IDLE_SESSIONS);
+    return [...actions, ...recent];
+  }, [paletteEntries]);
   const resumeRunSession = reactExports.useCallback(
     (sessionId) => {
       const hit = taskList?.find((t) => t.id === sessionId);
@@ -68333,7 +68779,8 @@ function App() {
         onOpenDiagnostics: openDiagnostics,
         onOpenStats: openStats,
         onOpenSkills: () => setView("skills"),
-        onOpenAutomations: openAutomations
+        onOpenAutomations: openAutomations,
+        onOpenPalette: () => setPaletteOpen(true)
       }
     ),
     view === "home" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -68544,6 +68991,16 @@ function App() {
         }
       },
       approvals[0].id
+    ),
+    // 命令面板：open=false 时组件内部 return null（不常驻 DOM，不给每次按键留监听）。
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CommandPalette,
+      {
+        open: paletteOpen,
+        onClose: () => setPaletteOpen(false),
+        entries: paletteEntries,
+        idleEntries: paletteIdleEntries
+      }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts })
   ] });

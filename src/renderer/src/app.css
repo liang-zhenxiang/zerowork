@@ -2308,7 +2308,11 @@ textarea:focus-visible {
 	white-space: nowrap;
 }
 
-.ac-hint {
+/* 右侧提示：补全候选行（pinyin/命令描述）与侧栏命令面板入口共用同一条规则 ——
+   .nav-hint 是"另一个位置上的同一件事"（右对齐的次文色 meta 短标签），
+   所以并入本选择器而不是复制一遍声明。 */
+.ac-hint,
+.nav-hint {
 	flex: 0 0 auto;
 	margin-left: auto;
 	color: var(--text-secondary);
@@ -2317,6 +2321,103 @@ textarea:focus-visible {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	max-width: 50%;
+}
+
+/* ── 命令面板（⌘K）────────────────────────────────────────────────
+   外壳只有一个（居中模态盒子）。列表本体复用上面的 .ac-* 类，这里只覆盖
+   .ac-menu 作为"输入框上方绝对定位浮层"时自带的那几项（定位 / 边框 / 阴影 /
+   圆角 / 最大高 / 自身入场），盒子的身份改由外壳承担（docs/DESIGN.md §6）。
+   新增类只有三个：.command-palette / .command-palette-input / .command-palette-foot。 */
+.command-palette {
+	align-self: flex-start;              /* 背板是 flex 居中，这里改贴顶 */
+	margin-top: 12vh;                    /* 顶距：贴近视口上沿，不压成"居中弹框" */
+	width: min(640px, 100vw - var(--space-7) * 2);
+	max-height: 60vh;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);     /* 模态级圆角（§2.7） */
+	box-shadow: var(--shadow-lg);        /* 模态档阴影（§6） */
+	/* 入场：条件挂载（open=false 时组件返回 null），走 animation；4px 上浮淡入
+	   与 widget 定稿入场同族（§10.3）。只动 opacity/transform，不碰布局属性（§5.1）。 */
+	animation: command-palette-in var(--dur-base) var(--ease-out);
+}
+
+/* 退场：open 转 false 后组件播 --dur-fast 的淡出再卸载（见 app.js 的 closing 态）。
+   只用 opacity、且比入场快 —— 进出场不对称（§5.8）。 */
+.command-palette[data-closing="true"] {
+	animation: command-palette-out var(--dur-fast) var(--ease-standard) forwards;
+}
+
+@keyframes command-palette-in {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes command-palette-out {
+	from {
+		opacity: 1;
+	}
+
+	to {
+		opacity: 0;
+	}
+}
+
+.command-palette-input {
+	/* input 不继承字体（全局只给 button 设过 font: inherit），这里补上；
+	   字号再覆盖到强调正文档（15px，与清单行/用户气泡同档）。 */
+	font: inherit;
+	font-size: var(--text-emphasis);
+	padding: var(--space-5);
+	background: transparent;
+	border: none;
+	border-bottom: 1px solid var(--border);   /* 与列表的分隔：接缝就是这条线 */
+	color: var(--text);
+}
+
+.command-palette-input::placeholder {
+	color: var(--text-secondary);
+}
+
+/* 列表：去掉绝对定位与自带边框/阴影/圆角（外壳已承担），只留滚动与内边距，
+   并占满输入行与页脚之间的空间。 */
+.command-palette .ac-menu {
+	position: static;
+	flex: 1;
+	min-height: 0;
+	max-height: none;
+	overflow-y: auto;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+	animation: none;                      /* 外壳已有入场动画，列表不再单独入场 */
+	padding: var(--space-1);
+}
+
+/* 选中行：底色之外再压字重 —— 不看颜色也能读出"当前选中"（§7.6）。
+   用 500（§3.6 允许的两档之一），不扩散 .settings-nav-item.active 的 600。 */
+.command-palette .ac-item.active {
+	font-weight: 500;
+}
+
+.command-palette-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding: var(--space-2) var(--space-5);
+	border-top: 1px solid var(--border);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
 }
 
 /* ── 上下文用量圆环（chat 输入条） ─────────────────────────────── */
@@ -11246,6 +11347,10 @@ button.agent-row {
 	.settings-card,
 	.pop-menu,
 	.modal-backdrop,
+	/* 命令面板：入场 + 退场两条动画都关（退场那条约有 [data-closing] 属性、
+	   特异性高于本块的 .command-palette，必须单独列出才关得掉）。 */
+	.command-palette,
+	.command-palette[data-closing="true"],
 	.permission-card,
 	.permission-details,
 	.ex-modal-mask,

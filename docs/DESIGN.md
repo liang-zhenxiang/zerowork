@@ -258,6 +258,11 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
   .widget-body` 的 4px 上浮淡入，`--dur-base` + `--ease-out`；只在内容成功定稿
   （finalized）的那一帧触发，流式中的空壳不入场闪；曲线用 `--ease-out`（animation
   入场默认曲线，§3.2），已加入 §10.3.1 的 reduced-motion 关停清单
+- **命令面板入场 / 退场**（2026-10-03，issue #103）—— `.command-palette` 入场
+  `opacity 0→1` + `translateY(-4px)→0`，走 `--dur-base` + `--ease-out`（与 widget
+  定稿入场同族，不新增时长）；退场只用 `opacity`、走 `--dur-fast`（离场比入场快，
+  §5.8），由组件在 `open=false` 后延迟 `--dur-fast` 再卸载触发。两条都只动
+  `opacity` / `transform`，不碰布局属性（§5.1），已加入 §10.3.1 的关停清单
 
 ### §10.3.1 减弱动态效果（`prefers-reduced-motion: reduce`）
 
@@ -275,6 +280,11 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 > 以及 33 个入场动画宿主（`page-in` / `pop-layer-in` / `fold-in` / `backdrop-in` /
 > `toast-in` / `jump-to-bottom-in` / `stream-reveal` / `questionnaire-slide-up`）。
 > 此前只覆盖 `.turn-nav` 一处。
+>
+> 命令面板（2026-10-03）：`.command-palette` 的入场 + 退场两条一并加入关停清单。
+> 退场那条选择器带 `[data-closing]` 属性，特异性高于本块的 `.command-palette`，
+> 因此**单列一行**才关得掉（关停后元素停在基础态 = 正常可见，随后按 `--dur-fast`
+> 的定时器卸载，等于直接消失 —— 对 reduced-motion 是正确形态）。
 
 **关动画 ≠ 回到「正常样子」。** `animation: none` 只是让元素回到**基础态**，
 而基础态不一定是它本该显示的样子。**每关一个动画都要问一句：关掉之后元素停在
