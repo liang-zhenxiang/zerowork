@@ -181,10 +181,18 @@ nsis:
 # ---------------------------------------------------------------------------
 linux: null
 
-# publish: never —— 构建后不上传，但**生成更新元数据**（channel yml：
-# 稳定版本产 latest.yml / latest-mac.yml，channel=beta 的构建产 beta.yml）。
-# 此前是 null：连 yml 都不生成（v0.3.0 的 Release 里没有任何 yml 就是这个原因），
-# 那时没有应用内更新器所以无需求；更新器（#85）上线后这是用户收到更新
-# 通知的前提，两个渠道的构建都必须带上。
-# 「不上传」维持不变：上传始终由 workflow 的 gh release upload 完成。
-publish: never
+# publish：**只为生成更新元数据**（channel yml：稳定产 latest*.yml、channel=beta
+# 产 beta*.yml），**不用于上传**——上传始终由 workflow 的 gh release upload 完成，
+# 构建命令里的 `--publish never` 会拦住这里配置的 provider 不出门。
+#
+# 踩坑记录（beta 上线实测，三轮）：
+#   · null —— 连 yml 都不生成（v0.3.0 的 Release 里没有任何 yml 可佐证）；
+#   · never（yml 里写）—— 不是合法枚举，被当「自定义 publisher 模块名」：
+#     `Cannot find module for publisher "never"`；
+#   · 正解 = 真 provider（这里）+ CLI `--publish never`（build-installers.yml 已有）。
+# app-update.yml 会随包写入这个 repo 信息——与运行时 setFeedURL 的目标一致，
+# 即使哪条路径读了它也是对的。
+publish:
+  provider: github
+  owner: liang-zhenxiang
+  repo: zerowork
