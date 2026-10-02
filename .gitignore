@@ -74,3 +74,7 @@ docs/repo-analysis-*.md
 
 # 内部前端重建的工作笔记（不入库）
 docs/superpowers/
+
+# e2e（gui-updates）运行态：electron-updater 在 dev 态读项目根的这个文件
+# （见 src/main/updates.js 的 forceDevUpdateConfig 注释）；测试中途被杀会残留
+dev-app-update.yml
