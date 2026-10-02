@@ -21,8 +21,8 @@ on:
   push:
     branches: [main]
     # 只有这些路径的变更才可能产出「值得发 beta 的内容」（纯文档/工作流改动不发）。
-# scripts/** 在列：beta 流水线自己就住在里面（版本计算、afterPack 裁剪）——
-# 修它们而不触发 beta 验证，等于盲改（版本字段名那次就因此多绕了一轮手动 dispatch）。
+    # scripts/** 在列：beta 流水线自己就住在里面（版本计算、afterPack 裁剪）——
+    # 修它们而不触发 beta 验证，等于盲改（版本字段名那次就因此多绕了一轮手动 dispatch）。
     paths:
       - "CHANGELOG.md"
       - "src/**"
