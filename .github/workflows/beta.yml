@@ -213,7 +213,7 @@ jobs:
             fi
           done
           if [[ "$renamed" -lt 2 ]]; then
-            echo "::error::期望转换 2 个 channel 清单，实际只找到 ${{ "$" }}renamed 个——builder 的清单产出行为变了？（第八轮起 builder 恒产 latest*，若某天自动产 beta* 也会落到这里，届时删除本步骤）"
+            echo "::error::期望转换 2 个 channel 清单，实际只找到 $renamed 个——builder 的清单产出行为变了？（第八轮起 builder 恒产 latest*，若某天自动产 beta* 也会落到这里，届时删除本步骤）"
             exit 1
           fi
           # 终检：stage 里不允许残留任何 latest*
