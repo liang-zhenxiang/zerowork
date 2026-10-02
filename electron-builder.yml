@@ -181,5 +181,10 @@ nsis:
 # ---------------------------------------------------------------------------
 linux: null
 
-# 打包时不要去查 GitHub 有没有新版本（那会在 CI 上产生一次无意义的网络请求）
-publish: null
+# publish: never —— 构建后不上传，但**生成更新元数据**（channel yml：
+# 稳定版本产 latest.yml / latest-mac.yml，channel=beta 的构建产 beta.yml）。
+# 此前是 null：连 yml 都不生成（v0.3.0 的 Release 里没有任何 yml 就是这个原因），
+# 那时没有应用内更新器所以无需求；更新器（#85）上线后这是用户收到更新
+# 通知的前提，两个渠道的构建都必须带上。
+# 「不上传」维持不变：上传始终由 workflow 的 gh release upload 完成。
+publish: never
