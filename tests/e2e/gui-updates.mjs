@@ -15,14 +15,16 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 // ── mock feed：两份 channel yml + 占位产物（available 阶段不下载产物本体） ──
-const FEED_DIR = "/tmp/zerowork-update-feed";
-mkdirSync(FEED_DIR, { recursive: true });
+// mkdtempSync 而不是固定 /tmp 路径：CodeQL 的 js/insecure-temporary-file
+// （本项目此前已修过 4 条同款）——固定名可预测目录是它的判定形态。
+const FEED_DIR = mkdtempSync(join(tmpdir(), "zerowork-update-feed-"));
 const fakeBody = "placeholder-installer";
 const sha512 = createHash("sha512").update(fakeBody).digest("base64");
 const ymlFor = (version) =>
@@ -187,3 +189,4 @@ await h.check("切回稳定版回到 latest.yml", async () => {
 await h.finish();
 feedServer.close();
 rmSync(DEV_FEED_CONFIG, { force: true });
+rmSync(FEED_DIR, { recursive: true, force: true });
