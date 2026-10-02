@@ -161,7 +161,9 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
+          # 与别处相反：这个 job 要 `git push` tag，需要持久化的凭证
+          # （persist-credentials: false 会让 push 拿不到认证）。
+          persist-credentials: true
 
       # download-artifact 的 pattern 是**单个 glob**，不认 `|` 或语法——
       # 首发实测把 `beta-notes|installer-*` 当字面量匹配，一个都没下来，
@@ -233,6 +235,11 @@ jobs:
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
+          # 附注 tag 需要 git identity（runner 上没有默认值——第九轮实测
+          # "empty ident name not allowed"）。发布身份用仓库通用的
+          # github-actions noreply，个人身份不该出现在自动发布里。
+          git config user.name "zerowork-release-bot"
+          git config user.email "437158325+liang-zhenxiang[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
             echo "tag ${TAG} 已在远端（重跑），不重复推"
           else
