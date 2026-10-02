@@ -75,6 +75,8 @@ function readChannelPreference() {
 function configure(channel) {
   state.channel = channel;
   autoUpdater.channel = channel;
+  // 渠道切换时 prerelease 标志跟着走（理由见 initUpdates 里的注释）。
+  autoUpdater.allowPrerelease = channel === "beta";
   // ZEROWORK_UPDATE_FEED（e2e 的本地 mock feed）优先于 GitHub provider——
   // 测试不碰真实仓库；generic provider 直接从该 url 拉 <channel>.yml。
   if (feedOverride !== undefined) {
@@ -124,9 +126,11 @@ export function initUpdates(win) {
   // 但 macOS 的自动安装需要签名身份——直接关掉自动下载，只做「检查 + 通知」。
   autoUpdater.autoDownload = process.platform === "win32";
   autoUpdater.autoInstallOnAppQuit = false;
-  // prerelease 标志由 channel 承担（beta channel 拉 beta.yml），不再用 allowPrerelease
-  // （那个开关会动 latest 语义，与双文件的物理隔离设计冲突）。
-  autoUpdater.allowPrerelease = false;
+  // allowPrerelease 跟随渠道：github provider 在 beta 渠道下**必须**为 true——
+  // 它默认只在「latest release」（稳定）里找 channel 清单，beta-mac.yml 在
+  // pre-release 里，不开就去 v0.3.0 找 beta-mac.yml 而 404（2026-10-02 真机
+  // 实测的错误原文即此）。stable 渠道保持 false：绝不把 pre-release 当稳定推送。
+  autoUpdater.allowPrerelease = readChannelPreference() === "beta";
 
   autoUpdater.on("checking-for-update", () => setPhase({ phase: "checking" }));
   autoUpdater.on("update-available", (info) => {

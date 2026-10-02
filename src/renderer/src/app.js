@@ -62178,7 +62178,11 @@ function UpdatesSection({ busy }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "更新" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: `V${__APP_VERSION__}` })
+      /* 版本徽章用运行时真值（state.version = app.getVersion()），不用构建期
+       * 注入的 __APP_VERSION__——beta 构建的产物 version 经 extraMetadata 覆盖，
+       * 而注入值还是仓库 package.json 的旧号（真机实测徽章显示 V0.3.0、
+       * 实际 0.4.0-beta.1）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: state?.version !== undefined ? `V${state.version}` : `V${__APP_VERSION__}` })
     ] }),
     channel === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取更新设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
