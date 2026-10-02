@@ -129,11 +129,13 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-macos
-          # 只要安装包本体；不要 .app 目录与 blockmap（前者巨大，后者是自动更新的差分文件，
-          # 本项目没有自动更新，带上只是徒增体积）
+          # 安装包本体 + channel yml（latest-mac.yml / beta-mac.yml——应用内更新器
+          # 的清单，随 Release 分发）。不要 .app 目录与 blockmap（前者巨大，后者是
+          # 差分文件，本项目更新走整包）。
           path: |
             release/*.dmg
             release/*.zip
+            release/*.yml
           if-no-files-found: error
           # 产物由 Release 承载，artifact 只用于这一次运行内传递
           retention-days: 7
@@ -230,6 +232,9 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: installer-windows
-          path: release/*.exe
+          # *.yml 同 mac：channel 清单（latest.yml / beta.yml）必须随产物走
+          path: |
+            release/*.exe
+            release/*.yml
           if-no-files-found: error
           retention-days: 7
