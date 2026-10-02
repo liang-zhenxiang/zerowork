@@ -308,6 +308,11 @@ const INVOKE = {
   getUpdateChannel: "settings:get-update-channel",
   /** 写渠道偏好；daemon 落盘，main 侧同步重配 autoUpdater 并立即检查一次。 */
   setUpdateChannel: "settings:set-update-channel",
+  /**
+   * 应用版本号（`app.getVersion()`）。**同步通道**（preload 用 sendSync 取值）——
+   * 侧栏品牌行是同步渲染的，异步取会先显示错误值再跳变。见 preload 的用法注释。
+   */
+  appVersion: "app:get-version",
   /** 更新器状态：{ version, channel, state }。只读，不发网络请求。 */
   getUpdateState: "updates:get-state",
   /** 触发一次更新检查（结果经 updates:event 事件流回报）。 */

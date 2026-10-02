@@ -142,7 +142,9 @@ const MAIN_HANDLED = [
   // 不进批量转发表——转发给 daemon 只会得到「未知通道」。
   INVOKE.getUpdateState,
   INVOKE.checkForUpdates,
-  INVOKE.installUpdate
+  INVOKE.installUpdate,
+  // 同步通道（preload 用 sendSync），不能走 ipcMain.handle 的批量转发
+  INVOKE.appVersion
 ];
 let window;
 let daemon;
@@ -369,6 +371,12 @@ function setupGlobalShortcut() {
   toggleShortcut.register();
 }
 function registerIpc() {
+  // 应用版本号：**同步**通道（ipcMain.on + returnValue）——渲染层 preload 用
+  // sendSync 在首帧前取值（理由见 preload 里该字段的注释）。它不走 callDaemon
+  // 的批量转发（daemon 不知道 Electron 的 app 对象）。
+  ipcMain.on(INVOKE.appVersion, (event) => {
+    event.returnValue = app.getVersion();
+  });
   for (const channel of Object.values(INVOKE)) {
     if (MAIN_HANDLED.includes(channel)) continue;
     ipcMain.handle(channel, (_event, ...args) => callDaemon(channel, args));

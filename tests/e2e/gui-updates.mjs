@@ -119,6 +119,23 @@ await h.check("设置 → 通用有更新区（徽章/渠道/按钮）", async (
 });
 await h.snap("updates-section");
 
+await h.check("版本号走运行时真值：桥暴露 appVersion，且侧栏品牌行与之一致", async () => {
+	// 为什么测这个：构建期注入的 __APP_VERSION__ 在 **beta 包**里恒为仓库版本号
+	// （extraMetadata 的版本覆盖发生在打包层、注入发生在更早的 vite build），
+	// 于是侧栏会显示错误版本——用户 2026-10-02 正是被这个坑到。修法是运行时取值。
+	//
+	// 诚实说明测试的边界：e2e 跑的是未打包的 out/，此时 getVersion() 与
+	// __APP_VERSION__ 恰好都是仓库版本号，**两者无法在这一层区分**。所以这里
+	// 锁的是「桥存在 + 侧栏用桥的值」这条接线；「值本身对不对」由真机（打包态）
+	// 验证覆盖，见 PR 描述里的截图。
+	const r = await win.evaluate(() => ({
+		bridge: globalThis.kami.appVersion ?? null,
+		brand: document.querySelector(".brand-version")?.textContent ?? null,
+	}));
+	assert.match(String(r.bridge), /^\d+\.\d+\.\d+/, `桥暴露的 appVersion 形态不对：${r.bridge}`);
+	assert.equal(r.brand, `V${r.bridge}`, `侧栏品牌行 ${r.brand} 与运行时版本 ${r.bridge} 不一致——它又回落到构建期注入了？`);
+});
+
 // ── ② 立即检查 → 有新版本（稳定渠道）────────────────────────
 await h.check("立即检查发现新版本（stable yml 的 99.0.0）", async () => {
 	await win.evaluate(() => {

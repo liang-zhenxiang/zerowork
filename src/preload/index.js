@@ -283,6 +283,7 @@ const INVOKE = {
   /* ── 更新渠道与更新器（与 shared/ipc.js 手工同步的副本表） ────── */
   getUpdateChannel: "settings:get-update-channel",
   setUpdateChannel: "settings:set-update-channel",
+  appVersion: "app:get-version",
   getUpdateState: "updates:get-state",
   checkForUpdates: "updates:check",
   installUpdate: "updates:install",
@@ -591,6 +592,13 @@ const bridge = {
   getUpdateChannel: () => ipcRenderer.invoke(INVOKE.getUpdateChannel),
   setUpdateChannel: (channel) => ipcRenderer.invoke(INVOKE.setUpdateChannel, channel),
   getUpdateState: () => ipcRenderer.invoke(INVOKE.getUpdateState),
+  /*
+   * 版本号是**同步**取值（不是 invoke）：侧栏品牌行在首帧就渲染，
+   * 异步拿到再回填会先显示构建期注入的旧值、再跳变成真值——而「版本显示错」
+   * 正是本轮用户困惑的来源之一（beta 包的 __APP_VERSION__ 恒为仓库版本号）。
+   * sendSync 只在这一处、只取一个短字符串，代价可忽略。
+   */
+  appVersion: ipcRenderer.sendSync(INVOKE.appVersion),
   checkForUpdates: () => ipcRenderer.invoke(INVOKE.checkForUpdates),
   installUpdate: () => ipcRenderer.invoke(INVOKE.installUpdate),
   getMemoryEnabled: () => ipcRenderer.invoke(INVOKE.getMemoryEnabled),
