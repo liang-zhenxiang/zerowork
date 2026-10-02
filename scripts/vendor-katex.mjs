@@ -99,11 +99,11 @@ css = css.replace(/@font-face\{[^}]*font-family:"?KaTeX_([A-Za-z0-9]+)"?[^}]*\}/
 	const named = `KaTeX_${family}`;
 	return included.has(`${named}-Regular`) || included.has(`${named}-Bold`) || included.has(`${named}-Italic`) || included.has(`${named}-BoldItalic`) ? block : '';
 });
-writeFileSync(resolve(SRC, 'katex.css'), `/* 由 scripts/vendor-katex.mjs 生成（勿手改）；字体 url 已改写至 ./katex-fonts/（仅 woff2 核心子集） */\n${css}`);
+writeFileSync(resolve(RENDERER, 'src/katex.css'), `/* 由 scripts/vendor-katex.mjs 生成（勿手改）；字体 url 已改写至 ./katex-fonts/（仅 woff2 核心子集） */\n${css}`);
 console.log(`✓ katex.css（${(css.length / 1024).toFixed(0)} KB）`);
 
 // ── 3. 核心字体 woff2 ─────────────────────────────────────────
-const fontsDir = resolve(SRC, 'katex-fonts');
+const fontsDir = resolve(RENDERER, 'src/katex-fonts');
 mkdirSync(fontsDir, { recursive: true });
 for (const name of CORE_FONTS) {
 	copyFileSync(resolve(DIST, 'fonts', `${name}.woff2`), resolve(fontsDir, `${name}.woff2`));
