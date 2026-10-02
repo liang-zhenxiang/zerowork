@@ -39,7 +39,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const SRC_DIR = path.join(ROOT, 'src/renderer/src');
+// vendor bundle 可能落在两处：src/renderer/src/（动态 import 型，有独立产物）或
+// src/renderer/（静态并入 app chunk 型，无独立产物、也在 chunk 契约扫描之外——
+// vendor-katex.js 是第一例）。两处都扫，登记行里的路径写哪处都认。
+const SRC_DIRS = [path.join(ROOT, 'src/renderer/src'), path.join(ROOT, 'src/renderer')];
 const SECURITY = path.join(ROOT, 'SECURITY.md');
 
 /** 清单所在的章节标题（`SECURITY.md`）。只取这一节里的表格行。 */
@@ -65,6 +68,12 @@ const VERSION_MARKER = {
 		lib: 'lodash',
 		re: /var VERSION\s*=\s*"([^"]+)"/,
 	},
+	// 版本号读生成头注释（scripts/vendor-katex.mjs 写入的「katex X.Y.Z」）——
+	// esbuild 的 min 产物内部无稳定版本常量可锚，头部注释就是这份 bundle 的版本标记。
+	'vendor-katex.js': {
+		lib: 'KaTeX（含 remark-math / rehype-katex 整链）',
+		re: /生成（katex ([0-9.]+)）/,
+	},
 	'vendor-jszip.js': {
 		lib: 'JSZip',
 		re: /n\.version\s*=\s*"([^"]+)"/,
@@ -84,7 +93,7 @@ const dim = (t) => paint('2', t);
 
 /** 源码树里全部 `vendor-*.js` 的文件名。 */
 function vendorFilesOnDisk() {
-	return readdirSync(SRC_DIR)
+	return SRC_DIRS.flatMap((dir) => readdirSync(dir))
 		.filter((name) => /^vendor-.*\.js$/.test(name))
 		.sort();
 }
@@ -133,7 +142,10 @@ function versionsIn(cell) {
 
 /** bundle 里的版本标记。返回 { version } 或 { error }。 */
 function versionFromBundle(file, registry) {
-	const source = readFileSync(path.join(SRC_DIR, file), 'utf8');
+	const source = readFileSync(
+		SRC_DIRS.map((dir) => path.join(dir, file)).find((f) => existsSync(f)) ?? path.join(SRC_DIRS[0], file),
+		'utf8',
+	);
 	if (registry.from) return { from: registry.from, version: versionFromBundle(registry.from, VERSION_MARKER[registry.from]).version };
 	const match = source.match(registry.re);
 	if (!match) {
@@ -149,7 +161,7 @@ function versionFromBundle(file, registry) {
 function main() {
 	const problems = [];
 
-	if (!existsSync(SECURITY) || !existsSync(SRC_DIR)) {
+	if (!existsSync(SECURITY) || !SRC_DIRS.every((d) => existsSync(d))) {
 		process.stdout.write(`\n${red('vendored 依赖校验：找不到 SECURITY.md 或 src/renderer/src')}\n`);
 		return 1;
 	}

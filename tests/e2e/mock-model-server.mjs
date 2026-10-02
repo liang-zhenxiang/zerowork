@@ -77,8 +77,11 @@ export function startMockModelServer({ reply = "这是 mock 模型的回复。",
 				});
 				send({}, "tool_calls");
 			} else {
-				// 分片吐出文本，模拟真实流式行为
-				for (const chunk of reply.match(/.{1,8}/gu) ?? []) {
+				// 分片吐出文本，模拟真实流式行为。
+				// 【\s 不能少】`.` 不匹配换行——多行回复的 \n 会在分片时全部丢失，
+				// 表现为「段落被并进同一段」：依赖段落结构的断言（块级公式、列表）
+				// 会莫名走样且极难排查（2026-10-02 公式用例首次踩到）。
+				for (const chunk of reply.match(/[\s\S]{1,8}/gu) ?? []) {
 					send({ content: chunk });
 				}
 				send({}, "stop");
