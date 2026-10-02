@@ -37,3 +37,16 @@
   不动；「在指定空间建会话」必须走 newTask（侧栏同一 IPC）——首页直发会续建到
   旧空间，两条会话挤同组就是这来的。
 - issue 队列只剩 #74（公式接入，评估已落评论，独立排期）。
+
+## 2026-10-02 三续：#74 公式渲染（PR #82）——issue 队列清空
+
+- 两版方案的教训：自写 remark 切分对 TeX 保真先天不足（markdown text 已解码转义，
+  \, 变 ,）——**语法捕获必须在 micromark 字符层**，最终走 esbuild 整链 vendor
+  （remark-math/rehype-katex/katex，296KB，可再生脚本）。
+- 单行 $$ 提升块级的后处理插件与消息流终态重建相互踩踏（整条消息渲染异常）——
+  撤回，围栏式即块级；插件方式的完整调试记录在测试注释里。
+- 顺带修两个既有缺陷：mock 分片正则 . 不匹配 \n（多行回复段落被压扁）；
+  theme 测试在 CI 慢机的 5/8 flake（SelectField 未渲染就点击）——慢环境才暴露的
+  时序洞，等元素出现是信号等待的应有形态。
+- vendored 治理：SECURITY.md 清单 + VERSION_MARKER + THIRD_PARTY_NOTICES + 静态
+  并入型 vendor 的目录约定（chunk 契约扫描之外）。
