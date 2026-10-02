@@ -18,6 +18,7 @@
  *   ⑨ 侧栏入口点击能唤起
  *   ⑩ 浅色 + 深色两套主题截图 + 像素断言（开/关画面可区分）
  *   ⑪ 输入法组合期间 Enter 不提交
+ *   ⑫ 行右侧的快捷键提示与真实键位一致（把提示里的键真的按一遍，不做假提示）
  *
  * 键盘一律走 Playwright 真实按键（win.keyboard.press），不用合成 KeyboardEvent
  * —— 合成事件需要浏览器全局、在 eslint 的 Node 视角是 no-undef，本项目踩过。
@@ -357,6 +358,48 @@ await h.check("⑩ 深色主题：data-theme 真的变了，且开/关画面可�
 	assert.ok(diff > 3, `深色下开/关面板的画面差异应显著 > 0，实际 ${diff.toFixed(2)}`);
 	// 收尾：切回浅色，避免影响后续（本文件之后没有用例，但保持干净）。
 	await win.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+});
+
+// ══ ⑫ 快捷键提示必须是真的 ══════════════════════════════════════════
+await h.check("⑫ 行右侧的快捷键提示与真实键位一致（不做假提示）", async () => {
+	// 「把快捷键贴在命令右侧」是 VS Code 的做法，价值在于用户不用去别处查。
+	// 反面是**假提示**：写了却没绑、或绑错了键 —— 用户照着按，什么也没发生，
+	// 比不写更糟。所以这条不只断言「有 hint」，还把提示里的键**按一遍**，
+	// 看它是否真的触发那件事。
+	await win.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+	// 不假设起点是关着的：上一条用例（⑩ 深色）结束时面板仍开着，
+	// 直接按 ⌘K 会把它**关掉**，于是后面等输入框就超时。
+	if (await paletteOpen()) {
+		await win.keyboard.press("Escape");
+		await waitPaletteClosed();
+	}
+	await pressModK();
+	await waitPaletteOpen();
+	await h.waitForSettled();
+
+	await paletteInput().fill("折叠侧栏");
+	const row = await win.evaluate(() => {
+		const opts = [...document.querySelectorAll('.command-palette [role="option"]')];
+		const hit = opts.find((el) => (el.querySelector(".ac-label")?.textContent ?? "").includes("侧栏"));
+		if (hit === undefined) return null;
+		return { hint: hit.querySelector(".ac-hint")?.textContent ?? null };
+	});
+	assert.notEqual(row, null, "搜「折叠侧栏」应有对应条目");
+	const expected = `${MOD === "Meta" ? "⌘" : "Ctrl"}+.`;
+	assert.equal(row.hint, expected, `侧栏开合条目的提示应是 ${expected}，实际 ${row.hint}`);
+
+	// 关掉面板，把提示里的键真的按一遍 —— 它必须真的折叠/展开侧栏。
+	await win.keyboard.press("Escape");
+	await waitPaletteClosed();
+	const before = await win.evaluate(() => document.querySelector(".app")?.dataset.sidebar ?? null);
+	await win.keyboard.press(`${MOD}+.`);
+	await waitUntil(
+		async () =>
+			(await win.evaluate(() => document.querySelector(".app")?.dataset.sidebar ?? null)) !== before,
+		{ timeout: 10_000, desc: "提示里的快捷键真的改变了侧栏状态" },
+	);
+	// 复原，便于人工看截图时界面是展开态。
+	await win.keyboard.press(`${MOD}+.`);
 });
 
 await h.finish();
