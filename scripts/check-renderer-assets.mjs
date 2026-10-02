@@ -83,6 +83,41 @@ function hashedVariantOf(assetNames, chunkName) {
 }
 
 /**
+ * 找出被**内联**的本地模块名 —— 即「只被静态 `from "./x.js"` 引用、从不按运行时
+ * 名字加载的产物」的文件。
+ *
+ * 这类文件（如命令面板内核 command-palette-core.js）被 Rollup 内联进导入它的
+ * chunk，**不产出同名产物**，因此不该被「每个源码 chunk 都要有一份同名产物」
+ * 这条要求追究。漏掉这一步的后果是：往 src/renderer/src/ 加一个被静态引用的
+ * 纯逻辑模块，检查会误报「产物里没有它」。
+ *
+ * **判据不能只看「静态 import」**：本仓库的产物格式是共享 chunk —— 懒加载块之间
+ * 也互相 `from "./x.js"`（例如 lang-javascript.js `from "./lang-typescript.js"`），
+ * 且以字面量字符串互相列进依赖表（`viteMapDeps(["./vendor-lodash.js", …])`）。
+ * 若只看静态 import，一个真懒加载块被改名成带哈希时会被误当作「内联」而漏报 ——
+ * 恰是这条守卫要防的事故。所以这里把「动态 import 目标」与「依赖表里的字面量名」
+ * 一并算作**运行时按名引用**，从中扣除后剩下的才是真正内联的模块。
+ */
+function inlinedModuleNames(chunks, srcDir) {
+	const staticNames = new Set();
+	const runtimeNames = new Set();
+	const fromRe = /from\s*["']\.\/([^"']+\.js)["']/g;
+	const importRe = /import\s*\(\s*["']\.\/([^"']+\.js)["']\s*\)/g;
+	for (const chunk of chunks) {
+		const source = readFileSync(path.join(srcDir, chunk), 'utf8');
+		let m;
+		while ((m = fromRe.exec(source)) !== null) staticNames.add(m[1]);
+		while ((m = importRe.exec(source)) !== null) runtimeNames.add(m[1]);
+		for (const dep of extractDeps(source)) runtimeNames.add(dep.replace(/^\.\//, ''));
+	}
+	const inlined = new Set();
+	for (const name of staticNames) {
+		if (!runtimeNames.has(name)) inlined.add(name);
+	}
+	return inlined;
+}
+
+/**
  * 版本号有没有真的注入到产物里。
  *
  * 判据是**带引号**的字面量：注入的是 `JSON.stringify(pkg.version)`，
@@ -109,6 +144,7 @@ function main() {
 	}
 
 	const chunks = readdirSync(SRC_DIR).filter((f) => f.endsWith('.js'));
+	const inlined = inlinedModuleNames(chunks, SRC_DIR);
 	const assetNames = readdirSync(ASSETS_DIR, { withFileTypes: true })
 		.filter((entry) => entry.isFile())
 		.map((entry) => entry.name);
@@ -127,7 +163,8 @@ function main() {
 	for (const chunk of chunks) {
 		// ① 每个源码 chunk 都应当有一份**同名**产物。
 		//    一旦名字变成 `chunk-<哈希>.js`，依赖表里的字面量字符串就全部落空。
-		if (!available.has(chunk)) {
+		//    例外：被静态 import 且非动态入口的模块会被内联进导入方，本就没有独立产物，跳过。
+		if (!inlined.has(chunk) && !available.has(chunk)) {
 			const variant = hashedVariantOf(assetNames, chunk);
 			renamed.push(variant ? `${chunk} → ${variant}` : `${chunk}（产物里没有它，也没有带后缀的变体）`);
 		}
@@ -143,8 +180,11 @@ function main() {
 		}
 	}
 
+	const inlinedChunks = chunks.filter((chunk) => inlined.has(chunk));
 	process.stdout.write('\n渲染层产物契约检查\n');
-	process.stdout.write(`  源码 ${chunks.length} 个 chunk，依赖表共 ${total} 项\n`);
+	process.stdout.write(
+		`  源码 ${chunks.length} 个文件（其中 ${inlinedChunks.length} 个被静态 import、内联进导入方，无需独立产物），依赖表共 ${total} 项\n`,
+	);
 
 	if (missingDeps.length > 0) {
 		process.stdout.write(`\n${red('依赖表指向了不存在的产物：')}\n`);
@@ -169,7 +209,7 @@ function main() {
 
 	if (missingDeps.length === 0 && renamed.length === 0) {
 		process.stdout.write(
-			`  ${green('✓')} ${chunks.length} 个 chunk 全部同名产出，依赖表 ${total} 项全部命中\n`,
+			`  ${green('✓')} ${chunks.length - inlinedChunks.length} 个 chunk 全部同名产出，依赖表 ${total} 项全部命中\n`,
 		);
 	}
 
