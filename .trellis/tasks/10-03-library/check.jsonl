@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-03-library/prd.md", "reason": "逐条核对 Acceptance Criteria"}
+{"file": ".trellis/tasks/10-03-library/design.md", "reason": "核对实现与设计一致：去重语义、快照 vs 实时字段、跨工作区边界有没有被放宽"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查断言可证伪性（反向验证做没做）、有没有静默跳过"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "核查三态纪律与「不新造视觉」"}

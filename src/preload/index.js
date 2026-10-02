@@ -109,6 +109,11 @@ const INVOKE = {
    * 返回导出文件的绝对路径。
    */
   sessionExport: "session:export",
+  /**
+   * 资料库：汇总全部会话交付过的产物（跨会话去重，带来源会话与失效标记）。
+   * **拉式**：只在用户打开资料库页面时调用。
+   */
+  libraryList: "library:list",
   /** 拉取当前工作空间与可选列表（默认根 + 已有子目录）。 */
   workspaceSnapshot: "workspace:snapshot",
   /** 在默认根下新建工作空间并切换过去。返回生效的目录路径。 */
@@ -546,6 +551,7 @@ const bridge = {
   deleteSession: (path) => ipcRenderer.invoke(INVOKE.sessionDelete, path),
   archiveSession: (path, archived) => ipcRenderer.invoke(INVOKE.sessionArchive, path, archived),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
+  listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
   workspaceSnapshot: () => ipcRenderer.invoke(INVOKE.workspaceSnapshot),
   createWorkspace: (name) => ipcRenderer.invoke(INVOKE.createWorkspace, name),
   setWorkspace: (path) => ipcRenderer.invoke(INVOKE.setWorkspace, path),
