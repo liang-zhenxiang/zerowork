@@ -15,7 +15,7 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { writeFileSync, rmSync, mkdtempSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
