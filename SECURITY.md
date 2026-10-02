@@ -231,6 +231,7 @@ Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**�
 | `src/renderer/src/vendor-lodash.js` | lodash | 4.18.1 | 被 `workspace.js` / `office-xlsx.js` / `office-pptx.js` **静态 import** |
 | `src/renderer/src/vendor-jszip.js` | JSZip | 3.10.2 | 被 `workspace.js` / `office-docx.js` / `office-pptx.js` **静态 import** |
 | `src/renderer/src/vendor-jszip-2.js` | JSZip —— 打包器拆出的**再导出薄壳**（244 字节，自身无版本号） | 3.10.2（同 `vendor-jszip.js`） | 被 `office-docx.js` / `office-pptx.js` 静态 import 取默认导出 |
+| `src/renderer/vendor-katex.js`（在 chunk 扫描目录之外：静态并入 app chunk，无独立产物） | KaTeX + remark-math + rehype-katex（esbuild 整链打包，`scripts/vendor-katex.mjs` 可再生生成） | 0.19.0 | 被 `app.js` **静态 import**：消息流的数学公式渲染（$$ 围栏式）。字体与样式在 `katex.css` / `katex-fonts/`（核心子集 13 个 woff2），经 `index.html` 随包、离线可用 |
 
 > **版本号取自 bundle 内的版本标记，不是猜的**：`vendor-xlsx.js` 的
 > `XLSX.version = "0.18.5"`、`vendor-lodash.js` 的 `var VERSION = "4.18.1"`、

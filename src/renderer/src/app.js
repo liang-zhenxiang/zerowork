@@ -29519,6 +29519,19 @@ function gfm(options) {
     gfmTaskListItem()
   ]);
 }
+/*
+ * ── 数学公式（issue #74：块级 $$ → KaTeX）───────────────────────────
+ * vendor-katex.js（scripts/vendor-katex.mjs 用 esbuild 生成）提供
+ * remark-math + rehype-katex + katex 整链。**必须走 micromark 字符层捕获**：
+ * 先经 markdown 的 text 解码再切分的话，TeX 的反斜杠序列（\alpha、\,）会被
+ * markdown 转义吃掉（第一版自写切分就栽在 f(x)\,dx 变 f(x),dx）。
+ * 静态 import（296KB 并入 app chunk）：公式首渲染即正确，不做懒加载的
+ * fallback 闪烁；体积对桌面应用可忽略（安装包 583MB 的 0.05%）。
+ * 语法取舍：singleDollarTextMath:false——单 $ 会把「预算 $500 与 $800」
+ * 切走，中文办公场景金额远多于行内公式（GitHub 同款取舍）；块级走
+ * remark-math 原生围栏式（$$ 独立行开闭）。
+ */
+import { remarkMath, rehypeKatex } from "../vendor-katex.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -29689,7 +29702,10 @@ const Markdown = React.memo(function Markdown2({
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "markdown", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
     Markdown$1,
     {
-      remarkPlugins: [remarkGfm],
+      remarkPlugins: [remarkGfm, [remarkMath, { singleDollarTextMath: false }]],
+      // rehype-katex 在 hast 层把 math 节点渲染成 KaTeX 的 HTML+MathML
+      //（颜色继承 currentColor，双主题直接可用）。
+      rehypePlugins: [rehypeKatex],
       components: {
         // 只覆盖 pre（围栏块）成行卡片；行内 code 走下面的 code 覆盖。
         pre: CodeBlockCard,

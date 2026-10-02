@@ -41,6 +41,7 @@
 | `resources/experts/market-researcher/skills/stock/scripts/{data,tool}-vendor.js`（内嵌注释） | 打包进来的开源库各自声明：axios、URI.js、OpenJS Foundation、Express 系等 | 各自作者 |
 | `resources/bin/UV-NOTICE.md` | `uv` 二进制来源与 sha256 校验记录 | astral-sh |
 | `src/renderer/src/app.css`（内嵌 pdf.js viewer 的文本层 / 注释层样式，文件头两处带 Apache-2.0 声明） | Apache-2.0 | Mozilla Foundation |
+| `src/renderer/src/vendor-katex.js` + `katex.css` + `katex-fonts/`（由 `scripts/vendor-katex.mjs` 从 npm 生成） | MIT（KaTeX、remark-math、rehype-katex 及其依赖树均为 MIT） | KaTeX Contributors 及各依赖的权利人；上游许可随 npm 包分发 |
 | `resources/fonts/README.md`（MiSans 字体来源与许可条款；**字体二进制未入库**） | 小米《MiSans 字体知识产权许可协议》—— 全球免费商用，但**嵌入式使用须「在软件中特别注明使用了 MiSans 字体」** | 小米科技有限责任公司 |
 
 **发布前需要权利人逐项处置**（三选一）：
