@@ -78,7 +78,10 @@ jobs:
         # BUILD_VERSION 非空（beta 发布路径）时覆盖产物版本；为空走仓库 version（稳定路径不变）
         run: |
           if [[ -n "$BUILD_VERSION" ]]; then
-            npx electron-builder --mac --arm64 --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION"
+            # channel=beta：channel 文件名（beta.yml / beta-mac.yml）由 channel 配置
+            # 驱动，**不从版本的 prerelease 段推导**——beta 首发实测只有
+            # extraMetadata.version 时产物仍叫 latest*.yml，被守卫拦下（拦得对）。
+            npx electron-builder --mac --arm64 --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION" --config.channel=beta
           else
             npx electron-builder --mac --arm64 --x64 --publish never
           fi
@@ -186,7 +189,8 @@ jobs:
         shell: bash
         run: |
           if [[ -n "$BUILD_VERSION" ]]; then
-            npx electron-builder --win --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION"
+            # 同 mac：channel 文件名走显式 channel 配置
+            npx electron-builder --win --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION" --config.channel=beta
           else
             npx electron-builder --win --x64 --publish never
           fi
