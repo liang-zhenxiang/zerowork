@@ -178,11 +178,19 @@ jobs:
           path: stage
           merge-multiple: true
 
-      # ⚠️ channel 守卫：beta 构建产物里**必须有 beta.yml / beta-mac.yml**，
-      # 且**不能有 latest.yml / latest-mac.yml**。这一步是稳定渠道的隔离带 ——
-      # electron-builder 的 channel 命名若随版本升级改变行为，这里要响亮地红，
-      # 而不是让一个 beta 把稳定渠道的 latest.yml 覆盖掉（那是静默的坏发布）。
-      - name: 校验 channel 文件（稳定渠道隔离带）
+      # ⚠️ channel 转换 + 守卫（稳定渠道隔离带）。
+      #
+      # electron-builder 在本地构建时 channel 清单文件名固定为 latest.yml /
+      # latest-mac.yml（--config.channel=beta 只影响发布侧，不改本地文件名——
+      # 第八轮实测）。而 electron-updater 的 channel 语义由**请求的文件名**决定：
+      # setFeedURL(channel=beta) 请求 beta.yml。所以这里的隔离动作是**重命名**：
+      # latest*.yml → beta*.yml。这个 Release 从此只服务 beta 渠道——稳定渠道
+      # 的 latest.yml 永远由稳定发布流水线提供，物理隔离由此成立。
+      #
+      # 「找不到要重命名的源文件」本身就是守卫：builder 行为若变化（自动按
+      # channel 改名了），mv 会失败，发布中止——转换即校验，不额外放行任何
+      # 形态的 latest* 遗留。
+      - name: channel 转换（latest* → beta*，稳定渠道隔离带）
         env:
           STAGE: stage
         run: |
@@ -194,20 +202,27 @@ jobs:
             exit 1
           fi
 
-          has_beta_win="$(find "$STAGE" -name 'beta.yml' -print -quit | wc -l | tr -d ' ')"
-          has_beta_mac="$(find "$STAGE" -name 'beta-mac.yml' -print -quit | wc -l | tr -d ' ')"
-          has_latest="$(find "$STAGE" \( -name 'latest.yml' -o -name 'latest-mac.yml' \) -print -quit | wc -l | tr -d ' ')"
-
-          if [[ "$has_beta_win" == "0" ]]; then
-            echo "::error::产物里没有 beta.yml —— NSIS 的 channel 文件没有跟随 prerelease 版本命名（electron-builder 行为变化？）。发布中止，稳定渠道不能被 beta 触碰。"
+          renamed=0
+          for pair in "latest.yml:beta.yml" "latest-mac.yml:beta-mac.yml"; do
+            src="${pair%%:*}"; dst="${pair##*:}"
+            found="$(find "$STAGE" -name "$src" -print -quit)"
+            if [[ -n "$found" ]]; then
+              mv "$found" "$(dirname "$found")/$dst"
+              renamed=$((renamed + 1))
+              echo "已转换：$src → $dst"
+            fi
+          done
+          if [[ "$renamed" -lt 2 ]]; then
+            echo "::error::期望转换 2 个 channel 清单，实际只找到 ${{ "$" }}renamed 个——builder 的清单产出行为变了？（第八轮起 builder 恒产 latest*，若某天自动产 beta* 也会落到这里，届时删除本步骤）"
             exit 1
           fi
-          if [[ "$has_latest" != "0" ]]; then
-            found="$(find "$STAGE" \( -name 'latest.yml' -o -name 'latest-mac.yml' \) -print)"
-            echo "::error::beta 产物里出现了稳定渠道文件：${found} —— 会被稳定渠道用户读到，发布中止。"
+          # 终检：stage 里不允许残留任何 latest*
+          leftover="$(find "$STAGE" -name 'latest*.yml' -print -quit)"
+          if [[ -n "$leftover" ]]; then
+            echo "::error::beta 产物里残留稳定渠道文件：$leftover —— 发布中止。"
             exit 1
           fi
-          echo "✓ channel 隔离成立：beta.yml 在（Windows: ${has_beta_win}），latest* 不在；macOS: ${has_beta_mac}"
+          echo "✓ channel 隔离成立：beta.yml / beta-mac.yml 就位，latest* 已清零"
 
       # 打 tag 并创建 pre-release。tag 必须存在（--verify-tag），所以先推 tag。
       # 幂等：重跑同一 run 时（网络重试）tag 已存在则跳过推送，release 已存在则 edit。
