@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：token 单一真源与档位纪律、四态过渡、CSS 注释吞规则的陷阱、产物契约"}
+{"file": "docs/DESIGN.md", "reason": "§2.0 双块同构、§3.8 首页垂直节奏、§3.9 盒子预算、§5 受控例外、§10.3 动效登记"}
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e harness 用法、像素断言与反向验证的写法、跳过的纪律"}
+{"file": ".trellis/tasks/10-03-dark-polish/research/design-review.md", "reason": "设计师评审：三处诊断（含对比度实算）、提案与「不做」清单 —— 本任务的原始依据"}
+{"file": ".trellis/tasks/10-03-dark-polish/design.md", "reason": "技术设计：token 取值与理由、测试设计、反向验证要求"}
+{"file": ".trellis/tasks/10-03-dark-polish/prd.md", "reason": "需求与验收标准"}
