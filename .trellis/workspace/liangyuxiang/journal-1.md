@@ -50,3 +50,15 @@
   时序洞，等元素出现是信号等待的应有形态。
 - vendored 治理：SECURITY.md 清单 + VERSION_MARKER + THIRD_PARTY_NOTICES + 静态
   并入型 vendor 的目录约定（chunk 契约扫描之外）。
+
+## 2026-10-02 四续：#84 双渠道自动更新（PR #85/#86）
+
+- 架构：beta 走独立流水线绕开 release.yml 的版本一致性校验（那套校验保护稳定语义，
+  beta 版本是运行态）；channel 隔离靠「prerelease 版本→beta.yml」+ 发布前守卫步骤。
+- 三个实测坑（都已沉淀注释）：① chord 的 esbuild 生产依赖把全平台 27 个二进制
+  （262MB）打进包——afterPack 按 Arch 枚举（数字！ia32=1/x64=2/arm64=3）裁剪；
+  ② electron-updater 非打包态 inactive（卡 checking 无网络请求）——
+  forceDevUpdateConfig + dev-app-update.yml；③ mac 的 channel 文件带平台后缀
+  （stable-mac.yml）——mock feed 按名字渠道段分发。
+- CodeQL 又立功：gui-updates 的固定 /tmp 路径 4 条高危（同款第二次）——mkdtempSync。
+- 操作手册在 MAINTAINER_GUIDE「双渠道更新」章（beta 零操作；稳定版=既有 tag 流程）。
