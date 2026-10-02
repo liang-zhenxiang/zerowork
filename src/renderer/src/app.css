@@ -881,15 +881,29 @@ textarea:focus-visible {
 
 /* 内容列（§4.32 修正）：`.app` 的直接子项里，除外壳与浮层之外的就是各视图页 ——
    它们是嵌在灰底上的圆角白卡。用**排除法**而不是各视图类名清单：视图页会增删，
-   而外壳那几件是稳定且少数；漏排除的后果是「多一张卡」，肉眼可见、不会静默。
+   而外壳那几件是稳定且少数。
+
+   ⚠️ **漏排除的后果是静默的，不是「多一张卡」**（2026-10 修正：此前的注释写「肉眼可见、
+   不会静默」，已被一起真实事故证伪）。本规则的特异性 (0,6,1) 会压过
+   `.modal-backdrop`(0,1,0，见本文件「权限审批弹窗」处) 的 `background: var(--overlay)`：
+   背板被盖成一块铺满窗口、内缩 6px、圆角 10px 的**不透明 `--bg` 面板**，
+   看起来像「界面被让干净了」而不像坏掉 —— 于是它静默了两周多、影响直挂 `.app` 的三个模态，
+   且 `--overlay` 这个设计 token 从未生效过（成了死代码）。
+   所以**新增直挂 `.app` 的浮层时，必须把它加进下面的排除清单**；
+   兜底是 tests/e2e/modal-backdrop.mjs —— 它遍历 DOM 里所有遮罩类元素
+   (`.modal-backdrop` / `.ex-modal-mask`)，断言每一个都是遮罩而非不透明面板，
+   将来漏排除会被它抓到。
 
    注意这里**不能写 `div:` 前缀**：视图页的根元素是 `<main class="chat">` /
    `<main class="settings">`（不是 div），加了前缀就一条都匹配不上 —— 灰底直接透出来，
    会话区整片变成灰的（2026-09-19 实测翻车）。
 
    也不加 overflow：`.home` 自己是滚动容器（`overflow-y: auto`），这里写
-   `overflow: hidden` 会把首页的滚动吃掉 —— 圆角靠元素自身背景的圆角呈现即可。 */
-.app> :not(.titlebar):not(.sidebar):not(button):not(.panel-slot):not(.panel-toggle-group):not(.toast-stack) {
+   `overflow: hidden` 会把首页的滚动吃掉 —— 圆角靠元素自身背景的圆角呈现即可。
+
+   `.modal-backdrop` 是模态背板（fixed inset:0、背景 var(--overlay)），不是视图页，
+   必须排除，否则上面那段「不透明面板」的后果立刻复现。 */
+.app> :not(.titlebar):not(.sidebar):not(button):not(.panel-slot):not(.panel-toggle-group):not(.toast-stack):not(.modal-backdrop) {
 	margin: var(--space-2);
 	border-radius: var(--radius-md);
 	background: var(--bg);
