@@ -62,3 +62,15 @@
   （stable-mac.yml）——mock feed 按名字渠道段分发。
 - CodeQL 又立功：gui-updates 的固定 /tmp 路径 4 条高危（同款第二次）——mkdtempSync。
 - 操作手册在 MAINTAINER_GUIDE「双渠道更新」章（beta 零操作；稳定版=既有 tag 流程）。
+
+## 2026-10-02 五续：beta 流水线的真实用户端到端（PR #88-97）
+
+十轮构建才全绿，每轮红灯都是真实缺陷（守卫体系全程没放行过坏包）：
+PowerShell 解析 / download-artifact 无 | 语法 / channel 不随版本推导 / publish:null
+不产 yml → never 非法 → 真 provider+CLI / artifact 不收 yml / tag 无 identity /
+**真机闭环再抓两个**：github provider 的 beta 渠道必须 allowPrerelease（默认只找
+latest release）、版本计算的字段名 tagName（写错则序号恒 1、beta.2 覆盖 beta.1）。
+最终闭环：装好的 beta.1 应用（Beta 渠道）检查到 beta.2 的新版本提示+toast，截图存证。
+教训两条：① dispatch 前**先核实 merge 真的落了 main**（网络重试静默失败会让后续
+全跑在旧代码上）；② 字段名类 bug 单测测不出（本地字符串数组 ≠ gh 对象形态）——
+映射层要有形态用例。
