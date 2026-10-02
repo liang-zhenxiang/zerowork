@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/main/index.md", "reason": "主进程新模块（updates.js）与 IPC 接线规范"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "updateChannel 偏好 handler 规范"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "设置区组件规范"}

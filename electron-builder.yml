@@ -104,6 +104,12 @@ extraResources:
 # ---------------------------------------------------------------------------
 beforePack: scripts/before-pack.cjs
 
+# afterPack：裁剪 @esbuild 的跨平台二进制（只留打包目标平台那一个）。
+# 为什么在钩子里做而不是 files 排除：files 规则是静态的，做不到
+# 「mac 包留 darwin-*、win 包留 win32-*」这种按目标平台的条件排除。
+# 背景与映射表见 scripts/after-pack-trim.cjs 的头注释。
+afterPack: scripts/after-pack-trim.cjs
+
 # ---------------------------------------------------------------------------
 # 不用 asar
 #

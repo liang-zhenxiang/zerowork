@@ -11,6 +11,16 @@ on:
   # 如果另写一个 tag 触发的工作流，「把产物附到 Release 上」这句话在架构上就不成立：
   # 两个 tag 触发的工作流之间没有任何机制保证先后，谁先跑完不确定。
   workflow_call:
+    # 覆盖产物版本号（beta 发布用）：传入形如 0.4.0-beta.3 的版本，
+    # 产物内 package.json 的 version 以此为准；**仓库的 package.json 不动**
+    # （beta 序号是流水线的运行态，不该弄脏 main）。
+    # 为空（默认，稳定版发布路径）时用仓库自身的 version —— 现行为不变。
+    inputs:
+      version:
+        description: "覆盖产物版本（空 = 用 package.json 的 version）"
+        required: false
+        default: ""
+        type: string
 
 # 只需要读代码
 permissions:
@@ -65,11 +75,19 @@ jobs:
 
       # 产物已经构建好了，跳过 dist:mac 里的重复构建
       - name: 打包 macOS 安装包
-        run: npx electron-builder --mac --arm64 --x64 --publish never
+        # BUILD_VERSION 非空（beta 发布路径）时覆盖产物版本；为空走仓库 version（稳定路径不变）
+        run: |
+          if [[ -n "$BUILD_VERSION" ]]; then
+            npx electron-builder --mac --arm64 --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION"
+          else
+            npx electron-builder --mac --arm64 --x64 --publish never
+          fi
         env:
           # 没有证书时不要去找钥匙串里的签名身份 —— 找不到会报错或卡住。
           # 这与 electron-builder.yml 里的 `identity: null` 是同一个决定的两面。
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # ${{ }} 经 env 中转（红线）；inputs 在 workflow_call 里可用
+          BUILD_VERSION: ${{ inputs.version }}
 
       - name: 列出产物
         run: find release -maxdepth 1 -type f -exec ls -lh {} + || true
@@ -162,7 +180,14 @@ jobs:
         run: npm run build
 
       - name: 打包 Windows 安装包
-        run: npx electron-builder --win --x64 --publish never
+        run: |
+          if [[ -n "$BUILD_VERSION" ]]; then
+            npx electron-builder --win --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION"
+          else
+            npx electron-builder --win --x64 --publish never
+          fi
+        env:
+          BUILD_VERSION: ${{ inputs.version }}
 
       - name: 列出产物
         shell: bash

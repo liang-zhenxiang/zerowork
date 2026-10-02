@@ -4434,6 +4434,19 @@ const handlers = {
     }
     writePreferences({ ...readPreferences(), styleId });
   },
+  /* ── 更新渠道（stable / beta，spec: update-channels） ──────────── */
+  // 未配置回 stable（缺省保守）：beta 是显式选择，升级不换渠道。
+  // 缺省语义收在这一个出口（读偏好处不填默认值，同 theme 口径）。
+  [INVOKE.getUpdateChannel]: async () => ({
+    channel: readPreferences().updateChannel ?? "stable"
+  }),
+  // 只校验与落盘；autoUpdater 的重配与立即检查在 main（daemon 不碰 Electron API）。
+  [INVOKE.setUpdateChannel]: async ([channel]) => {
+    if (channel !== "stable" && channel !== "beta") {
+      throw new Error(`未知的更新渠道：${String(channel)}`);
+    }
+    writePreferences({ ...readPreferences(), updateChannel: channel });
+  },
   /* ── 外观主题 ─────────────────────────────────────────────────── */
   // 未配置回 light（不是 system）：存量用户升级后界面保持浅色不变，
   // 「跟随系统」作为设置项里的显式选择，而不是升级即换脸（design.md §6 的
