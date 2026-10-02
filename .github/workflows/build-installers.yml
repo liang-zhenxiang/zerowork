@@ -180,6 +180,10 @@ jobs:
         run: npm run build
 
       - name: 打包 Windows 安装包
+        # shell: bash —— Windows runner 的默认 shell 是 PowerShell，[[ ]] 语法过不去
+        # （beta 首发实测：ParserError "Missing '(' after 'if'"）。macOS job 无此问题
+        # 但为对称与防呆，两个打包 step 都显式声明。
+        shell: bash
         run: |
           if [[ -n "$BUILD_VERSION" ]]; then
             npx electron-builder --win --x64 --publish never --config.extraMetadata.version="$BUILD_VERSION"
