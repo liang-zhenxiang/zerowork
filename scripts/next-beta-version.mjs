@@ -80,7 +80,10 @@ function main() {
 	const withIdx = args.indexOf('--with-releases');
 	if (withIdx !== -1) {
 		const raw = args[withIdx + 1] ?? '[]';
-		const tags = JSON.parse(raw).map((r) => r.tag ?? r.name ?? r);
+		// 字段名核对过 `gh release list --json`：是 **tagName**（首版写成 r.tag，
+		// 三元一路 fallback 到整个对象 → startsWith 全不匹配 → 序号永远 1，
+		// beta.2 发成了 beta.1 并撞上「已存在」路径。真机端到端才暴露）。
+		const tags = JSON.parse(raw).map((r) => r.tagName ?? r.tag ?? r.name ?? r);
 		console.log(computeNextBeta(pkg.version, tags));
 		return;
 	}
