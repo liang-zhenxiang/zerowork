@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：token 是唯一视觉真源、档位固定、四态过渡、产物命名契约、CSS 注释吞规则的陷阱"}
+{"file": "docs/DESIGN.md", "reason": "设计纪律的事实来源：圆角/阴影/时长档位、§5 受控例外、§6 禁止清单、§7.6 状态不只靠颜色、§10.3 动效登记"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试分层与写法：e2e harness 用法、看门狗、跳过要让门禁读得出来、反向验证的纪律"}
+{"file": ".trellis/tasks/10-03-command-palette/design.md", "reason": "本任务的技术设计：模块契约、排序链、组件结构、token 级视觉规范、测试设计"}
+{"file": ".trellis/tasks/10-03-command-palette/research/competitor-gaps.md", "reason": "同类产品调研：Raycast 的排序优先级链、VS Code 的快捷键提示、Obsidian 的「未输入才置顶」取舍、明确不做清单"}
+{"file": ".trellis/tasks/10-03-command-palette/prd.md", "reason": "需求与验收标准"}
