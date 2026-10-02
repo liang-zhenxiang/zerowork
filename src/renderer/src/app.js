@@ -13675,7 +13675,10 @@ function Sidebar({
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "brand-name", children: "ZeroWork" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "brand-version", children: [
         "V",
-        __APP_VERSION__
+		// 运行时真值（preload 同步取出）优先，构建期注入值兜底 —— 兜底不只是防御：
+		// 它让 check-renderer-assets 的「产物含版本号」守卫继续有意义
+		// （那项查的是「构建产物是否与当前源码同步」）。
+        (window.kami?.appVersion ?? __APP_VERSION__)
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "new-task", onClick: onNewTask, children: [
@@ -62182,7 +62185,7 @@ function UpdatesSection({ busy }) {
        * 注入的 __APP_VERSION__——beta 构建的产物 version 经 extraMetadata 覆盖，
        * 而注入值还是仓库 package.json 的旧号（真机实测徽章显示 V0.3.0、
        * 实际 0.4.0-beta.1）。 */
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: state?.version !== undefined ? `V${state.version}` : `V${__APP_VERSION__}` })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: state?.version !== undefined ? `V${state.version}` : `V${(window.kami?.appVersion ?? __APP_VERSION__)}` })
     ] }),
     channel === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取更新设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
@@ -64798,7 +64801,7 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "ZeroWork" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
         "版本 ",
-        __APP_VERSION__
+        (window.kami?.appVersion ?? __APP_VERSION__)
       ] })
     ] }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
