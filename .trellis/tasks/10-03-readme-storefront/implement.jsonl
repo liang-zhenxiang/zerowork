@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e harness 用法与产物断言的写法；截图流水线复用同一套骨架"}
+{"file": ".trellis/tasks/10-03-readme-storefront/design.md", "reason": "技术设计：截图脚本的形状（scale:css / 隔离目录 / mock 模型）、README 结构约束、图片路径守卫"}
+{"file": ".trellis/tasks/10-03-readme-storefront/prd.md", "reason": "需求与验收标准"}
+{"file": "docs/DESIGN.md", "reason": "若需要在截图脚本里驱动界面（切主题等），沿用既有 token 与三档纪律"}
