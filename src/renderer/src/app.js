@@ -13244,6 +13244,7 @@ const TASK_SKELETON_TITLE_STYLE = {
 function Sidebar({
   link: link2,
   groups,
+  currentCwd,
   tasksError,
   onReloadTasks,
   unreadIds,
@@ -13519,7 +13520,7 @@ function Sidebar({
       {
         className: collapsed ? "space-group space-group-collapsed" : "space-group",
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-group-header", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `space-group-header${group.cwd === currentCwd ? " space-group-current" : ""}`, children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "button",
               {
@@ -13538,7 +13539,10 @@ function Sidebar({
                 children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx(IconFolder, { size: 12, className: "space-group-icon" }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 12, className: "space-group-chevron" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-name", children: group.name })
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-name", children: group.name }),
+                  /* 「当前」徽标（issue #73）：置顶（排序）+ 文字徽标双信号承担
+                     「这是你现在所在的空间」；颜色只做主色强调，不新造语义。 */
+                  group.cwd === currentCwd && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-badge", children: "当前" })
                 ]
               }
             ),
@@ -13625,7 +13629,16 @@ function Sidebar({
     );
   };
   const tasks = groups?.tasks;
-  const spaces = groups?.spaces ?? [];
+  const rawSpaces = groups?.spaces ?? [];
+  /*
+   * 当前工作空间置顶（issue #73）：其余组保持 latestAt 序不变。
+   * 多项目并行时「找当前组」不该靠扫读——置顶 + 组头「当前」徽标
+   * （形态承担状态，见 renderSpaceGroup）双信号。
+   */
+  const spaces = currentCwd === void 0 ? rawSpaces : [
+    ...rawSpaces.filter((g) => g.cwd === currentCwd),
+    ...rawSpaces.filter((g) => g.cwd !== currentCwd)
+  ];
   const groupsUnavailable = tasksError !== void 0 || link2.kind === "down";
   const visibleTasks = tasksExpanded ? tasks ?? [] : (tasks ?? []).slice(0, TASKS_COLLAPSED_COUNT);
   const hiddenTaskCount = tasks === void 0 ? 0 : tasks.length - visibleTasks.length;
@@ -68141,6 +68154,7 @@ function App() {
       {
         link: link2,
         groups: sidebarGroups,
+        currentCwd: conversation.state.cwd,
         tasksError: taskListError,
         onReloadTasks: reloadSessions,
         unreadIds,
