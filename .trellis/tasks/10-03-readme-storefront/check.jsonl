@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-03-readme-storefront/prd.md", "reason": "逐条核对 Acceptance Criteria（尤其图片总重、不出现敏感信息、中英两份都改到）"}
+{"file": ".trellis/tasks/10-03-readme-storefront/design.md", "reason": "核对实现与设计一致：截图脚本的形状、产物契约、README 结构约束"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查产物断言是否可证伪（反向验证做没做）、有没有静默跳过"}
+{"file": "scripts/check-docs.mjs", "reason": "核实图片路径是否真被这条检查覆盖，以及反向验证是否做了"}

@@ -18,9 +18,27 @@
 > where most of this project's design rationale lives. This page covers what you need
 > to get started. Contributions that improve the English documentation are welcome.
 
+<br />
+
+![The ZeroWork home screen (light theme): input box, example cards, and the setup checklist](docs/images/home-light.png)
+
 </div>
 
 ---
+
+## What it does
+
+**It finishes the job.** Hand it a task and it reads your own files, runs commands when a step calls for it, and hands the result back as a finished artifact — not just a block of prose. Your files stay on your machine; everything the app sends outward is itemised in [EXTERNAL_REQUESTS.md](EXTERNAL_REQUESTS.md).
+
+![A real exchange: the chat on the left, the artifact it delivered on the right](docs/images/conversation.png)
+
+**No menu-hunting.** Press `⌘K` (or `Ctrl+K` on Windows), type a few letters, and land on a session, a setting, or an action.
+
+![The command palette: a few keystrokes match actions and sessions together](docs/images/command-palette.png)
+
+**The same interface day and night.** Light, dark, or follow the system — three settings, one design.
+
+![The home screen in dark theme](docs/images/home-dark.png)
 
 ## What this is
 
@@ -89,6 +107,10 @@ npm run dev
 
 Then connect a model (**Settings → Model**) — any OpenAI-compatible endpoint.
 See the [usage guide](docs/USAGE.md) (Chinese) for details.
+
+With the model connected, put the cursor in the home input and send your first message.
+The three-step checklist on the home screen — workspace, model, first message — clears
+itself once all three are done.
 
 ## Platform support
 

@@ -78,9 +78,9 @@ export default [
 		},
 	},
 	{
-		// 端到端测试：evaluate() 回调体在浏览器上下文里执行，
-		// 可以用 document / window 等浏览器全局。
-		files: ["tests/e2e/**/*.mjs"],
+		// 端到端测试，以及门面截图流水线（tools/shoot-storefront.mjs）：
+		// 后者的 evaluate() 回调体同样在浏览器上下文里执行，可以用 document / window 等浏览器全局。
+		files: ["tests/e2e/**/*.mjs", "tools/shoot-storefront.mjs"],
 		languageOptions: {
 			globals: {
 				document: "readonly",
