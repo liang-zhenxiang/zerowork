@@ -74,3 +74,5 @@ rules:
   self-repository:
     ignore:
       - release.yml
+      # 同一条豁免理由（见上）：beta.yml 也用 `./` 调用同仓库可复用工作流
+      - beta.yml

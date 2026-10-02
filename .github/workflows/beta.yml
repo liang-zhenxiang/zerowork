@@ -1,0 +1,264 @@
+# 工作流名称
+name: Beta 发布
+# 工作流运行时显示名称
+run-name: Beta 渠道发布
+
+# Beta 渠道的自动发布：main 上有「可发的变更」（CHANGELOG 的 [Unreleased] 非空）
+# 就构建一个 beta 安装包并发布为 pre-release。选了 beta 更新渠道的用户由此收到更新。
+#
+# 与稳定渠道（release.yml，vX.Y.Z tag 手工触发）的关系：
+#   · 本工作流**绕开** release.yml 的版本一致性校验（tag=CHANGELOG=package.json）——
+#     那套校验保护的是稳定渠道的发布语义；beta 的版本是流水线运行态
+#     （package.json 不改、CHANGELOG 不归档），走了反而必红。
+#   · 构建复用 build-installers.yml（同一份打包逻辑、同一个溯源证明），
+#     通过 inputs.version 覆盖产物版本号。
+#   · 产物里的 channel 文件：版本含 -beta.N 时 electron-builder 自动把 NSIS 的
+#     latest.yml 命名为 beta.yml —— 稳定渠道与 beta 渠道由此物理隔离，
+#     **一个 beta 发布不可能污染 latest.yml**。发布前有守卫步骤校验这件事。
+#
+# 怎样触发工作流
+on:
+  push:
+    branches: [main]
+    # 只有这些路径的变更才可能产出「值得发 beta 的内容」（纯文档/工作流改动不发）
+    paths:
+      - "CHANGELOG.md"
+      - "src/**"
+      - "resources/**"
+      - "package.json"
+      - "package-lock.json"
+      - "electron-builder.yml"
+      - "electron.vite.config.mjs"
+  # 手动触发：想在没碰代码路径时补发一个 beta 时用
+  workflow_dispatch: {}
+
+# 全局并发：同一时刻只允许一条 beta 流水线。排队（不取消）——
+# 连续两个功能合并时后一个等前一个发完，序号由「数已有 release」得出，
+# 排队保证不撞号。
+concurrency:
+  group: beta-release
+  cancel-in-progress: false
+
+# 默认只读；写权限按 job 声明（与 release.yml 同一纪律）
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # ① 决定要不要发、发什么版本
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: 决定 beta 版本
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      should-release: ${{ steps.decide.outputs.release }}
+      version: ${{ steps.decide.outputs.version }}
+      tag: ${{ steps.decide.outputs.tag }}
+      notes: ${{ steps.decide.outputs.notes_file }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # 完整历史：算「上一条变更清单」的分界要用 tag 历史
+          fetch-depth: 0
+
+      - name: "「[Unreleased] 有内容」才发"
+        id: unreleased
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if node scripts/next-beta-version.mjs --check-unreleased; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "[Unreleased] 为空 —— 本次不发 beta（正常退出）"
+          fi
+
+      - name: 计算下一个 beta 版本
+        id: decide
+        # 判断经 env 中转（GitHub 表达式的字符串只认单引号，与其在引号规则里绕，
+        # 不如统一走仓库的 env 纪律）
+        if: ${{ steps.unreleased.outputs.skip == 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          # 已有 release 列表喂给版本计算脚本（幂等：重跑同一批 release 得同一号）
+          releases="$(gh release list --limit 100 --json tagName)"
+          version="$(node scripts/next-beta-version.mjs --with-releases "$releases")"
+          echo "下一个 beta 版本：${version}"
+          {
+            echo "version=${version}"
+            echo "tag=v${version}"
+            echo "release=true"
+          } >> "$GITHUB_OUTPUT"
+
+      # beta 的发布说明：[Unreleased] 原文 + beta 渠道的使用说明。
+      # 不做三段式（AI 摘要/PR 清单）——那是稳定发布的礼仪，beta 要的是快。
+      - name: 生成 beta 发布说明
+        if: ${{ steps.unreleased.outputs.skip == 'false' }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          {
+            {
+              echo "### 🧪 Beta 渠道版本"
+              echo ""
+              echo "这是**自动构建的预览版**：main 分支上合并的功能原样打包，未经稳定版发布前的完整确认。"
+              echo "想尝鲜的用户在 ZeroWork 的 **设置 → 通用 → 更新** 里把渠道切到 **Beta** 即可收到。"
+              echo ""
+              echo "---"
+              echo ""
+              # [Unreleased] 段原文（awk 与 release.yml 的提取同款思路，但带标题）
+              awk '/^## \[Unreleased\]/ { found = 1; next } found && /^## / { exit } found { print }' CHANGELOG.md
+              echo ""
+              echo "---"
+              echo ""
+              echo "**完整变更**：[\`main\`](https://github.com/${GITHUB_REPOSITORY}/commits/main)"
+            } > beta-notes.md
+          }
+          echo "notes_file=beta-notes.md" >> "$GITHUB_ENV"
+
+      - name: 保存 beta 发布说明
+        if: ${{ steps.unreleased.outputs.skip == 'false' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: beta-notes
+          path: beta-notes.md
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # ② 构建安装包（复用 build-installers.yml，版本号经 inputs 覆盖）
+  # ---------------------------------------------------------------------------
+  installers:
+    name: 构建安装包
+    needs: [prepare]
+    if: needs.prepare.outputs.should-release == 'true'
+    uses: ./.github/workflows/build-installers.yml
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  # ---------------------------------------------------------------------------
+  # ③ 校验 channel 文件并发布 pre-release
+  # ---------------------------------------------------------------------------
+  publish:
+    name: 发布 Beta Release
+    needs: [prepare, installers]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 取回发布说明与安装包
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: beta-notes|installer-*
+          path: stage
+          merge-multiple: true
+
+      # ⚠️ channel 守卫：beta 构建产物里**必须有 beta.yml / beta-mac.yml**，
+      # 且**不能有 latest.yml / latest-mac.yml**。这一步是稳定渠道的隔离带 ——
+      # electron-builder 的 channel 命名若随版本升级改变行为，这里要响亮地红，
+      # 而不是让一个 beta 把稳定渠道的 latest.yml 覆盖掉（那是静默的坏发布）。
+      - name: 校验 channel 文件（稳定渠道隔离带）
+        env:
+          STAGE: stage
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          has_beta_win="$(find "$STAGE" -name 'beta.yml' -print -quit | wc -l | tr -d ' ')"
+          has_beta_mac="$(find "$STAGE" -name 'beta-mac.yml' -print -quit | wc -l | tr -d ' ')"
+          has_latest="$(find "$STAGE" \( -name 'latest.yml' -o -name 'latest-mac.yml' \) -print -quit | wc -l | tr -d ' ')"
+
+          if [[ "$has_beta_win" == "0" ]]; then
+            echo "::error::产物里没有 beta.yml —— NSIS 的 channel 文件没有跟随 prerelease 版本命名（electron-builder 行为变化？）。发布中止，稳定渠道不能被 beta 触碰。"
+            exit 1
+          fi
+          if [[ "$has_latest" != "0" ]]; then
+            found="$(find "$STAGE" \( -name 'latest.yml' -o -name 'latest-mac.yml' \) -print)"
+            echo "::error::beta 产物里出现了稳定渠道文件：${found} —— 会被稳定渠道用户读到，发布中止。"
+            exit 1
+          fi
+          echo "✓ channel 隔离成立：beta.yml 在（Windows: ${has_beta_win}），latest* 不在；macOS: ${has_beta_mac}"
+
+      # 打 tag 并创建 pre-release。tag 必须存在（--verify-tag），所以先推 tag。
+      # 幂等：重跑同一 run 时（网络重试）tag 已存在则跳过推送，release 已存在则 edit。
+      - name: 打 tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+            echo "tag ${TAG} 已在远端（重跑），不重复推"
+          else
+            git tag -a "$TAG" -m "Beta 渠道自动发布（main 快照）"
+            git push origin "$TAG"
+            echo "✓ 已推 ${TAG}"
+          fi
+
+      - name: 创建 Beta Release（pre-release）
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          notes="$(find stage -name 'beta-notes.md' -print -quit)"
+          if [[ -z "$notes" ]]; then
+            echo "::warning::没找到 beta 发布说明，用最简说明"
+            printf '### 🧪 Beta 渠道版本（自动构建）\n' > stage/beta-notes.md
+            notes="stage/beta-notes.md"
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release ${TAG} 已存在（重跑），改用 edit"
+            gh release edit "$TAG" --title "$TAG" --notes-file "$notes" --prerelease
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file "$notes" --prerelease --verify-tag
+            echo "✅ Beta Release ${TAG} 已创建（pre-release）"
+          fi
+
+      - name: 附上安装包
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          # 除说明外的所有产物（安装包 + channel 文件 + 溯源证明）
+          find stage -type f ! -name 'beta-notes.md' -print0 | xargs -0 gh release upload "$TAG" --clobber
+          echo "已附上产物："
+          find stage -type f ! -name 'beta-notes.md' -exec ls -lh {} \;
+
+      - name: 总结
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          {
+            echo "### 🧪 Beta [${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}) 已发布"
+            echo ""
+            echo "版本 \`${VERSION}\`（pre-release，channel 文件 beta.yml —— 稳定渠道不受影响）。"
+            echo "Beta 渠道用户将在下一次检查更新时收到。"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -280,6 +280,12 @@ const INVOKE = {
   getThemePreference: "settings:get-theme",
   /** 写外观档位。落盘（daemon）与 nativeTheme 生效（main）在一次 invoke 内完成。 */
   setThemePreference: "settings:set-theme",
+  /* ── 更新渠道与更新器（与 shared/ipc.js 手工同步的副本表） ────── */
+  getUpdateChannel: "settings:get-update-channel",
+  setUpdateChannel: "settings:set-update-channel",
+  getUpdateState: "updates:get-state",
+  checkForUpdates: "updates:check",
+  installUpdate: "updates:install",
   /* ── 记忆（spec: add-memory-system） ─────────────────────────── */
   /** 读记忆系统开关。未配置时 daemon 回 true（缺省开启）。 */
   getMemoryEnabled: "settings:get-memory-enabled",
@@ -470,6 +476,8 @@ const INVOKE = {
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */
   sessionEvent: "session:event",
+  /** 更新器事件流（updates:*）：检查中/有新版本/已是最新/下载进度/已就绪/出错。 */
+  updatesEvent: "updates:event",
   /**
    * 任务列表有变更（run 开始/结束、会话增删改），payload 为**完整最新列表**
    * （与 INVOKE.sessionList 同元素类型），renderer 收到直接替换本地 state。
@@ -580,6 +588,11 @@ const bridge = {
   // 落盘（daemon）与 nativeTheme.themeSource 生效（main）在同一次 invoke 里完成，
   // 渲染层不需要先 set 再 apply 的两步时序（见任务 design.md §2.3）。
   setThemePreference: (theme) => ipcRenderer.invoke(INVOKE.setThemePreference, theme),
+  getUpdateChannel: () => ipcRenderer.invoke(INVOKE.getUpdateChannel),
+  setUpdateChannel: (channel) => ipcRenderer.invoke(INVOKE.setUpdateChannel, channel),
+  getUpdateState: () => ipcRenderer.invoke(INVOKE.getUpdateState),
+  checkForUpdates: () => ipcRenderer.invoke(INVOKE.checkForUpdates),
+  installUpdate: () => ipcRenderer.invoke(INVOKE.installUpdate),
   getMemoryEnabled: () => ipcRenderer.invoke(INVOKE.getMemoryEnabled),
   setMemoryEnabled: (enabled) => ipcRenderer.invoke(INVOKE.setMemoryEnabled, enabled),
   getAgentTeamsEnabled: () => ipcRenderer.invoke(INVOKE.getAgentTeamsEnabled),
@@ -625,6 +638,7 @@ const bridge = {
   toggleAutomation: (id) => ipcRenderer.invoke(INVOKE.automationToggle, id),
   runAutomationNow: (id) => ipcRenderer.invoke(INVOKE.automationRunNow, id),
   onSessionEvent: (listener) => subscribe(PUSH.sessionEvent, listener),
+  onUpdateEvent: (listener) => subscribe(PUSH.updatesEvent, listener),
   onTaskListChanged: (listener) => subscribe(PUSH.taskListChanged, listener),
   onUiRequest: (listener) => subscribe(PUSH.uiRequest, listener),
   onPermissionRequest: (listener) => subscribe(PUSH.permissionRequest, listener),

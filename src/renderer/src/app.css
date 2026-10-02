@@ -1982,6 +1982,33 @@ textarea:focus-visible {
  *    此前三行待办是 14px/600/纯黑，比输入卡的 15px 占位符还重 ——
  *    抢重点的是清单而不是输入卡，这才是「整体没有视觉重点」的成因。
  */
+/* ── 设置·更新区（spec: update-channels）──────────────────────────
+ * 版本徽章与状态行只引用既有档位：徽章用 --bg-chip 静态底（无 hover 语义），
+ * 状态行 meta 档文字；「有新版本」态用 --ok 强调（真状态语义，非装饰）。 */
+.settings-section-badge {
+	flex: 0 0 auto;
+	padding: 0 var(--space-1);
+	border-radius: var(--radius-full);
+	background: var(--bg-chip);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	line-height: 18px;
+}
+
+.update-phase {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.update-phase[data-phase="available"],
+.update-phase[data-phase="downloaded"] {
+	color: var(--ok);
+}
+
+.update-phase[data-phase="error"] {
+	color: var(--warning);
+}
+
 /* ── 首页「最近会话」───────────────────────────────────────────────
  * 与 home-guide 同族：--bg-raised 次级面、无边框（§3.7）、行距 --space-3。
  * 行是 button（整行可点、键盘可达），hover 走唯一 hover 底色 --bg-hover。

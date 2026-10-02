@@ -303,6 +303,21 @@ const INVOKE = {
    * 渲染层 data-theme 的生效联动在 main / renderer（daemon 不碰 Electron API）。
    */
   setThemePreference: "settings:set-theme",
+  /* ── 更新渠道与更新器（spec: update-channels） ─────────────────── */
+  /** 读更新渠道偏好（"stable" | "beta"，缺省 stable——beta 是显式选择）。 */
+  getUpdateChannel: "settings:get-update-channel",
+  /** 写渠道偏好；daemon 落盘，main 侧同步重配 autoUpdater 并立即检查一次。 */
+  setUpdateChannel: "settings:set-update-channel",
+  /** 更新器状态：{ version, channel, state }。只读，不发网络请求。 */
+  getUpdateState: "updates:get-state",
+  /** 触发一次更新检查（结果经 updates:event 事件流回报）。 */
+  checkForUpdates: "updates:check",
+  /**
+   * 安装已下载的更新（quitAndInstall）。仅 Windows：macOS 未签名应用
+   * 不支持自动安装（Squirrel 限制），渲染层收到 { kind: "manual" } 后
+   * 引导用户到 Release 页手动下载。
+   */
+  installUpdate: "updates:install",
   /* ── 记忆（spec: add-memory-system） ─────────────────────────── */
   /** 读记忆系统开关。未配置时 daemon 回 true（缺省开启）。 */
   getMemoryEnabled: "settings:get-memory-enabled",

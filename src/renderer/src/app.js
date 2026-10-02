@@ -62117,6 +62117,126 @@ function SelectField({ value, options, onChange, disabled, ariaLabel, placeholde
     }
   );
 }
+/*
+ * 更新区（设置 → 通用，spec: update-channels）：渠道选择 + 当前版本 + 检查/安装。
+ * 状态机来自主进程 updates:event 的 state 投影（phase 全集见 updates.js）——
+ * 这里只做展示与触发，不持有更新状态（单一真源在主进程）。
+ * 平台差异如实降级：Windows 下载完显示「重启并安装」；macOS 永远不显示
+ * 安装按钮（未签名不支持自动安装），显示「到 Release 页下载」的引导。
+ */
+const UPDATE_CHANNEL_LABELS = {
+  stable: "稳定版",
+  beta: "Beta 尝鲜"
+};
+function UpdatesSection({ busy }) {
+  const [channel, setChannel] = reactExports.useState(void 0);
+  const [state, setState] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  const refresh = reactExports.useCallback(async () => {
+    try {
+      setChannel((await window.kami.getUpdateChannel()).channel);
+      setState(await window.kami.getUpdateState());
+      setError(void 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  // 主进程的事件流（检查进度/结果都在这）：state 投影直接替换。
+  reactExports.useEffect(() => {
+    const off = window.kami.onUpdateEvent((event) => {
+      if (event !== undefined && event.type === "state") setState(event);
+    });
+    return () => {
+      off?.();
+    };
+  }, []);
+  const change = (next) => {
+    const prev = channel;
+    if (prev === next) return;
+    setChannel(next);
+    void window.kami.setUpdateChannel(next).catch((e) => {
+      setChannel(prev);
+      void refresh();
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  };
+  const isMac = navigator.userAgent.includes("Macintosh");
+  const phase = state?.phase ?? "idle";
+  const phaseText = {
+    idle: "尚未检查",
+    checking: "正在检查…",
+    available: isMac ? "有新版本，请到发布页下载" : "发现新版本，下载中…",
+    "not-available": "已是最新",
+    downloading: `下载中 ${state?.percent ?? 0}%`,
+    downloaded: "已就绪，重启后安装",
+    error: "检查失败",
+    unavailable: "开发模式不启用更新器"
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "更新" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: `V${__APP_VERSION__}` })
+    ] }),
+    channel === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取更新设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "更新渠道" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            SelectField,
+            {
+              ariaLabel: "更新渠道",
+              value: channel,
+              disabled: busy,
+              options: Object.keys(UPDATE_CHANNEL_LABELS).map((option) => ({ value: option, label: UPDATE_CHANNEL_LABELS[option] })),
+              onChange: (value) => change(value)
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "检查更新" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "update-phase", "data-phase": phase, children: phaseText[phase] ?? phase })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "context-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            disabled: phase === "checking" || phase === "unavailable",
+            onClick: () => void window.kami.checkForUpdates(),
+            children: "立即检查"
+          }
+        ),
+        phase === "downloaded" && !isMac && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            onClick: () => void window.kami.installUpdate(),
+            children: "重启并安装"
+          }
+        ),
+        phase === "available" && isMac && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            onClick: () => window.open("https://github.com/liang-zhenxiang/zerowork/releases"),
+            children: "打开发布页"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: channel === "beta" ? "Beta 渠道：每次功能合并后自动构建的预览版，尝鲜但可能不稳。切回稳定版后，下一次稳定发布才会收到更新。" : "稳定版：只有维护者确认过的版本才会收到更新。需要更早的体验可切到 Beta 尝鲜。macOS 未签名，有新版本时引导到发布页手动下载。" })
+    ] })
+  ] });
+}
 const THEME_LABELS = {
   light: "浅色",
   dark: "深色",
@@ -62477,6 +62597,7 @@ function GeneralSection({ busy }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     // 外观放通用分组第一位：主题是最高频的个性化设置（同类产品均置顶）。
     /* @__PURE__ */ jsxRuntimeExports.jsx(AppearanceSection, { busy }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(UpdatesSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingLevelSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(WebSearchSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(DefaultWorkspaceSection, { busy }),
@@ -67892,6 +68013,22 @@ function App() {
    * 不在这里另写比较器。当前会话也在列表里——从首页点它等于「回到刚才那屏」，
    * 与侧栏行为一致，不特判剔除。
    */
+  /*
+   * 更新通知（spec: update-channels）：主进程静默检查发现新版本时 toast 一次。
+   * 只对 available 抖一次（checking/progress 不打扰）；点击直达设置的更新区
+   * （openSettings 落在「通用」分组——更新区就在那里）。
+   */
+  reactExports.useEffect(() => {
+    const off = window.kami.onUpdateEvent((event) => {
+      if (event?.type !== "state" || event.phase !== "available") return;
+      const version = event.availableVersion ?? "";
+      showToast(`发现新版本${version === "" ? "" : `（${version}）`}，到 设置 → 通用 → 更新 查看`);
+    });
+    return () => {
+      off?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const recentForHome = reactExports.useMemo(
     () => [...taskList ?? []].sort(byModifiedDesc).slice(0, 3),
     [taskList]

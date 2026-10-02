@@ -135,7 +135,14 @@ const MAIN_HANDLED = [
   INVOKE.workspaceReveal,
   // 主题档位：落盘（daemon）+ 生效（themeSource）要在同一次 invoke 里完成，
   // 不能走批量转发（那只落盘），所以拆到这里单独注册。
-  INVOKE.setThemePreference
+  INVOKE.setThemePreference,
+  // 更新渠道同款拆法：daemon 落盘 + autoUpdater 重配并立即检查。
+  INVOKE.setUpdateChannel,
+  // 更新器三通道是 main 直连（autoUpdater 住在主进程，daemon 不碰），
+  // 不进批量转发表——转发给 daemon 只会得到「未知通道」。
+  INVOKE.getUpdateState,
+  INVOKE.checkForUpdates,
+  INVOKE.installUpdate
 ];
 let window;
 let daemon;
@@ -297,6 +304,7 @@ function createWindow() {
   if (devServer !== void 0) void window.loadURL(devServer);
   else void window.loadFile(join(__dirname, "../renderer/index.html"));
 }
+import { initUpdates, switchUpdateChannel, disposeUpdates } from "./updates.js";
 function appendMainEventLog(record) {
   const override = process.env["ZEROWORK_CONFIG_DIR"];
   const configDir = override !== void 0 && override !== "" ? override : join(homedir(), ".zerowork");
@@ -373,6 +381,13 @@ function registerIpc() {
   ipcMain.handle(INVOKE.setThemePreference, async (_event, theme) => {
     await callDaemon(INVOKE.setThemePreference, [theme]);
     nativeTheme.themeSource = theme;
+    return null;
+  });
+  ipcMain.handle(INVOKE.setUpdateChannel, async (_event, channel) => {
+    await callDaemon(INVOKE.setUpdateChannel, [channel]);
+    // 落盘成功才切：非法值在 daemon 侧抛错，updater 不会被污染
+    // （与 themeSource 的「先落盘后生效」同一个纪律）。
+    switchUpdateChannel(channel);
     return null;
   });
   ipcMain.handle(INVOKE.openArtifact, async (_event, path) => {
@@ -505,6 +520,8 @@ if (!app.requestSingleInstanceLock()) {
       )
     );
     createWindow();
+    // 更新器：窗口就绪后初始化（事件转发需要 webContents；dev 环境内部自守卫）。
+    initUpdates(window);
     // 窗口控件符号色随主题（overlay 底全透明不变，见 createWindow 注释）。
     // macOS hiddenInset 的红绿灯是系统控件、自动适配深浅，不在此列。
     // shouldUseDarkColors 已综合 themeSource 覆写与 OS 偏好，是唯一判据。
@@ -529,6 +546,7 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== "darwin") app.quit();
   });
   app.on("before-quit", () => {
+    disposeUpdates();
     daemon?.kill();
   });
   app.on("will-quit", () => {

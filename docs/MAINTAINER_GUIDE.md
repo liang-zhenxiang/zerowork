@@ -624,6 +624,10 @@ gh pr merge <N> --squash --delete-branch
 
 ## 发布新版本
 
+> **本章现在描述的是「稳定渠道」的发布。** 项目还有一条 **Beta 渠道**
+> （main 合并即自动构建、无需人工操作），完整机制见下一节「双渠道更新」；
+> 两者的关系一句话：**beta 是自动的，稳定版是你手工触发的**。
+
 ### 什么时候发
 
 - 有新的用户可见功能
@@ -716,6 +720,62 @@ git switch main && git log --oneline -3 # 3. 确认 main 含归档提交
 git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z   # 4. 重推
 gh release view vX.Y.Z                 # 5. 验证正文开头是本轮主题句
 ```
+
+---
+
+## 双渠道更新：机制与操作
+
+### 机制总览
+
+```
+main 合并功能 PR（AI/维护者的日常开发）          你试用某个 beta 觉得 OK
+        │                                              │
+        ▼                                              ▼
+  Beta 发布流水线（自动）                      稳定发布流程（手工，见上一章）
+  版本 0.X.0-beta.N                            CHANGELOG 归档 + version + tag vX.Y.Z
+  pre-release + beta.yml                                │
+        │                                              ▼
+        └──────────► GitHub Releases ◄──── 稳定 Release + latest.yml
+                           │
+                           ▼
+        应用内更新器按用户设置拉对应渠道的 yml：
+        稳定版用户 ← latest.yml     Beta 用户 ← beta.yml
+```
+
+两条铁律（由流水线保证，不需要你记）：
+
+1. **beta 永远是 pre-release 且只带 beta.yml** —— 稳定渠道用户永远不会被 beta 触碰
+   （发布前有守卫步骤校验，channel 文件不对会红）
+2. **beta 版本号永远领先稳定版一个 minor**（稳定 0.3.0 → beta 落在 0.4.0 线）——
+   你发稳定版 0.4.0 时天然「覆盖」这条 beta 线，不需要「beta 转正」动作
+
+### 你要做的事
+
+**发 beta：什么都不用做。** 功能 PR 合并进 main 后，若 `CHANGELOG.md` 的
+`[Unreleased]` 段有内容，Beta 流水线（`.github/workflows/beta.yml`）自动构建并发布
+`v0.X.0-beta.N`（N 自动递增）。想主动补发（比如改了打包配置想验证），到
+Actions → **Beta 发布** → Run workflow 手动触发一次。
+
+**发稳定版：走上一章的既有流程。** 一句话版（细节都在上一章）：
+
+1. 觉得当前 beta（或 main 上的积累）够稳了
+2. 从最新 main 切 `chore/release-vX.Y.Z`，把 `[Unreleased]` 归档成 `[X.Y.Z] - 日期`、
+   `package.json` 的 version 改成同版本
+3. PR 合并后打 tag 推上去：`git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
+4. Release 流水线自动出稳定版（latest.yml 随安装包附上），稳定渠道用户
+   在下一次检查更新时收到通知
+
+**给 beta 用户的提示**：beta 用户切回稳定渠道后，要**等到下一个稳定版本发布**
+才会收到更新（beta 版本号领先稳定版，这是语义化版本的比较规则使然，不是 bug）——
+设置页的更新区文案里写了这一点。
+
+### 验证与排错
+
+- Beta 流水线的 run 在 Actions 里看；`[Unreleased]` 为空时会正常退出（绿色，不发布）
+- channel 守卫失败（产物里没有 beta.yml 或混入了 latest.yml）会让 run 变红——
+  这条红线**不要跳过**，它保护的是稳定渠道
+- 应用内更新器：设置 → 通用 → 更新；macOS 未签名不支持自动安装（只检查 + 通知 +
+  跳转下载页，Windows 才有「重启并安装」）——这是平台限制，如实呈现
 
 ---
 

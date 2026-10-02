@@ -99,6 +99,7 @@ const MAIN_PROCESS_REQUIRED = [
 	'@earendil-works/pi-coding-agent',
 	'@modelcontextprotocol/sdk',
 	'@mozilla/readability',
+	'electron-updater',
 	'jsonc-parser',
 	'jszip',
 	'koffi',
