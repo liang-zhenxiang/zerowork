@@ -101,16 +101,29 @@ const phaseKind = () =>
 // ── ① 更新区渲染 ─────────────────────────────────────────────
 await h.check("设置 → 通用有更新区（徽章/渠道/按钮）", async () => {
 	await openSettingsGeneral();
-	// SelectField 的出现依赖 getUpdateChannel 的 IPC 回包 + 渲染，CI 慢机上
-	// 15s 不够（#92 的 CI flake：「渠道选择器不在」——与 theme 套件修过的
-	// 同族问题）。放宽到 40s，与「等元素出现」的信号等待语义一致。
+	// SelectField 的出现依赖 getUpdateChannel 的 IPC 回包 + 渲染，CI 慢机上要等。
+	//
+	// 【2026-10-03 修】此前这里写的是「15s 不够 → 放宽到 40s」，但**超时值从来
+	// 没参与过判定**：谓词返回的是一个**对象字面量**，而 waitUntil 的判定是
+	// `if (value) return value`（harness.mjs）—— 对象恒真，于是它在第一次求值就
+	// 返回，40s 一格没用上，紧随其后的断言跑在尚未渲染完的 DOM 上。
+	// 症状是间歇性红（PR #112 的 CI：feed 就绪到 FAIL 相隔 4.5 秒），
+	// 而「加超时」治不了它 —— 那是给一个没生效的参数加倍。
+	//
+	// 正解是让**谓词真的能返回假值**：就绪才交出对象，否则返回 null。
+	// 谓词必须能返回假值，否则超时形同虚设 —— 这条已沉淀进 .trellis/spec/testing/。
 	const found = await waitUntil(
-		async () =>
-			await win.evaluate(() => ({
+		async () => {
+			const state = await win.evaluate(() => ({
 				badge: document.querySelector(".settings-section-badge")?.textContent ?? null,
 				channel: document.querySelector('[aria-label="更新渠道"]') !== null,
 				checkBtn: [...document.querySelectorAll("button")].some((b) => b.textContent === "立即检查"),
-			})),
+			}));
+			// 三项都到齐才算「更新区渲染完成」：徽章与选择器来自同一次 IPC 回包，
+			// 按钮是同一段 JSX 里的静态子节点 —— 以**最晚到达的那个**为准，
+			// 才不会出现「选择器到了、按钮还没到」这种半成品状态被当成就绪。
+			return state.channel && state.checkBtn ? state : null;
+		},
 		{ timeout: 40_000, interval: 400, desc: "更新区渲染" },
 	);
 	assert.match(String(found.badge), /^V\d+\.\d+\.\d+/, `版本徽章形态不对：${found.badge}`);

@@ -87,6 +87,37 @@ await waitUntil(() => mock.requests.length >= 2, { timeout: 30_000, desc: "mock 
 > 回合中的等待要用更直接的信号：等 mock 真的收到请求、等目标元素真的出现。
 > 导航后、启动后这类**空闲态**才适合 `waitForSettled()`。
 
+#### 谓词**必须能返回假值** —— 否则超时形同虚设
+
+`waitUntil` 的判定是 `if (value) return value`（`harness.mjs`）。
+**返回对象、数组、函数都是恒真**，于是它在第一次求值就返回 ——
+`timeout` 一格都用不上，而写法**读起来完全像一个正常的信号等待**。
+
+```js
+// ✗ 错的：谓词返回对象字面量 → 恒真 → 立刻返回，timeout 从不参与判定
+const state = await waitUntil(
+	async () => await win.evaluate(() => ({ badge: …, channel: …, checkBtn: … })),
+	{ timeout: 40_000, desc: "更新区渲染" },
+);
+
+// ✓ 对的：就绪才交出对象，否则返回假值
+const state = await waitUntil(async () => {
+	const s = await win.evaluate(() => ({ badge: …, channel: …, checkBtn: … }));
+	return s.channel && s.checkBtn ? s : null;
+}, { timeout: 40_000, desc: "更新区渲染" });
+```
+
+**这不是假想的风险**（2026-10-03，`gui-updates`）：那条等待从写下起就没生效过，
+CI 上间歇性红。日志时间戳显示「feed 就绪 → FAIL」只隔 **4.5 秒**，而代码写着 40 秒超时 ——
+红灯不是等超时，是根本没等。
+
+更值得记的是**它被「修」错过一次**：上一轮把 15s 放宽到 40s 并写下
+「放宽到 40s 就好了」——那是**给一个没生效的参数加倍**，治不了任何东西，
+还留下了一条错误的因果，让人下次继续用加超时的办法去治同类问题。
+
+> 判断方法：**把谓词单独拿出来问一句「它什么时候返回假？」** 答不上来，就是在裸奔。
+> 与「用 `waitForTimeout` 盖住竞态」同族 —— 都属于「看起来在等，其实没等」。
+
 ### 2. 先截图、后断言
 
 截图要放在可能失败的断言**之前**，失败时才有现场。这一点**真实踩过**：
