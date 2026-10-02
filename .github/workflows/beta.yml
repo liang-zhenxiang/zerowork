@@ -163,10 +163,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: 取回发布说明与安装包
+      # download-artifact 的 pattern 是**单个 glob**，不认 `|` 或语法——
+      # 首发实测把 `beta-notes|installer-*` 当字面量匹配，一个都没下来，
+      # 后续 find stage 直接 No such file or directory。分两步各取各的。
+      - name: 取回发布说明
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: beta-notes|installer-*
+          name: beta-notes
+          path: stage
+      - name: 取回安装包
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: installer-*
           path: stage
           merge-multiple: true
 
@@ -180,6 +188,11 @@ jobs:
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
+
+          if [[ ! -d "$STAGE" ]]; then
+            echo "::error::${STAGE} 目录不存在——artifact 没取回来（看上面 download 步骤）"
+            exit 1
+          fi
 
           has_beta_win="$(find "$STAGE" -name 'beta.yml' -print -quit | wc -l | tr -d ' ')"
           has_beta_mac="$(find "$STAGE" -name 'beta-mac.yml' -print -quit | wc -l | tr -d ' ')"
