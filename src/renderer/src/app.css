@@ -1445,6 +1445,24 @@ textarea:focus-visible {
 	border-radius: var(--radius-sm);
 }
 
+/* ── 当前工作空间组（issue #73：置顶 + 徽标）──────────────────────
+ * 「当前」由三样一起承担：置顶（排序）、文字徽标、组名主色——
+ * 位置与文字独立可读（§7.6），颜色只是强调不是唯一信号。 */
+.space-group-current .space-group-name {
+	color: var(--text);
+}
+
+.space-group-badge {
+	flex: 0 0 auto;
+	padding: 0 var(--space-1);
+	border-radius: var(--radius-full);
+	background: var(--bg-chip);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	/* 与组名同基线，不抢折叠箭头的位置（右侧留白由 header-main 的 gap 承担）。 */
+	line-height: 18px;
+}
+
 .space-group-header:hover {
 	background: var(--bg-hover);
 }
