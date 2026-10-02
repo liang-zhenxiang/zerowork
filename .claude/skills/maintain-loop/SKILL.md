@@ -215,7 +215,17 @@ print('\n'.join(bad) if bad else 'OK')
 
 ---
 
-## 五、发布
+## 五、发布（双渠道）
+
+本项目有**两条发布渠道**，发布动作完全不同（机制全景图与排错见
+`docs/MAINTAINER_GUIDE.md` 的「双渠道更新」章，这里是可以直接照做的操作序列）：
+
+| 渠道 | 触发 | 什么时候发 |
+| --- | --- | --- |
+| **Beta**（`vX.Y.0-beta.N`） | **自动**：main 合并且 `[Unreleased]` 有内容 | AI 的功能开发完、合并即发，零操作 |
+| **稳定**（`vX.Y.Z`） | **人工**：维护者（或用户明说「帮我发布正式版」）走下面五·二 | 用户试用觉得 OK 了 |
+
+### 五·二、发稳定版（用户说「帮我发布正式版 / 发个稳定版」时的完整序列）
 
 1. 从最新 main 切 `chore/release-vX.Y.Z` 分支。
 2. 把 `CHANGELOG.md` 的 `[Unreleased]` 归入 `[X.Y.Z] - 日期`，段首加一句话概述本轮主题；
@@ -229,6 +239,46 @@ print('\n'.join(bad) if bad else 'OK')
 7. `release.yml` 自动生成三段式发布说明（AI 摘要 + CHANGELOG 手写段 + PR 清单与对比链接）
    并附上安装包。
 8. 验证：`gh release view vX.Y.Z` 确认内容齐全、`gh run list --workflow=release.yml` 成功。
+
+### 五·一、发 Beta（默认零操作；主动补发与验证）
+
+**日常零操作**：功能 PR 合并进 main 且 `CHANGELOG.md` 的 `[Unreleased]` 非空，
+`beta.yml` 自动构建 `v<minor+1>.0.0-beta.<N>`（版本号由
+`scripts/next-beta-version.mjs` 幂等计算；产物版本经构建参数覆盖，
+**不改仓库的 package.json**）并发布为 **pre-release，只带 `beta.yml`**——
+稳定渠道用户不受影响。
+
+**主动补发**（验证打包配置 / 想提前尝鲜）：
+
+```bash
+gh workflow run beta.yml            # 或 Actions 页面手动 Run workflow
+gh run list --workflow=beta.yml --limit 1   # 盯进度
+gh release view "v$(node scripts/next-beta-version.mjs --with-releases "$(gh release list --limit 100 --json tagName)")"
+```
+
+**验证三件**（发布后）：
+
+1. `gh release view v0.X.0-beta.N` → 标记 **Pre-release**、附带安装包与 `beta.yml`
+2. Release 资产里**没有** `latest.yml`（channel 守卫步骤会拦，但复核无害）
+3. 应用侧：设置 → 通用 → 更新 → 切「Beta 尝鲜」→ 立即检查 → 应发现该版本
+
+**已踩过的坑（动 beta.yml / build-installers.yml 前先读）**：
+
+- **Windows runner 的默认 shell 是 PowerShell**——`run: |` 里的 `[[ ]]` 直接
+  解析失败（beta 首发实测：`ParserError: Missing '(' after 'if'`）。打包 step
+  必须 `shell: bash`。
+- **chord 的 esbuild 是生产依赖**，其全平台二进制（27 个目录 262 MB）会被
+  electron-builder 装进产物——`afterPack: scripts/after-pack-trim.cjs` 按打包
+  目标裁剪。动依赖后跑 `npm run dist:dir && npm run check:package-size` 复核。
+- **版本号一致性校验只属于稳定渠道**：beta 绕开 `check-release-version`
+  （它的语义是 tag=CHANGELOG=package.json，beta 三者天然不一致——beta 不归档
+  CHANGELOG、不改 version）。别「顺手统一」。
+
+### 五·二·附：稳定版发布后的用户视角核对
+
+发布完成 ≠ 用户能收到。最后一步从用户视角看一遍：
+`gh release view vX.Y.Z` 的首次运行指引在**最前**、三段齐全、安装包在列——
+应用内（装了正式版的机器）下次检查更新应弹出 vX.Y.Z 通知。
 
 ### 发布幂等
 
