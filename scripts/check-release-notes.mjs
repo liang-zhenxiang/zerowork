@@ -89,6 +89,10 @@ const EN_REQUIREMENTS = [
 ];
 
 const SURFACES = [
+	// 发布说明的指引正文（两条发布流水线共用）。**必须在这里**：只校验
+	// release.yml 的文本会漏掉它 —— 2026-10-02 就发现「文案在 yml 里、
+	// 却从未随任何一次发布出去」这种「校验通过但用户看不到」的形态。
+	{ file: 'docs/release-notice.md', label: '发布说明的首次运行指引', requirements: ZH_REQUIREMENTS },
 	{ file: 'README.md', label: 'README（中文）', requirements: ZH_REQUIREMENTS },
 	{ file: 'README.en.md', label: 'README（英文版）', requirements: EN_REQUIREMENTS },
 	{ file: 'docs/USAGE.md', label: '使用指南', requirements: ZH_REQUIREMENTS },
@@ -147,10 +151,24 @@ function extractStepScript(yml, stepName) {
  */
 function extractAppendedBlocks(script) {
 	const lines = script.split('\n');
-	const opener = /cat\s+>>\s*release-notes\.md\s*<<\s*'?"?([A-Za-z_][A-Za-z0-9_]*)'?"?/;
+	// 两种写法都认（指引正文的落点可能演化，但断言不该因此失效）：
+	//   ① heredoc：cat >> release-notes.md <<'NOTICE' … NOTICE
+	//   ② 引用文件：cat docs/release-notice.md >> release-notes.md
+	//      —— 2026-10-02 起用这种：指引抽成单一真源，beta 与稳定两条流水线共用，
+	//      避免「各写一份 → 其中一份漏掉整段」的漂移（真的发生过）。
+	const heredocOpener = /cat\s+>>\s*release-notes\.md\s*<<\s*'?"?([A-Za-z_][A-Za-z0-9_]*)'?"?/;
+	const fileOpener = /cat\s+(\S+\.md)\s*>>\s*release-notes\.md/;
 	const blocks = [];
 	for (let i = 0; i < lines.length; i += 1) {
-		const match = lines[i].match(opener);
+		const fromFile = lines[i].match(fileOpener);
+		if (fromFile) {
+			// 引用式：正文以**被引用的那个文件**为准（读不到就交给调用方报错）
+			const rel = fromFile[1];
+			const abs = path.join(ROOT, rel);
+			blocks.push({ at: i, body: normalize(existsSync(abs) ? readFileSync(abs, 'utf8') : ''), source: rel });
+			continue;
+		}
+		const match = lines[i].match(heredocOpener);
 		if (!match) continue;
 		const delimiter = match[1];
 		const body = [];
@@ -193,8 +211,8 @@ function checkReleaseNotes(problems) {
 	const blocks = extractAppendedBlocks(script);
 	if (blocks.length === 0) {
 		problems.push(
-			`${RELEASE_NOTES_FILE}：「${RELEASE_NOTES_STEP}」里没有写进 release-notes.md 的指引段落 —— ` +
-				'首次运行指引被删掉了',
+			`${RELEASE_NOTES_FILE}：「${RELEASE_NOTES_STEP}」里没有写�� release-notes.md 的指引段落 —— ` +
+				'首次运行指引被删掉了（也可能是它引用的 .md 文件读不到）',
 		);
 		return { checked: false, summary: '' };
 	}

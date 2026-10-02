@@ -104,11 +104,13 @@ extraResources:
 # ---------------------------------------------------------------------------
 beforePack: scripts/before-pack.cjs
 
-# afterPack：裁剪 @esbuild 的跨平台二进制（只留打包目标平台那一个）。
-# 为什么在钩子里做而不是 files 排除：files 规则是静态的，做不到
+# afterPack：① 裁剪 @esbuild 的跨平台二进制（只留打包目标平台那一个）
+# ② macOS 整体 ad-hoc 重签（让 arm64 包从「已损坏」变回可右键打开的
+#    「未验证开发者」——理由见 mac 段里的订正注释）。
+# 为什么裁剪要在钩子里做而不是 files 排除：files 规则是静态的，做不到
 # 「mac 包留 darwin-*、win 包留 win32-*」这种按目标平台的条件排除。
-# 背景与映射表见 scripts/after-pack-trim.cjs 的头注释。
-afterPack: scripts/after-pack-trim.cjs
+# 两个职责的完整背景见 scripts/after-pack.cjs 的头注释。
+afterPack: scripts/after-pack.cjs
 
 # ---------------------------------------------------------------------------
 # 不用 asar
@@ -141,11 +143,17 @@ mac:
   # （见 release.yml 组装发布说明时的开头那段提示；三处指引的落点与
   # 「为什么不去申请证书」的结论写在 .trellis/tasks/10-01-first-run-guidance/）。
   #
-  # 顺带说明 `Identifier=Electron`：那不是本配置写错的标识，而是**上游 Electron
-  # 预编译二进制自带的 linker-signed adhoc 签名**残留 —— `identity: null` 意味着
-  # electron-builder 全程不做签名，于是那个签名原样留了下来（所以 `Info.plist=not bound`）。
-  # 实测 `codesign --force --sign - --identifier <正确标识>` 能把它改对，
-  # 但那**不影响 Gatekeeper 判定**（判据是证书链与公证票据），没有意义。
+  # ⚠️ `identity: null` 的真实代价（2026-10-02 用户实测后订正，此前这里的判断是错的）：
+  # 不做签名 → 上游 Electron 的 linker-signed 签名残留 → 我们的构建往 bundle 里
+  # 加了 out/、resources/、node_modules/ 之后，那份签名的资源清单与实际不符 →
+  # macOS 判定「签名损坏」，arm64 包双击直接弹「已损坏，移到废纸篓」，**且系统
+  # 设置里没有「仍要打开」按钮**（那是「无法验证开发者」才有的）。Intel 包因走
+  # Rosetta 躲过这条，所以现象上「Intel 能开、arm64 不能」（Intel 慢是另一回事）。
+  #
+  # 因此 `afterPack: scripts/after-pack.cjs` 里做了**整体 ad-hoc 重签**：
+  # 判定随之变成正常的「未验证开发者」→ 右键「打开」可用。ad-hoc 不提供身份
+  # 证明（仍会被 Gatekeeper 拦一次），它的作用只是让 bundle 结构自洽——
+  # 而 Apple 芯片**强制要求 arm64 二进制签名自洽才肯执行**。
   # 完整实测记录见 docs/MAINTAINER_GUIDE.md 的「安装包签名」一节。
   identity: null
   hardenedRuntime: false

@@ -115,6 +115,11 @@ jobs:
               echo "这是**自动构建的预览版**：main 分支上合并的功能原样打包，未经稳定版发布前的完整确认。"
               echo "想尝鲜的用户在 ZeroWork 的 **设置 → 通用 → 更新** 里把渠道切到 **Beta** 即可收到。"
               echo ""
+              # 首次运行指引与稳定版**同一份内容**（单一真源 docs/release-notice.md）——
+              # beta 用户同样从这一页下载，此前这里完全没有指引，装完打不开时无从下手。
+              cat docs/release-notice.md
+              echo ""
+              echo ""
               echo "---"
               echo ""
               # [Unreleased] 段原文（awk 与 release.yml 的提取同款思路，但带标题）
