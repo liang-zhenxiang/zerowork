@@ -18,10 +18,16 @@
  *
  * ## 什么时候该重跑
  *
- * **界面发生明显变化时**（首页/会话/命令面板的排版、配色、关键文案改动）。
+ * **界面发生明显变化时**（首页/会话/命令面板的排版、配色、关键文案改动），
+ * 以及**版本号 bump 之后**（侧栏品牌行会把仓库版本号拍进去）。
  * 跑完要提交的：`docs/images/` 下这四张 PNG。**产物契约由脚本自己断言** ——
- * 四张都存在、宽度正确、不是纯色（`imageStats` 的 `stdDev` / `distinctColors`），
- * 任一条不成立就非零退出。一张全白/全黑的图被静默提交比不产出更糟。
+ * 四张都存在、宽度正确、不是纯色（`imageStats` 的 `stdDev` / `distinctColors`）、
+ * 彼此不同、总重不超标，任一条不成立就非零退出。一张全白/全黑的图被静默提交比不产出更糟。
+ *
+ * ⚠️ **重跑不是逐字节可复现的**：界面里有真实时间戳（会话卡上的最后活动时间、
+ * 侧栏任务行的时间），所以两次运行的 PNG 会有几字节到几十字节的差。
+ * 这不是缺陷，是「拍的是真机」的代价 —— 不要把它当成回归信号，
+ * 也不要把这四张图设成固定的像素基线（那会与「门面图应该随设计变化」的目的相反）。
  *
  * ## 边界：会拍到什么、不会拍到什么
  *
@@ -40,7 +46,7 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createHarness, waitUntil, ROOT } from "../tests/e2e/lib/harness.mjs";
 import { decodePng, imageStats, downsample, diffGrids } from "../tests/e2e/lib/png.mjs";
@@ -238,8 +244,13 @@ const shots = [];
 async function shoot(name) {
 	const file = resolve(OUT_DIR, name);
 	await win.screenshot({ path: file, scale: "css" });
-	const bytes = statSync(file).size;
-	const img = decodePng(readFileSync(file));
+	// 读一次、量一次，**不要 statSync 之后再 readFileSync**：那是典型的
+	// TOCTOU（先探测存在/大小、再按探测结果去读），CodeQL 的 js/file-system-race
+	// 会按高危报它（本仓库 src/main/index.js:501 有一条同规则的既有告警）。
+	// 直接读成 Buffer，长度就是字节数 —— 顺带少一次系统调用。
+	const buf = readFileSync(file);
+	const bytes = buf.length;
+	const img = decodePng(buf);
 	const stats = imageStats(img);
 	shots.push({ name, bytes, stats, grid: downsample(img) });
 	console.log(
