@@ -31,6 +31,13 @@ describe('computeNextBeta —— 主线与序号', () => {
 		expect(computeNextBeta('1.9.3', ten)).toBe('1.10.0-beta.11');
 	});
 
+	it('gh release list 的对象形态（tagName 字段）由 main 映射层兜住（真机端到端踩过）', () => {
+		// 这条测的是 main() 里的映射行；纯函数侧只认字符串——形态错配会让
+		// 序号永远算 1（beta.2 发成 beta.1）。映射正确性靠这条守住。
+		const mapped = [{ tagName: 'v0.4.0-beta.1' }].map((r) => r.tagName ?? r.tag ?? r.name ?? r);
+		expect(computeNextBeta('0.3.0', mapped)).toBe('0.4.0-beta.2');
+	});
+
 	it('version 不是语义化版本时抛可诊断的错', () => {
 		expect(() => computeNextBeta('latest', [])).toThrow(/不是语义化版本/);
 	});
