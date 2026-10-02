@@ -31,6 +31,11 @@ Token 真源有两块：`:root`（亮色基准）与 `[data-theme="dark"]`（暗
 这条由 `scripts/check-theme-tokens.mjs`（`npm run check:theme-tokens`，已收编 lint:all）守护：
 加新颜色 token 忘配暗色会在静态检查就红，不用等暗色截图。
 
+> **这个检查只认「同名 token 对」——它看不见「压根没走 token 的字面量」。**
+> 首页输入卡外槽的渐变（`--composer-slot-bg`）就曾是这样一处逃逸：亮色块用裸字面量、
+> 暗色块漏配，深色下在输入卡外圈炸出一圈发光边，静态检查却全绿。2026-10-03 把它收进
+> token 才拉回覆盖面。检测「字面量逃逸」是另一件事，见 issue #105。
+
 驱动方式是**单一路线**：渲染层挂载前同步设 `documentElement` 的 `data-theme` 属性
 （`app.js` 的 `initTheme`；三档 `light` / `dark` / `system`，`system` 档由 JS 求值成显式的
 `light` / `dark`——app.css **没有** prefers-color-scheme 版暗色块，widget 的 CSS 才有双路）。
@@ -271,6 +276,10 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 打字机与光标、无限循环动效（转圈 / 呼吸点 / 扫光）、一次性入场动画、
 以及沿袭下来的 `.turn-nav` 过渡豁免。
 
+**关的是「动画」还是「过渡」要把准**：第 ③ 组只写 `animation: none`，**关不到
+`transition`** —— 凡是用过渡做的入场（如 `.case-cover img` 的封面淡入）必须在
+第 ④ 组（`transition: none`）单独列一行，别以为进了这一块就自动被关掉。
+
 **位置是硬约束，不是排版偏好**：`@media` 不提高优先级，同级选择器靠源码顺序裁决；
 动画宿主的声明遍布全文（`.toast` / `.pop-menu` / `.questionnaire-card` …），
 规则块放在中段会被它们盖掉。新增动画时**去那里补一行**。
@@ -285,6 +294,9 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 > 退场那条选择器带 `[data-closing]` 属性，特异性高于本块的 `.command-palette`，
 > 因此**单列一行**才关得掉（关停后元素停在基础态 = 正常可见，随后按 `--dur-fast`
 > 的定时器卸载，等于直接消失 —— 对 reduced-motion 是正确形态）。
+>
+> 案例封面淡入（2026-10-03）：`.case-cover img` 的 `opacity` 过渡**不是动画**，
+> 加进第 ④ 组（`transition: none`）—— 关掉后实图直接出现，不再从兜底暗底淡入。
 
 **关动画 ≠ 回到「正常样子」。** `animation: none` 只是让元素回到**基础态**，
 而基础态不一定是它本该显示的样子。**每关一个动画都要问一句：关掉之后元素停在

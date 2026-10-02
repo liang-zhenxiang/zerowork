@@ -15858,7 +15858,11 @@ function CaseCover({
   icon: Icon
 }) {
   const [failed, setFailed] = reactExports.useState(false);
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover", children: failed ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-fallback", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 28 }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: cover, alt: "", loading: "lazy", onError: () => setFailed(true) }) });
+  // 实图加载完成 → 淡入。CSS 的 opacity 过渡需要一个触发点，否则是惰性的：
+  // 基础态 opacity:0（压在 .case-cover 的 --bg-raised 兜底底上），onLoad 加
+  // .case-cover-img-loaded 才过渡到 1，消除「暗底 ↔ 亮图」的硬切。
+  const [loaded, setLoaded] = reactExports.useState(false);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover", children: failed ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-fallback", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 28 }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: cover, alt: "", loading: "lazy", className: loaded ? "case-cover-img-loaded" : void 0, onLoad: () => setLoaded(true), onError: () => setFailed(true) }) });
 }
 function HomeView({
   ready,

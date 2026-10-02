@@ -53,7 +53,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "npm run test:gui && npm run test:gui:model && npm run test:gui:loop && npm run test:gui:real && npm run test:gui:doc && npm run test:gui:docx && npm run test:gui:skill && npm run test:gui:cmd && npm run test:gui:auto && npm run test:gui:branch && npm run test:gui:palette",
-    "test:gui": "npm run test:gui:smoke && npm run test:gui:sections && npm run test:gui:onboarding && npm run test:gui:settings && npm run test:gui:theme && npm run test:gui:recent && npm run test:gui:focus && npm run test:gui:space-pin && npm run test:gui:formula && npm run test:gui:updates && npm run test:gui:ipc && npm run test:gui:bridge && npm run test:gui:state && npm run test:gui:dialog && npm run test:gui:widget && npm run test:gui:artifact && npm run test:gui:subagent && npm run test:gui:team && npm run test:gui:preview && npm run test:gui:palette && npm run test:gui:modal-backdrop",
+    "test:gui": "npm run test:gui:smoke && npm run test:gui:sections && npm run test:gui:onboarding && npm run test:gui:settings && npm run test:gui:theme && npm run test:gui:recent && npm run test:gui:focus && npm run test:gui:space-pin && npm run test:gui:formula && npm run test:gui:updates && npm run test:gui:ipc && npm run test:gui:bridge && npm run test:gui:state && npm run test:gui:dialog && npm run test:gui:widget && npm run test:gui:artifact && npm run test:gui:subagent && npm run test:gui:team && npm run test:gui:preview && npm run test:gui:palette && npm run test:gui:modal-backdrop && npm run test:gui:dark-polish",
     "test:gui:smoke": "node tests/e2e/gui-smoke.mjs",
     "test:gui:sections": "node tests/e2e/gui-sections.mjs",
     "test:gui:onboarding": "node tests/e2e/onboarding.mjs",
@@ -98,7 +98,8 @@
     "test:gui:team": "node tests/e2e/team-create.mjs",
     "test:gui:preview": "node tests/e2e/preview-renderers.mjs",
     "test:gui:palette": "node tests/e2e/command-palette.mjs",
-    "test:gui:modal-backdrop": "node tests/e2e/modal-backdrop.mjs"
+    "test:gui:modal-backdrop": "node tests/e2e/modal-backdrop.mjs",
+    "test:gui:dark-polish": "node tests/e2e/dark-polish.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",

@@ -560,6 +560,13 @@
 	                                     不用 --bg-hover 顶替：那是 hover 专用档（§2.2），
 	                                     气泡里的胶囊是只读的、没有 hover 语义。 */
 	--border: #e6e6e6;                /* 唯一常规边框：卡片、弹层、分隔线 */
+	--composer-slot-bg: linear-gradient(180deg, #f0f0f0 0%, #f5f5f5 100%);
+		/* 首页输入卡外槽的渐变底（灰白渐变，白卡坐在这一层浅灰槽上）。
+		   语义是「比主背景深一档的凹槽」；暗色块用 --bg-raised → --bg 沿用同一条关系。
+		   【2026-10-03 收进 token】此前是裸字面量，暗色主题落地时漏配 ——
+		   深色下输入卡外圈炸出一圈浅灰发光边，与 §3.9「唯一的视觉重点」相反。
+		   收进 token 后 check:theme-tokens 自动接管这一处（它只认同名 token 对），
+		   以后谁把暗色块的 --composer-slot-bg 删掉会静态报红。 */
 
 	/* ── 主色（黑按钮体系）────────────────────────── */
 	--primary: rgba(0, 0, 0, 0.9);        /* 主按钮/主选中底：发送键、主操作 */
@@ -711,6 +718,11 @@
 	--bg-chip: rgba(255, 255, 255, 0.10);  /* 同亮色的关系：比 --bg-hover 略实一点
 	                                          。 */
 	--border: rgba(255, 255, 255, 0.12);
+
+	/* 输入卡外槽暗色版：与亮色同语义（比主背景凹一档的槽），两端取既有抬升面/底色。
+	   暗色下不能再往深走（--bg 已近黑），改由「抬升面 → 底」表达凹槽与卡片的差；
+	   不新造字面量 —— --bg-raised(#26262a) 与 --bg(#1c1c1e) 现成。 */
+	--composer-slot-bg: linear-gradient(180deg, var(--bg-raised) 0%, var(--bg) 100%);
 
 	--primary: rgba(255, 255, 255, 0.9);
 	--primary-hover: rgba(255, 255, 255, 0.78);
@@ -2150,10 +2162,16 @@ textarea:focus-visible {
    而 #ebebeb 是另一个 token
    该槽位。后果是输入卡周围那圈灰带
    比 深一档 —— 输入卡是首页视觉焦点，这层灰直接影响整页的"轻重"。
-   现按 token 原值改回 #f0f0f0；仍不入 token 档（它是 场景原值，
-   docs/DESIGN.md §2.7 已登记同类例外）。 */
+   现按 token 原值改回 #f0f0f0。
+
+   【2026-10-03 收进 token】此前注释写着「仍不入 token 档（场景原值，
+   docs/DESIGN.md §2.7 登记同类例外）」—— 那个决定做于**暗色主题存在之前**，
+   单主题时代「不入档」是合理的。暗色主题落地后它是漏配：暗色块没有同名
+   覆盖，深色下这层亮色渐变在输入卡外圈炸出一圈发光边，与 §3.9「唯一的
+   视觉重点」完全相反。现改为引用 `--composer-slot-bg`（亮/暗两块各定义），
+   于是 check:theme-tokens 的「同名 token 对」检查**自动接管**这一处。 */
 .composer-slot {
-	background: linear-gradient(180deg, #f0f0f0 0%, #f5f5f5 100%);
+	background: var(--composer-slot-bg);
 	border-radius: 24px;
 	padding: 2px 2px var(--space-1);
 }
@@ -3242,6 +3260,35 @@ textarea:focus-visible {
 	height: 100%;
 	object-fit: cover;
 	border-radius: inherit;
+	/* 加载完成前不显像素，先压在 .case-cover 的 --bg-raised 兜底底上；加载完成由
+	   CaseCover 的 onLoad 加 .case-cover-img-loaded 再淡入 —— 消除「暗底 ↔ 亮图」
+	   的硬切（§5.8）。opacity 是 §5.1 允许的视觉属性，不触发布局、不占受控例外。
+	   过渡走既有 --dur-fast(--dur 三档) + --ease-standard(§3.2 两条曲线之一)，
+	   不另立时长 —— 过渡是**过渡**不是动画，reduced-motion 下在第 ④ 组单独关。
+
+	   ⚠️ **基础态 opacity:0 是一条硬依赖，不是无害的动画起点**：它靠
+	   CaseCover 的 onLoad 加 .case-cover-img-loaded 才可见。**若 onLoad 不触发
+	   （最典型是缓存命中、事件在 React 挂上监听前就已过去），封面会停在不可见
+	   —— 四张案例卡全空白，比原先的「闪一下」更糟。**
+	   在本应用（Electron/Chromium、客户端渲染、无 SSR）下实测这条依赖可靠：
+	   首次加载 + 两次整页 reload（走 HTTP 缓存，即上述最可疑的路径）共 3 轮，
+	   4/4 张图 computed opacity 均为 1、complete=true、带 loaded 类 —— 故**刻意
+	   不加** img.complete 兜底或定时器补丁（那些是为了掩盖不可靠而引入的复杂度）。
+	   日后若换渲染方式（如引入 SSR/水合），必须重新验证这条。 */
+	opacity: 0;
+	transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+.case-cover img.case-cover-img-loaded {
+	opacity: 1;
+}
+
+/* 深色下把实拍封面收进暗环境：深色首屏原先最亮的四块矩形是别人的实拍图，
+   视线先被图片吸走再回到输入卡，与 §3.9 的盒子预算反向。只压亮度、略降饱和
+   （纯降亮度会让画面发灰），不动 cases.json / 不动 CDN / 不碰授权面（另见 #104）。
+   用 filter 而不是给卡片加一层遮罩盒子 —— 加盒子违反 §3.9 且牵动案例槽几何。 */
+[data-theme="dark"] .case-cover img {
+	filter: brightness(0.86) saturate(0.94);
 }
 
 /* 图标兜底：铺满封面位并居中（图片加载失败时显示）。 */
@@ -11383,9 +11430,12 @@ button.agent-row {
 		animation: none;
 	}
 
-	/* ④ 沿袭既有行为：轨道刻度与预览卡只关过渡（本块此前放在中段） */
+	/* ④ 沿袭既有行为：轨道刻度与预览卡只关过渡（本块此前放在中段）。
+	   案例封面淡入（2026-10-03）也是过渡、不是动画 —— 上面 ③ 关的是 animation，
+	   关不到它，必须在这里单列：关掉后实图直接出现，不再从兜底暗底淡入。 */
 	.turn-nav-mark::before,
-	.turn-nav-preview {
+	.turn-nav-preview,
+	.case-cover img {
 		transition: none;
 	}
 }

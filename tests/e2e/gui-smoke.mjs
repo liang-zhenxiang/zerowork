@@ -11,6 +11,11 @@
  * 这里同时演示本仓库 e2e 的两条纪律：
  *   ① 骨架全部来自 `./lib/harness.mjs`，本文件只写"驱动界面 + 断言"
  *   ② **先截图、后断言** —— 断言失败时截图里才有出问题的那一屏
+ *
+ * 反向验证记录（2026-10-03，首页主列垂直节奏那条）：把 `.capability-row` 的
+ * `margin-bottom` 由 `--space-6` 改回 `--space-4`（24 → 12），重跑本文件 →
+ * 「首页主列垂直节奏」这条变红、其余不受影响；改回后重新全绿。这条断言守的是
+ * docs/DESIGN.md §3.8 记载的事故：分组变了而间距没跟着分。
  */
 import assert from "node:assert/strict";
 import { createHarness } from "./lib/harness.mjs";
@@ -69,6 +74,35 @@ await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.len
 // 首屏是全新用户看到的第一眼，最该有像素级证据。
 // 断言「不是一片纯色」能抓住白屏、整块错误边界、崩溃后残留的空壳。
 await h.shoot("home");
+
+// ── 首页主列垂直节奏（docs/DESIGN.md §3.8）────────────────────────
+//
+// 把只写在规范里的约定变成断言：`.home-title` → `.mode-tabs` → `.capability-row`
+// → `.home-guide` 的 `margin-bottom` 必须是 12 : 12 : 24 : 16。
+//
+// **写死数值，不读 token** —— 读 token 就与实现同义反复：把 token 值改坏、
+// 或把其中一个 margin 接到别的档，断言都测不出来。这里守的是 §3.8 记载的事故：
+// **分组变了而间距没跟着分**（那段 64px 曾是给「胶囊→输入卡」标的，chip 行插进
+// 来之后 64 从没被重新分配，于是主列最大的一段空白落到了两个本该挨着的控件之间）。
+const rhythm = await win.evaluate(() => {
+	const read = (sel) => {
+		const el = document.querySelector(sel);
+		return el === null ? null : getComputedStyle(el).marginBottom;
+	};
+	return {
+		homeTitle: read(".home-title"),
+		modeTabs: read(".mode-tabs"),
+		capabilityRow: read(".capability-row"),
+		homeGuide: read(".home-guide"),
+	};
+});
+
+await h.check("首页主列垂直节奏 = 12 / 12 / 24 / 16（docs/DESIGN.md §3.8）", () => {
+	assert.equal(rhythm.homeTitle, "12px", `标题底 .home-title=${rhythm.homeTitle}（期望 12 = --space-4）`);
+	assert.equal(rhythm.modeTabs, "12px", `场景胶囊底 .mode-tabs=${rhythm.modeTabs}（期望 12 = --space-4）`);
+	assert.equal(rhythm.capabilityRow, "24px", `能力 chip 底 .capability-row=${rhythm.capabilityRow}（期望 24 = --space-6）`);
+	assert.equal(rhythm.homeGuide, "16px", `上手清单底 .home-guide=${rhythm.homeGuide}（期望 16 = --space-5）`);
+});
 
 // ── 减弱动态效果（prefers-reduced-motion: reduce）────────────────
 //

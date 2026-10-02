@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-03-dark-polish/prd.md", "reason": "逐条核对 Acceptance Criteria"}
+{"file": ".trellis/tasks/10-03-dark-polish/design.md", "reason": "核对实现与设计一致：token 名、取值来源、测试设计"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查断言是否可证伪（反向验证做没做）、有没有静默跳过"}
+{"file": "docs/DESIGN.md", "reason": "核查动效登记与 reduced-motion 关停（含 transition 是否也关）"}

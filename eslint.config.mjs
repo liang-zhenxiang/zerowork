@@ -93,6 +93,9 @@ export default [
 				fetch: "readonly",
 				// harness 用它等界面稳定：连续静默一段时间即认为这一屏渲染完了
 				MutationObserver: "readonly",
+				// 主题相关的用例在 evaluate 回调里切主题，用得到这两个浏览器全局
+				localStorage: "readonly",
+				CustomEvent: "readonly",
 			},
 		},
 	},
