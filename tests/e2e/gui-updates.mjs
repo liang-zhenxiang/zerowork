@@ -101,6 +101,9 @@ const phaseKind = () =>
 // ── ① 更新区渲染 ─────────────────────────────────────────────
 await h.check("设置 → 通用有更新区（徽章/渠道/按钮）", async () => {
 	await openSettingsGeneral();
+	// SelectField 的出现依赖 getUpdateChannel 的 IPC 回包 + 渲染，CI 慢机上
+	// 15s 不够（#92 的 CI flake：「渠道选择器不在」——与 theme 套件修过的
+	// 同族问题）。放宽到 40s，与「等元素出现」的信号等待语义一致。
 	const found = await waitUntil(
 		async () =>
 			await win.evaluate(() => ({
@@ -108,7 +111,7 @@ await h.check("设置 → 通用有更新区（徽章/渠道/按钮）", async (
 				channel: document.querySelector('[aria-label="更新渠道"]') !== null,
 				checkBtn: [...document.querySelectorAll("button")].some((b) => b.textContent === "立即检查"),
 			})),
-		{ timeout: 15_000, interval: 400, desc: "更新区渲染" },
+		{ timeout: 40_000, interval: 400, desc: "更新区渲染" },
 	);
 	assert.match(String(found.badge), /^V\d+\.\d+\.\d+/, `版本徽章形态不对：${found.badge}`);
 	assert.ok(found.channel, "渠道选择器不在");
