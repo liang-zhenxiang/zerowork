@@ -68558,7 +68558,12 @@ function App() {
         openPreview2({ kind: "file", path: path2 });
       });
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // ⚠️ 这个文件不在 eslint 的覆盖范围内（`eslint.config.mjs` 的 ignores 列了
+    // "src/renderer/src/**"，这里既不会加载 react-hooks 规则，写不写 disable 注释
+    // 都一样 —— 留一条会让人误以为依赖数组有规则守着）。依赖数组**只能靠人维护**：
+    // 漏加依赖的后果不是报错，而是**预览在错误的 cwd 上打开**（闭包里拿着旧的
+    // resumeTask / openPreview2，预览服务按旧会话的 cwd 解析路径，于是打不开）。
+    // 改这里的取值来源时，务必同步这一个数组。
     [resumeTask, revealPanel, openPreview2]
   );
   const renameTask = reactExports.useCallback(

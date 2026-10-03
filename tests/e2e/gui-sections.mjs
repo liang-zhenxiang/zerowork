@@ -16,9 +16,13 @@ import { createHarness } from "./lib/harness.mjs";
  * 侧边栏区域。
  *
  * 第三项 `expectsOwnPage` 依据**实测行为**标注：
- *   助理 / 项目 / 资料库 在无数据时渲染的是欢迎页本身（不是独立页面），
+ *   助理 / 项目 在无数据时渲染的是欢迎页本身（不是独立页面），
  *   因此不能用「欢迎页标语消失」判断导航是否生效。
- *   这一点是跑测试时发现的 —— 最初一律用该断言，把这三个正常页面误判为故障。
+ *   这一点是跑测试时发现的 —— 最初一律用该断言，把这两个正常页面误判为故障。
+ *
+ * 「资料库」已从这一档移出：任务 10-03-library 把它做成了**独立页面**
+ * （有页头、空态），导航过去会离开欢迎页，故 `expectsOwnPage = true`
+ * 现在成立、也是更强的断言（此前它挂在欢迎页上，只能靠元素数兜底）。
  *
  * 标注依据是截图人工核对（artifacts/sections/*.png），不是推测。
  */
@@ -27,7 +31,7 @@ const SECTIONS = [
 	["项目", "projects", false],
 	["专家·技能·连接器", "experts", true],
 	["自动化", "automation", true],
-	["资料库", "library", false],
+	["资料库", "library", true],
 	["诊断", "diagnostics", true],
 	["统计", "stats", true],
 ];

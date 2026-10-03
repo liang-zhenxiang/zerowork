@@ -338,9 +338,14 @@ await h.check("点「上手清单」能再调出来，且三项都标成已完�
 	});
 });
 
-// ── ⑥ 侧栏：4 个「敬请期待」是真禁用态 ──────────────────
+// ── ⑥ 侧栏：3 个「敬请期待」是真禁用态 ──────────────────
+//
+// 注：此前这里是 4 个（助理 / 项目 / 资料库 / 更多）。**「资料库」已不再是未就绪项** ——
+// 任务 10-03-library 把它做成了真页面（NAV_ITEMS 的 ready 改成 true），于是它移出
+// 「规划中」组、带上 pointer 与正常档；把它留在这份「未就绪」清单里会让本用例假红
+// （实测：「「资料库」没有 disabled 属性」）。未就绪组剩下 3 项，断言口径不变。
 await h.check("侧栏未就绪项带 disabled、指针不是 pointer、降灰那一档还在", async () => {
-	for (const label of ["助理", "项目", "资料库", "更多"]) {
+	for (const label of ["助理", "项目", "更多"]) {
 		const item = await readNavItem(label);
 		assert.ok(item !== null, `侧栏没有「${label}」`);
 		assert.equal(item.disabled, true, `「${label}」没有 disabled 属性`);
