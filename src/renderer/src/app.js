@@ -13236,7 +13236,7 @@ const NAV_ITEMS$1 = [
   { icon: IconProject, label: "项目", ready: false },
   { icon: IconSkill, label: "专家·技能·连接器", ready: true },
   { icon: IconAutomation, label: "自动化", ready: true },
-  { icon: IconLibrary, label: "资料库", ready: false },
+  { icon: IconLibrary, label: "资料库", ready: true },
   { icon: IconMore, label: "更多", ready: false }
 ];
 const TASKS_COLLAPSED_COUNT = 5;
@@ -13269,6 +13269,7 @@ function Sidebar({
   onOpenStats,
   onOpenSkills,
   onOpenAutomations,
+  onOpenLibrary,
   onOpenPalette
 }) {
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
@@ -13666,6 +13667,7 @@ function Sidebar({
       onClick: () => {
         if (label === "专家·技能·连接器") onOpenSkills();
         else if (label === "自动化") onOpenAutomations();
+        else if (label === "资料库") onOpenLibrary();
       },
       children: [
         // 未就绪项图标 13：与降档字号(--text-meta)同步收小，视觉重量才真的轻
@@ -13712,7 +13714,7 @@ function Sidebar({
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconStats, { size: 16 }),
         "统计"
       ] }),
-      // 未开放的 4 项收成**连续一组**，排在已就绪项之后，并给一个组标题。
+      // 未开放的那几项收成**连续一组**，排在已就绪项之后，并给一个组标题。
       //
       // 为什么是「分组」而不只是「加个灰色角标」：它们此前与已就绪项交替排列
       // （灰-灰-黑-黑-灰-灰-黑-黑），读起来像「一半图标没加载出来」；
@@ -67038,6 +67040,121 @@ function buildSchedule(draft) {
   const invalid = validateSchedule(schedule);
   return invalid === void 0 ? { schedule } : { error: invalid };
 }
+/**
+ * 「产物是否落在某个来源会话 cwd 之内」的判定（design.md §2）。
+ *
+ * 只有当产物位于某来源会话的 cwd 之内，切到那个会话之后才可能被预览 ——
+ * 既有的 readArtifact / statPath 以**当前会话 cwd** 为边界，本项目不为资料库
+ * 新开「渲染层指定任意 cwd 去读」的通道（那是放宽安全边界，红线 4）。
+ * 归一化分隔符（Windows 反斜杠）与末尾斜杠，避免「C:\ws」与「C:/ws/」被判成不同前缀。
+ */
+function isPathWithinCwd(cwd2, path2) {
+  if (typeof cwd2 !== "string" || cwd2 === "") return false;
+  const norm = (value) => value.replace(/\\/g, "/").replace(/\/+$/, "");
+  const base = norm(cwd2);
+  const target = norm(path2);
+  return target !== "" && (target === base || target.startsWith(`${base}/`));
+}
+/**
+ * 资料库的一行。行骨架复用 `.auto-row`（AutomationsView / 连接器同一套
+ * 「文本 + 一组行内操作按钮」的行形态）——
+ * **刻意不用 OverviewView 的 `.preview-item`**：那个类带 `:active` 按下态，
+ * 是给「整行本身就是一个按钮」的（见 app.css 里那段说明），行内再嵌按钮会变成
+ * 「按行内任一按钮时整行一起变色」。这是一行要挂多个操作时项目里既定的选型。
+ *
+ * 三个动作的可用性（design.md §2/§3.2）：
+ * - 预览：仅当产物落在某个来源会话 cwd 内 —— 预览的做法是**切到来源会话**
+ *   （当前 cwd 随之变成来源 cwd）再打开右侧预览面板，全程复用既有 previewBaseUrl
+ *   + resolveWithinRoot，没有放宽任何边界；落在 cwd 之外的产物不给按钮，改为一句说明。
+ * - 在文件夹中显示：打开**来源工作区**目录（既有 revealWorkspace 通道）。
+ * - 定位到来源会话：跳到最近交付它的那个会话（复用 resumeTask）。
+ */
+function LibraryRow({ artifact, now, onPreview, onReveal, onLocate, onOpenExternal }) {
+  const sessions = Array.isArray(artifact.sessions) ? artifact.sessions : [];
+  const previewSession = sessions.find((s) => isPathWithinCwd(s.cwd, artifact.path));
+  const latestSession = sessions[0];
+  const revealCwd = (previewSession ?? latestSession)?.cwd;
+  const isUrl2 = artifact.kind === "url";
+  // 次文：大小（**交付时刻的快照**，不是实时值）· 来源会话标题 · 交付时间 · 多会话时标出会话数。
+  const meta = [
+    artifact.size > 0 ? formatSize(artifact.size) : void 0,
+    latestSession?.title,
+    artifact.deliveredAt !== void 0 ? formatMessageTime(Date.parse(artifact.deliveredAt), now) : void 0,
+    sessions.length > 1 ? `共 ${sessions.length} 个会话交付过` : void 0
+  ].filter((part) => part !== void 0 && part !== "").join(" · ");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-text", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-title", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-row-name", title: artifact.path, children: artifact.name }),
+          artifact.exists === false && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "auto-badge auto-badge-missed", title: "交付时这个文件在，现在磁盘上已找不到", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 11 }),
+            "文件已不在"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-row-meta", children: meta })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-ops", children: [
+        isUrl2 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onOpenExternal(artifact.path), children: "打开链接" }) : previewSession !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onPreview(previewSession.path, artifact.path), children: "预览" }) : null,
+        !isUrl2 && revealCwd !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "在系统文件管理器中打开来源工作区", onClick: () => onReveal(revealCwd), children: "在文件夹中显示" }),
+        latestSession !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onLocate(latestSession.path), children: "定位到来源会话" })
+      ] })
+    ] }),
+    !isUrl2 && previewSession === void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-row-meta", children: "该产物在来源工作区之外，资料库不直接读它；可「定位到来源会话」后在那里查看。" })
+  ] });
+}
+/**
+ * 资料库：把「全部会话交付过的产物」汇总成一页（跨会话按 path 去重）。
+ *
+ * 数据面（daemon 侧 library.js + INVOKE.libraryList）返回
+ *   `{ artifacts: [{ path, name, kind, size, html, deliveredAt, exists, sessions }], truncated }`。
+ * 语义要点（design.md §1.2）：size / kind / html 是**交付那一刻的快照**，
+ * exists 才是**实时**判定 —— 界面上不混为一谈（一个答「当时多大」，一个答「现在还在不在」）。
+ *
+ * 骨架照 AutomationsView / SkillsView，三态**互斥且可辨**（docs/DESIGN.md §4）：
+ * error → 就地错误 + 重试；data === undefined → 加载态；artifacts 为空 → 空态。
+ * 空态要**教人怎么产生产物**：这很可能是用户第一次见到本页时唯一见过的样子。
+ */
+function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArtifact, onOpenExternal, onNewTask }) {
+  const [data, setData] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  const load = reactExports.useCallback(async () => {
+    try {
+      setData(await window.kami.listLibrary());
+      setError(void 0);
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  const now = Date.now();
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "资料库" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => void load(), children: "刷新" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : data === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : data.artifacts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconLibrary, { size: 22 }),
+      title: "还没有交付过产物",
+      description: "让 Agent 做一件事——查资料、写文档、做表格——当它把成果文件交付出来时，就会出现在这里，之后跨会话都能找到。",
+      action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onNewTask, children: "新建任务" })
+    }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      data.truncated && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: "产物较多，这里只显示最近交付的 500 条。" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-list", children: data.artifacts.map((artifact) => /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryRow, {
+        artifact,
+        now,
+        onPreview: onPreviewArtifact,
+        onReveal: onRevealWorkspace,
+        onLocate: onResumeSession,
+        onOpenExternal
+      }, artifact.path)) })
+    ] }) })
+  ] });
+}
 function AutomationsView({
   cwd: cwd2,
   onClose,
@@ -68402,7 +68519,9 @@ function App() {
     (path2) => {
       const target = taskListRef.current?.find((t) => t.path === path2);
       const seq = ++resumeSeqRef.current;
-      window.kami.resumeSession(path2).then(() => {
+      // 返回 promise：资料库的「预览」需要在**切到来源会话之后**再打开预览面板，
+      // 得有个「恢复完成」的信号可等（其余调用方忽略返回值，行为不变）。
+      return window.kami.resumeSession(path2).then(() => {
         if (seq !== resumeSeqRef.current) return;
         if (target !== void 0) {
           setUnreadIds((prev) => {
@@ -68424,6 +68543,28 @@ function App() {
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [resyncSnapshot, restoreFromBucket]
+  );
+  /*
+   * 资料库的「预览」（design.md §2）：先切到**来源会话**，当前 cwd 随之变成来源 cwd，
+   * 再打开右侧预览面板——预览服务（previewBaseUrl + resolveWithinRoot）与文本读取
+   * 都跟着走来源会话的边界，没有为「任意路径预览」新开任何通道。
+   * 顺序：resumeTask 内部会先 closePreviewPanel 再 setView("chat")，所以这里在其
+   * promise resolve 之后再开面板，标签不会被那一次清空覆盖掉。
+   */
+  const previewLibraryArtifact = reactExports.useCallback(
+    (sessionPath, path2) => {
+      void resumeTask(sessionPath).then(() => {
+        revealPanel("artifact");
+        openPreview2({ kind: "file", path: path2 });
+      });
+    },
+    // ⚠️ 这个文件不在 eslint 的覆盖范围内（`eslint.config.mjs` 的 ignores 列了
+    // "src/renderer/src/**"，这里既不会加载 react-hooks 规则，写不写 disable 注释
+    // 都一样 —— 留一条会让人误以为依赖数组有规则守着）。依赖数组**只能靠人维护**：
+    // 漏加依赖的后果不是报错，而是**预览在错误的 cwd 上打开**（闭包里拿着旧的
+    // resumeTask / openPreview2，预览服务按旧会话的 cwd 解析路径，于是打不开）。
+    // 改这里的取值来源时，务必同步这一个数组。
+    [resumeTask, revealPanel, openPreview2]
   );
   const renameTask = reactExports.useCallback(
     (path2, name2) => {
@@ -68583,11 +68724,15 @@ function App() {
     setReturnView(view === "chat" ? "chat" : "home");
     setView("automations");
   }, [view]);
+  const openLibrary = reactExports.useCallback(() => {
+    setReturnView(view === "chat" ? "chat" : "home");
+    setView("library");
+  }, [view]);
   /*
    * 命令面板条目的数据源。分两套：
    * - paletteEntries：全集，搜索时用（动作 + 设置分组 + 全部会话/空间/专家/技能/连接器/自动化）
    * - paletteIdleEntries：空查询的引导集（常用动作 + 最近 N 条会话），避免摊成一堵墙
-   * 未开放的导航项（NAV_ITEMS$1 里 ready:false 的助理/项目/资料库/更多）**不生成条目**——
+   * 未开放的导航项（NAV_ITEMS$1 里 ready:false 的助理/项目/更多）**不生成条目**——
    * 把"功能缺失的错觉"从侧栏扩散到面板，是明确要避免的（prd 背景第 4 条、docs/ONBOARDING-RESEARCH.md）。
    */
   const changeTheme = reactExports.useCallback((pref) => {
@@ -68784,6 +68929,7 @@ function App() {
         onOpenStats: openStats,
         onOpenSkills: () => setView("skills"),
         onOpenAutomations: openAutomations,
+        onOpenLibrary: openLibrary,
         onOpenPalette: () => setPaletteOpen(true)
       }
     ),
@@ -68921,6 +69067,17 @@ function App() {
         onClose: () => setView(returnView),
         onResumeSession: resumeRunSession,
         onToast: showToast
+      }
+    ),
+    view === "library" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      LibraryView,
+      {
+        onClose: () => setView(returnView),
+        onResumeSession: resumeTask,
+        onRevealWorkspace: revealWorkspace,
+        onPreviewArtifact: previewLibraryArtifact,
+        onOpenExternal: openArtifact,
+        onNewTask: newTask
       }
     ),
     view === "chat" && /* @__PURE__ */ jsxRuntimeExports.jsx(

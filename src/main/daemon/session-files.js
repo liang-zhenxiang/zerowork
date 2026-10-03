@@ -54,6 +54,7 @@ import {
 } from "./config-paths.js";
 import { AutomationStore } from "./automation.js";
 import { SessionArchive } from "./archive.js";
+import { readLibraryArtifacts } from "./library.js";
 import {
 	loadMemorySystemPrompt,
 	profilePath,
@@ -4068,6 +4069,24 @@ const handlers = {
   [INVOKE.newTask]: async ([cwd]) => newTask(cwd),
   /* ── 历史会话 ─────────────────────────────────────────────────── */
   [INVOKE.sessionList]: async () => listSessions(),
+  /**
+   * 资料库：汇总**全部会话**交付过的产物（跨会话、跨工作区）。
+   *
+   * 拉式（用户打开页面时才 invoke），不挂推送、不进 run 边界的热路径 ——
+   * 否则每次 run 都要全量扫一遍会话文件。聚合逻辑见 ./library.js。
+   *
+   * 跳过内部会话（子会话 / 内置定时任务）的口径与 listSessions 一致：
+   * 复用现成的 isInternalSessionFile 判据，用 builtinTaskIds 收窄内置任务。
+   */
+  [INVOKE.libraryList]: async () => {
+    const builtinTaskIds = new Set(
+      automationStore.list().filter((task) => task.builtin === true).map((task) => task.id)
+    );
+    return readLibraryArtifacts({
+      sessionsDir: getSessionsDir(),
+      isInternalSessionFile: (filePath) => isInternalSessionFile(filePath, builtinTaskIds),
+    });
+  },
   // 归档 / 取消归档（L28）：只动 archive.json 索引，会话文件与宿主不动 ——
   // 归档 ≠ 下线，正在聊的会话归档后照常可用。列表变化推
   // taskListChanged 让侧栏即时收起。
