@@ -107,6 +107,11 @@ const INVOKE = {
   sessionResume: "session:resume",
   /** 归档 / 取消归档会话（archive.json 索引，会话文件不动；详见 InvokeMap）。 */
   sessionArchive: "session:archive",
+  /**
+   * 置顶 / 取消置顶会话（pins.json 索引，会话文件不动；详见 InvokeMap）。
+   * 置顶只影响侧栏列表的顺序与标记，不改会话本身的任何数据。
+   */
+  sessionPin: "session:pin",
   /** 重命名会话（写入 pi 的 session_info 条目）。path 定位，name 为新名。 */
   sessionRename: "session:rename",
   /**

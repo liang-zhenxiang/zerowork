@@ -13086,6 +13086,19 @@ const IconBranch = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, ch
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M7 7v10" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M17 11c0 3.5-3 4.5-6.5 4.5" })
 ] });
+/*
+ * 图钉：会话行的「已置顶」标记。
+ *
+ * 轮廓是一个**带喇叭口的钉头**加一根针（闭合路径 + 一条直线）。为什么不是更省笔画的
+ * 「竖线 + 两道横线」：那种画法在 12px 下与侧栏里的加号（IconPlus，同样横平竖直）
+ * 会读混——它会被读成十字/准星，而不是「钉住了」。喇叭口把剪影拉开。
+ * 与既有图标一样是手写几何图形（不引第三方图标库），只在 12px 出现，与
+ * .task-branch-mark 同档。
+ */
+const IconPin = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M10.5 4h3v6l2.5 3H8l2.5-3z" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 13v7" })
+] });
 const IconImage = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "9", cy: "9.5", r: "1.6" }),
@@ -13240,6 +13253,11 @@ const NAV_ITEMS$1 = [
   { icon: IconMore, label: "更多", ready: false }
 ];
 const TASKS_COLLAPSED_COUNT = 5;
+/**
+ * 会话行 ⋯ 菜单翻转判定的余量（px）。等于 `--space-3`（8px）那一档 ——
+ * 菜单贴着滚动容器底边展开会挨着滚动条，留一档呼吸。
+ */
+const MENU_FLIP_MARGIN = 8;
 const TASK_SKELETON_WIDTHS = ["72%", "54%", "84%", "46%", "63%"];
 const TASK_SKELETON_TITLE_STYLE = {
   display: "flex",
@@ -13259,6 +13277,7 @@ function Sidebar({
   onRenameTask,
   onDeleteTask,
   onArchiveTask,
+  onPinTask,
   onExportTask,
   onNewTaskInSpace,
   onRenameWorkspace,
@@ -13282,6 +13301,67 @@ function Sidebar({
   const [removingCwd, setRemovingCwd] = reactExports.useState(void 0);
   const [tasksCollapsed, setTasksCollapsed] = reactExports.useState(false);
   const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
+  /*
+   * 会话行的 ⋯ 菜单：下方放不下时翻到行的上方（`.space-menu-up`）。
+   *
+   * 为什么要量：菜单的实际高度取决于项数与文案（本轮加「置顶」后是 6 项），
+   * CSS 自己算不出「下面还剩多少」。菜单是绝对定位挂在行上的，落进
+   * `.sidebar-scroll` 可视区之外就会被裁掉、最后几项点不到 —— 而 `getBoundingClientRect`
+   * 报的是**布局几何**（不受裁剪影响），所以「菜单底 > 滚动容器底」这个判据是准的。
+   * 这是既有的形态问题（不是本轮引入），但本轮的置顶项把它推到了会真的发生的位置：
+   * `tests/e2e/session-pin.mjs` 的 ④ 会先断言菜单项落在可视区内再点，越界时直接红。
+   *
+   * 用 useLayoutEffect（不是 useEffect）：量完立刻改类名，这一帧还没绘制，
+   * 因此不会出现「先画在下面、再跳到上面」的闪动。
+   */
+  const [menuFlipUp, setMenuFlipUp] = reactExports.useState(false);
+  /** 已经为哪一次「打开」量过了（存当时的 menuPath）。为什么要这个 —— 见下面 effect。 */
+  const menuMeasuredFor = reactExports.useRef(void 0);
+  reactExports.useLayoutEffect(() => {
+    if (menuPath === void 0) {
+      menuMeasuredFor.current = void 0;
+      if (menuFlipUp) setMenuFlipUp(false);
+      return;
+    }
+    /*
+     * 同一次打开**只量一次**。
+     *
+     * 为什么不能每次渲染都量：`.pop-menu` 的入场是 `animation`（`pop-layer-in`，
+     * 从 `scale(0.98)` 起），而 `getBoundingClientRect()` **会把 transform 算进去** ——
+     * 动画进行中量到的菜单高度一直在变，于是「量 → setState → 重渲染 → 再量」
+     * 互相追着跑，最后撞上 React 的更新深度上限（#185）。
+     * 真机症状：点 ⋯ 直接进错误边界。这条是 GUI 测试**第一次真跑**时撞出来的 ——
+     * 静态读代码想不到：动画 + 量测 + setState 三件事凑一起才是环。
+     */
+    if (menuMeasuredFor.current === menuPath) return;
+    const menu = document.querySelector(".task-op-menu");
+    const scroller = document.querySelector(".sidebar-scroll");
+    if (menu === null || scroller === null) return;
+    const row = menu.closest(".task-item");
+    if (row === null) return;
+    menuMeasuredFor.current = menuPath;
+    /*
+     * 判据只用**翻转不会改变的量**，且都用忽略 transform 的读数：
+     *   · 行底 —— 菜单是绝对定位的子节点，翻不翻都不动行
+     *   · 菜单高 —— 用 `offsetHeight`（不受入场 scale 影响；`getBoundingClientRect` 会）
+     * 不翻转时菜单的自然位置就是「行底之下」，于是判据写成「行底 + 菜单高 vs 容器底」。
+     */
+    const menuHeight = menu.offsetHeight;
+    const rowRect = row.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    /*
+     * 只有「下方放不下、上方放得下」时才翻。
+     *
+     * 少了后半句会在矮窗口里帮倒忙：侧栏可视区比菜单还矮时两边都放不下，
+     * 翻转只是把它从「下面被裁」换成「上面被裁」——CI 的 runner 就是这么翻车的
+     * （实测可视区只有 204px、菜单 6 项约 190px + 边距，两个方向都塞不下）。
+     * 塞不下时保持默认的「向下展开」：菜单在滚动容器里是**可滚动**的，
+     * 用户往下滚一下就够得到，而翻上去会让他先往回滚。
+     */
+    const fitsBelow = rowRect.bottom + menuHeight <= scrollerRect.bottom - MENU_FLIP_MARGIN;
+    const roomAbove = rowRect.top - menuHeight >= scrollerRect.top + MENU_FLIP_MARGIN;
+    setMenuFlipUp(!fitsBelow && roomAbove);
+  }, [menuPath, menuFlipUp]);
   reactExports.useEffect(() => {
     if (menuCwd === void 0 && menuPath === void 0) return;
     const onKey = (event) => {
@@ -13362,6 +13442,14 @@ function Sidebar({
           },
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "task-item-title", children: [
+              /*
+               * 置顶标记（形态承担状态，docs/DESIGN.md §2.1）：与未读点 / 转圈 / 分支标记
+               * 同一组「标题前缀」，压在标题文本之前 —— 放行尾会被 text-overflow 的省略号裁掉。
+               * hover 时**不隐藏**：隐藏等于「状态在 hover 期消失」，而那些正是用户最可能
+               * 去看这一行是谁的时刻。色取 --text-secondary（与分支标记同档），
+               * 不借状态色 —— 置顶不是状态（§2.4）。
+               */
+              isPinned(task) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-pin-mark", title: "已置顶", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPin, { size: 12 }) }),
               unreadIds.has(task.id) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-unread-dot" }),
               task.running && /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
               origin !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-branch-mark", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBranch, { size: 12 }) }),
@@ -13398,7 +13486,7 @@ function Sidebar({
             onClick: () => setMenuPath(void 0)
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pop-menu space-menu task-op-menu", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `pop-menu space-menu task-op-menu${menuFlipUp ? " space-menu-up" : ""}`, children: [
           task.cwd !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "button",
             {
@@ -13439,6 +13527,26 @@ function Sidebar({
                 setEditingPath(task.path);
               },
               children: "重命名"
+            }
+          ),
+          /*
+           * 置顶 / 取消置顶。放在「重命名」与「归档」之间：它和归档同属
+           * 「整理侧栏列表」一类，排在销毁性的删除之前。文案随状态切换 ——
+           * 菜单项是唯一入口（行内不另开第二个 hover 按钮，理由见 app.css 的
+           * .task-item-ops 注释：那条刻意决定记录着四个图标并排在窄栏里挤成一簇）。
+           */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                onPinTask(task.path, !isPinned(task));
+              },
+              children: isPinned(task) ? "取消置顶" : "置顶"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -13647,8 +13755,16 @@ function Sidebar({
     ...rawSpaces.filter((g) => g.cwd !== currentCwd)
   ];
   const groupsUnavailable = tasksError !== void 0 || link2.kind === "down";
-  const visibleTasks = tasksExpanded ? tasks ?? [] : (tasks ?? []).slice(0, TASKS_COLLAPSED_COUNT);
-  const hiddenTaskCount = tasks === void 0 ? 0 : tasks.length - visibleTasks.length;
+  /*
+   * 折叠窗口走 session-pin.js 的纯函数（单测覆盖）：置顶项**不参与**那 5 个名额的竞争，
+   * 于是不会出现「钉住了却还藏在『查看更多』后面」—— 那是这个功能最容易出的失效形态。
+   * tasks 未就绪（undefined）时窗口是空的，与下方骨架分支的顺序一致。
+   */
+  const taskWindow = tasksExpanded
+    ? { visible: tasks ?? [], hiddenCount: 0 }
+    : taskListWindow(tasks ?? [], TASKS_COLLAPSED_COUNT);
+  const visibleTasks = taskWindow.visible;
+  const hiddenTaskCount = taskWindow.hiddenCount;
   /**
    * 一条导航行。抽出来的唯一目的是让「已就绪」与「即将开放」两段
    * 共用同一份渲染，避免为分组复制一遍按钮（DESIGN.md §6 禁复制）。
@@ -13868,19 +13984,25 @@ function groupSessions(summaries, metas) {
       buckets.set(session.cwd, { sessions: [session], latestAt: session.modifiedAt });
     }
   }
-  tasks.sort(byModifiedDesc);
+  /*
+   * 置顶优先（纯逻辑在 session-pin.js，单测直接覆盖）：
+   * 分区**内部**把置顶会话提到最前，分区之间、空间组的先后**一律不动** ——
+   * 置顶的语义是「在这一组里排最前」，不是「搬去另一个容器」。
+   * 与「当前工作空间置顶」（issue #73）是两层不同的东西：那边动的是空间组序，
+   * 这里动的是组内会话序，两者不冲突，也不互相覆盖。
+   */
+  const orderedTasks = sortSessionsByPin(tasks);
   const spaces = [];
   for (const [cwd2, bucket] of buckets) {
-    bucket.sessions.sort(byModifiedDesc);
     spaces.push({
       cwd: cwd2,
       name: displayNames.get(cwd2) ?? basename$2(cwd2),
-      sessions: bucket.sessions,
+      sessions: sortSessionsByPin(bucket.sessions),
       latestAt: bucket.latestAt
     });
   }
   spaces.sort((a, b) => b.latestAt - a.latestAt);
-  return { tasks, spaces };
+  return { tasks: orderedTasks, spaces };
 }
 function byModifiedDesc(a, b) {
   return b.modifiedAt - a.modifiedAt;
@@ -29555,6 +29677,9 @@ function gfm(options) {
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
 import { rankEntries, matchRank, KIND_WEIGHT } from "./command-palette-core.js";
+// 会话置顶的纯逻辑（排序 + 折叠窗口）在 session-pin.js 里，单测直接 import 它 ——
+// 见该文件头注：这两条判断在界面上只表现为「顺序对不对」，是 GUI 断言最说不清的一类。
+import { isPinned, sortSessionsByPin, taskListWindow } from "./session-pin.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -68490,9 +68615,14 @@ function App() {
   }, []);
   /*
    * 首页「最近会话」的数据源：taskList 按 modifiedAt 倒序取前 3。
-   * 排序复用侧栏分组用的 byModifiedDesc（同一口径：谁最近动过谁靠前），
+   * 排序用 byModifiedDesc（谁最近动过谁靠前），
    * 不在这里另写比较器。当前会话也在列表里——从首页点它等于「回到刚才那屏」，
    * 与侧栏行为一致，不特判剔除。
+   *
+   * **不做置顶优先**（会话置顶见 session-pin.js）：这块的名字是「最近会话」，
+   * 口径必须单一 —— 一个被钉住的会话如果两周没动过，它出现在「最近」里就是在撒谎。
+   * 侧栏才是「我钉住的要一直在手边」该生效的地方。要让首页也露置顶，
+   * 正确做法是**另起一组**而不是改这一组的排序（不在本轮范围内）。
    */
   /*
    * 更新通知（spec: update-channels）：主进程静默检查发现新版本时 toast 一次。
@@ -68596,6 +68726,19 @@ function App() {
   );
   const archiveTask = reactExports.useCallback((path2) => {
     window.kami.archiveSession(path2, true).then(() => showToast("已归档，可在设置 → 数据管理中找到", "success")).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error));
+    });
+  }, []);
+  /*
+   * 置顶 / 取消置顶。**不弹 toast**：置顶的可观察结果是「这一行挪到分区最前 + 钉标记出现」，
+   * 都在同一屏内、且可逆；toast 在本项目里的语义是**后台异步结果**（任务完成/失败），
+   * 用全局提示去确认一次行内重排是重量级误配。
+   * 失败必须说出来（写盘失败时行不会动，不说就是「点了没反应」）—— 故 catch 里照样弹。
+   * 成功路径**不做本地乐观更新**：daemon 会推 taskListChanged，列表以推送为准，
+   * 避免「界面先跳、磁盘后失败」造成的不一致。
+   */
+  const pinTask = reactExports.useCallback((path2, pinned) => {
+    window.kami.pinSession(path2, pinned).catch((error) => {
       showToast(error instanceof Error ? error.message : String(error));
     });
   }, []);
@@ -68919,6 +69062,7 @@ function App() {
         onRenameTask: renameTask,
         onDeleteTask: deleteTask,
         onArchiveTask: archiveTask,
+        onPinTask: pinTask,
         onExportTask: exportTask,
         onNewTaskInSpace: newTaskInSpace,
         onRenameWorkspace: renameWorkspace,
