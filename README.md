@@ -154,7 +154,7 @@ npm run dev
 
 1. **源码以 JavaScript + JSDoc 提供**，类型检查走 `tsc`（`checkJs` 当前关闭，
    原因与渐进补类型的路径写在架构文档里）
-2. **渲染层是 chunk 粒度，不是组件粒度** —— `src/renderer/src/app.js` 单个文件 6.8 万行。
+2. **渲染层是 chunk 粒度，不是组件粒度** —— `src/renderer/src/app.js` 单个文件近 7 万行。
    这是**有意的**：自动拆分产不出可读可靠的划分，理由与四条人工切分线索同在架构文档里
 
 ```bash
