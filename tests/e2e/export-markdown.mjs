@@ -132,6 +132,13 @@ const clickMenuItem = async (label) => {
 			(b) => (b.textContent ?? "").trim() === l,
 		);
 		if (btn === undefined) return null;
+		/*
+		 * 先把这一项滚进可视区，再断言、再点：菜单挂在行上、处在 `.sidebar-scroll`
+		 * 这个滚动容器里，窗口矮的时候（CI runner 实测可视区只有约 200px）菜单必然有
+		 * 一部分在可视区之外 —— 但它是可滚动的，真实用户往下滚一下就能点到。
+		 * 滚动之后仍会断言它确实在可视区内，所以「菜单根本没渲染」这类真问题照样会红。
+		 */
+		btn.scrollIntoView({ block: "nearest" });
 		const rect = btn.getBoundingClientRect();
 		const view = document.querySelector(".sidebar-scroll")?.getBoundingClientRect();
 		return {
