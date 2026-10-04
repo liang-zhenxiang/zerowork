@@ -13470,6 +13470,20 @@ function Sidebar({
             "button",
             {
               type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                onArchiveTask(task.path);
+              },
+              children: "归档"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
               className: "space-menu-item space-menu-danger",
               onClick: () => {
                 setMenuPath(void 0);
