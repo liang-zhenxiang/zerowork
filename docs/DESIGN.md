@@ -251,6 +251,24 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 
 滚动容器的行为与「跟着滚」的场景保持既有口径。
 
+### §7.9 hover 浮现的控件：`opacity` + `pointer-events`，**不用 `visibility: hidden`**
+
+行内操作钮（`.task-item-ops`、`.space-group-actions`）只在 hover / 焦点进入时浮现，
+**隐藏态一律写 `opacity: 0` + `pointer-events: none`**：
+
+- `visibility: hidden` 会把子树里的按钮**移出 Tab 序列**，于是 `.foo:focus-within`
+  **永远不可能触发**（够不着就进不去焦点）—— 键盘用户彻底没有入口，
+  而视觉上一切正常，截图断言也看不出来。
+  2026-10-03 修：会话行的「导出 / 重命名 / 置顶 / 归档 / 删除」与空间组头的
+  「+ / ⋯」此前正是这种状态，键盘完全够不着。
+- `pointer-events: none` 是配套的**硬要求**：只降透明度的话，透明按钮仍然接得到点击，
+  点行尾那一格空白就会误触一个看不见的按钮。
+- 进出场时长仍按 §5.8（淡回 `--dur-fast` / 浮现 `--dur-base`）；
+  不再过渡 `visibility`，因为它已不参与控制。
+
+守卫见 `tests/e2e/session-pin.mjs` 的③：Tab 从行主体走进操作钮，
+并断言它**真的可见**（`visibility: hidden` 会让这条同时拿不到焦点、等不到淡入）。
+
 ## §10.3 动效与色彩登记
 
 不进 §2.8 三档、或需要偏离默认值的效果，在这里登记：

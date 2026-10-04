@@ -1,0 +1,2 @@
+{"file": "src/renderer/src/command-palette-core.js", "reason": "渲染层纯逻辑模块的既有样板（文件头写法、导出风格、单测路径）"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层编码规范：token 档位、禁止清单、改完要跑 check:renderer-assets"}

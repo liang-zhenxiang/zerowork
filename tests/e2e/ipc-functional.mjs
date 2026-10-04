@@ -341,7 +341,7 @@ await h.check("权限：读取 → 设置 → 复原", async () => {
 });
 
 // ── 5. 会话生命周期 ────────────────────────────────────────
-await h.check("会话：新建 → 列表可见 → 重命名 → 归档 → 删除", async () => {
+await h.check("会话：新建 → 列表可见 → 重命名 → 归档 → 置顶 → 删除", async () => {
 	const r = await win.evaluate(async () => {
 		const k = globalThis.kami;
 		const out = {};
@@ -367,6 +367,20 @@ await h.check("会话：新建 → 列表可见 → 重命名 → 归档 → 删
 		await k.archiveSession(path, false);
 		out.archiveRoundTrip = true;
 
+		// 置顶同样是双向开关：列表里的 pinned 字段要如实反映（不能只在内存里改）。
+		await k.pinSession(path, true);
+		const afterPin = await k.listSessions();
+		const pinnedRow = (Array.isArray(afterPin) ? afterPin : (afterPin?.sessions ?? [])).find(
+			(s) => (s.path ?? s.file) === path,
+		);
+		out.pinnedOn = pinnedRow?.pinned === true;
+		await k.pinSession(path, false);
+		const afterUnpin = await k.listSessions();
+		const unpinnedRow = (Array.isArray(afterUnpin) ? afterUnpin : (afterUnpin?.sessions ?? [])).find(
+			(s) => (s.path ?? s.file) === path,
+		);
+		out.pinnedOff = unpinnedRow?.pinned === false;
+
 		return out;
 	});
 	if (r.skipped) return;
@@ -374,6 +388,8 @@ await h.check("会话：新建 → 列表可见 → 重命名 → 归档 → 删
 	assert.ok(r.listed, "newTask 后会话列表为空");
 	assert.ok(r.renamed, "重命名未生效");
 	assert.ok(r.archiveRoundTrip, "归档往返失败");
+	assert.ok(r.pinnedOn, "置顶后 listSessions 的 pinned 应为 true");
+	assert.ok(r.pinnedOff, "取消置顶后 listSessions 的 pinned 应为 false");
 });
 
 await h.check("补全：@ 文件与 / 命令列表可读取", async () => {

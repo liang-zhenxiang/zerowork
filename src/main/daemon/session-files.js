@@ -55,6 +55,7 @@ import {
 import { AutomationStore } from "./automation.js";
 import { SessionArchive } from "./archive.js";
 import { readLibraryArtifacts } from "./library.js";
+import { SessionPinStore } from "./pin.js";
 import {
 	loadMemorySystemPrompt,
 	profilePath,
@@ -1739,6 +1740,12 @@ const automationStore = new AutomationStore();
 
 const sessionArchive = new SessionArchive();
 
+/**
+ * 会话置顶索引（`pins.json`）。与归档同形态：独立索引、会话文件不动。
+ * 为什么不是写进会话文件、为什么不清理失效条目 —— 见 ./pin.js 的文件头。
+ */
+const sessionPins = new SessionPinStore();
+
 const automationScheduler = new AutomationScheduler({
   store: automationStore,
   execute: createAutomationRunExecutor({
@@ -3346,7 +3353,14 @@ async function listSessions() {
       messageCount: bucket.conversation.entries.filter((entry) => entry.role === "user" || entry.role === "assistant").length,
       current: bucket === currentBucket,
       running: bucket.running,
-      archived: false
+      archived: false,
+      /*
+       * 这里的桶**有** sessionFilePath，只是文件当前不在磁盘上（pending 的判据正是
+       * 「有路径、但不在 onDiskPaths 里」）——所以这一格可能是 **true**：
+       * 会话文件在同步目录 / 外置盘里暂时不可达时，用户钉住的记录仍然生效。
+       * 这正是 pin.js 文件头写明「不清理悬空记录」的理由，别把它简化成恒 false。
+       */
+      pinned: sessionPins.isPinned(resolve(file))
     });
   }
   return [...visible.map((info) => {
@@ -3368,7 +3382,10 @@ async function listSessions() {
       messageCount: info.messageCount,
       current: bucket !== void 0 && bucket === currentBucket,
       running: bucket?.running ?? false,
-      archived: sessionArchive.isArchived(resolve(info.path))
+      archived: sessionArchive.isArchived(resolve(info.path)),
+      // 键与归档同一套写法（resolve 后的绝对路径）。两个索引指向同一批会话文件，
+      // 键的规范化不能各写一套，否则「同一个会话」在两个索引里会是两条不同的键。
+      pinned: sessionPins.isPinned(resolve(info.path))
     };
   }), ...pending].sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
@@ -4092,6 +4109,24 @@ const handlers = {
   // taskListChanged 让侧栏即时收起。
   [INVOKE.sessionArchive]: async ([path, archived]) => {
     sessionArchive.setArchived(resolve(path), archived, Date.now());
+    pushTaskListChanged();
+  },
+  /**
+   * 置顶 / 取消置顶会话（pins.json 索引，会话文件不动；详见 pin.js 的文件头）。
+   *
+   * 与归档的三点不同，都是有意的：
+   *   · **不校验路径**（归档也没校验）：索引里存的只是一个键，daemon 从不按它做 IO ——
+   *     没有路径穿越面。反过来，校验会误伤一种正常情形：会话文件在同步目录里、
+   *     此刻暂时读不到，但用户想先把它钉住。
+   *   · **当前会话也能置顶**（归档也允许，删除才拒绝）：置顶是展示偏好，
+   *     与「这个会话是不是活的」无关。
+   *   · **脏的 pinned 不报错**：非 `true` 一律按 false 处理（走取消置顶）——
+   *     渲染层只会传布尔，这里防的是手写的 IPC 调用把索引写成脏值。
+   *     路径本身仍然是硬约束（空 / 非字符串直接抛），那才是调用方的 bug。
+   */
+  [INVOKE.sessionPin]: async ([path, pinned]) => {
+    if (typeof path !== "string" || path === "") throw new Error("置顶需要会话路径");
+    sessionPins.setPinned(resolve(path), pinned === true, Date.now());
     pushTaskListChanged();
   },
   [INVOKE.sessionResume]: async ([path]) => resumeSession(path),
