@@ -188,26 +188,28 @@ await h.check("① ⋯ 菜单里「导出为 HTML」与「导出为 Markdown」�
 
 // ══ ② 导出真的落盘（并在同一次点击里捕获成功 toast）═══════════
 /*
- * ⚠️ toast 只活 2.2 秒（`showToast` 里的 `setTimeout(…, 2200)`），所以它的轮询必须
- * **在点击之前**就挂上：等文件落盘、再读文件、再断言，这段耗时在 CI 上足以让 toast
- * 消失（第一次真跑就是这么红的：文件写出来了，toast 判据却超时）。
- * 一次点击、两个信号并行等 —— 既不重复导出，也不依赖「谁先到」。
+ * ⚠️ toast 只活 2.2 秒（`showToast` 里的 `setTimeout(…, 2200)`）——**不能靠轮询抓它**：
+ * CI 上「点了导出 → 等文件落盘」这段耗时可能长于 toast 的寿命，等文件回来时 toast
+ * 早就消失了（轮询版就是这么红的，本地却因为够快而一直是绿的）。
+ *
+ * 改成**事件驱动**：点击之前先在渲染层装一个 MutationObserver，凡是插进来的 toast
+ * 都记进 `window.__toasts`。无论它活多久，出现那一刻就被记下来了。
  */
 let exportedToast = null;
 await h.check("② 点「导出为 Markdown」→ exports/*.md 落盘，内容含这次对话", async () => {
-	const toastSeen = waitUntil(
-		() =>
-			win.evaluate(() => {
-				const stack = document.querySelector(".toast-stack");
-				if (stack === null) return null;
-				const node = [...stack.querySelectorAll(".toast")].find((t) =>
-					(t.textContent ?? "").includes("已导出"),
-				);
-				if (node === undefined) return null;
-				return { text: (node.textContent ?? "").trim(), success: node.classList.contains("toast-success") };
-			}),
-		{ timeout: 30_000, desc: "出现「已导出」toast" },
-	);
+	await win.evaluate(() => {
+		window.__toasts = [];
+		const recordToast = (node) => {
+			if (node === null || node.nodeType !== 1) return;
+			const el = node.matches?.(".toast") === true ? node : node.querySelector?.(".toast");
+			if (el === null || el === undefined) return;
+			window.__toasts.push({ text: (el.textContent ?? "").trim(), cls: el.className });
+		};
+		new MutationObserver((records) => {
+			// 变量名不能叫 record —— 会把上面的函数遮蔽掉，回调里那一行就调错了对象。
+			for (const entry of records) for (const node of entry.addedNodes) recordToast(node);
+		}).observe(document.body, { childList: true, subtree: true });
+	});
 	await clickMenuItem("导出为 Markdown");
 	await waitUntil(() => win.evaluate(() => document.querySelector(".task-op-menu") === null), {
 		timeout: 15_000,
@@ -221,7 +223,10 @@ await h.check("② 点「导出为 Markdown」→ exports/*.md 落盘，内容�
 		},
 		{ timeout: 30_000, desc: "exports/ 下出现 .md" },
 	);
-	exportedToast = await toastSeen;
+	exportedToast = await waitUntil(
+		() => win.evaluate(() => window.__toasts.find((t) => t.text.includes("已导出")) ?? null),
+		{ timeout: 15_000, desc: "记录到「已导出」toast（MutationObserver）" },
+	);
 	const md = readFileSync(file, "utf8");
 
 	assert.ok(md.startsWith(`# ${FIRST_LINE}\n`), `一级标题应是会话标题：${md.slice(0, 60)}`);
@@ -244,7 +249,7 @@ await h.check("② 点「导出为 Markdown」→ exports/*.md 落盘，内容�
 await h.check("③ 界面上是成功反馈（toast 带导出路径），不是错误提示", async () => {
 	const toast = exportedToast;
 	assert.ok(toast !== null, "成功 toast 没出现 —— 见 ② 的失败信息（它与文件是同一次导出的两个信号）");
-	assert.equal(toast.success, true, `导出成功的提示应是 success 样式：${JSON.stringify(toast)}`);
+	assert.equal(String(toast.cls).includes("toast-success"), true, `导出成功的提示应是 success 样式：${JSON.stringify(toast)}`);
 	assert.ok(toast.text.includes(".md"), `toast 里应带导出路径：${toast.text}`);
 });
 
