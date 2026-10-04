@@ -4568,13 +4568,17 @@ textarea:focus-visible {
 /* 行内 code 路径徽章（markdown.tsx InlineCode，cb-clickable-path
    浅色主题：#1470B4 字 / #E9EEF2 底）。截断在文本层做，不靠 max-width ——
    box-decoration-break: clone 保证折行时两段各自成徽章、不断裂。
-   字色收编为 --accent；两档底色（常态 #e9eef2 / hover #dde6ee）是 原值的
-   accent 浅色调，与 --accent 不同轨（不是与 token 等值的硬编码），保留原值并
-   登记为 token 例外，避免为它另造第 7 档分类色。 */
+   字色收编为 --accent；两档底色（原值常态 #e9eef2 / hover #dde6ee）是**原值的
+   accent 浅色调**，与 --accent 不同轨，所以此前写成字面量并自认为「已登记例外」。
+   2026-10-04（#105）改成由 --accent 与 --bg 混出来：**那个「已登记」其实没有落到
+   docs/DESIGN.md**，而它是有实际后果的 —— 深色主题下这块底色仍是近白的 #e9eef2，
+   markdown 正文里会冒出一块亮片（与 .composer-slot 那次的形态一模一样）。
+   color-mix 让它在两套主题下都自动成立：浅色下与原来几乎等值（#e3eef6），
+   深色下变成深底 + accent 字，不用为它另造第 7 档分类色，也不再需要例外登记。 */
 .markdown code.clickable-path {
 	padding: 2px var(--space-2);
 	line-height: 1.5;
-	background: #e9eef2;
+	background: color-mix(in srgb, var(--accent) 12%, var(--bg));
 	border-radius: 4px;
 	color: var(--accent);
 	cursor: pointer;
@@ -4586,7 +4590,7 @@ textarea:focus-visible {
 
 .markdown code.clickable-path:hover {
 	opacity: 1;
-	background: #dde6ee;
+	background: color-mix(in srgb, var(--accent) 20%, var(--bg));
 }
 
 .markdown code.clickable-path:active {
