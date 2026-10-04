@@ -385,8 +385,10 @@ await h.check("⑨ 收藏到上限时明确拒绝并提示；悬空收藏 id 不
 		favorites: dangling,
 		usage: { ...(prefs.paletteMemory?.usage ?? {}), "action:automations": { score: 100, lastAt: Date.now() } },
 	};
-	writeFileSync(join(h.CONFIG_DIR, "preferences.json"), `${JSON.stringify(prefs, null, 2)}\n`, "utf8");
+	// **先关应用再写文件**：应用还活着时，上一节那些 fire-and-forget 的写回可能
+	// 刚好落在这次写入之后（读-改-写会把刚种下的内容盖回去）。关掉它就没有并发的写者。
 	await app.close();
+	writeFileSync(join(h.CONFIG_DIR, "preferences.json"), `${JSON.stringify(prefs, null, 2)}\n`, "utf8");
 	app = await h.launch();
 	win = h.window();
 
