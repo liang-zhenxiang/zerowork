@@ -258,7 +258,7 @@ Trellis 是**建议采用**的工作方法。
 
 ```
 .trellis/spec/main/      ← src/main/、src/main/sandbox/、src/preload/
-.trellis/spec/daemon/    ← src/main/daemon/（40 个模块）
+.trellis/spec/daemon/    ← src/main/daemon/（43 个模块）
 .trellis/spec/renderer/  ← src/renderer/
 .trellis/spec/shared/    ← src/shared/
 .trellis/spec/resources/ ← resources/（随时需记住：不参与本项目工具链）

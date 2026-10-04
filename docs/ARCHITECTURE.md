@@ -53,7 +53,7 @@ daemon 就绪后向渲染层推送 `daemon:ready`。但**推送可能在渲染�
 | 路径 | 职责 |
 | --- | --- |
 | `src/main/index.js` | 应用入口：窗口、菜单、快捷键、CSP、IPC 注册、daemon 拉起 |
-| `src/main/daemon/` | Agent 内核，40 个领域模块（见下） |
+| `src/main/daemon/` | Agent 内核，43 个领域模块（见下） |
 | `src/main/sandbox/` | 沙箱探测与执行，独立 worker |
 | `src/preload/index.js` | contextBridge 桥接层，定义渲染层可见的 IPC 面 |
 | `src/shared/ipc.js` | IPC 通道常量与文档类型判定，主进程与 preload 共用 |
@@ -63,7 +63,8 @@ daemon 就绪后向渲染层推送 `daemon:ready`。但**推送可能在渲染�
 
 ### daemon 模块划分
 
-daemon 共 19,467 行，按领域拆为 40 个模块。主要模块：
+daemon 共约 24,400 行，按领域拆为 43 个模块（两个数字都会随迭代漂移，
+实时值以 `npm run check:daemon-graph` 的输出为准）。主要模块：
 
 | 模块 | 职责 |
 | --- | --- |
@@ -92,7 +93,7 @@ daemon 共 19,467 行，按领域拆为 40 个模块。主要模块：
 | `memory.js` / `schedule.js` / `archive.js` | 记忆系统、调度、归档 |
 | `web-tools.js` / `preview-server.js` | 联网工具、预览服务 |
 
-⚠️ **改动 daemon 时请留意跨模块的初始化期依赖**。40 个模块的顶层求值顺序
+⚠️ **改动 daemon 时请留意跨模块的初始化期依赖**。43 个模块的顶层求值顺序
 由 import 图决定；在顶层引入新的跨模块引用可能触发 TDZ 错误
 （`Cannot access 'x' before initialization`）。
 

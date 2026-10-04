@@ -27,7 +27,7 @@
 | 目录 | 对应源码 |
 | --- | --- |
 | `spec/main/` | `src/main/index.js`、`src/main/sandbox/`、`src/preload/` |
-| `spec/daemon/` | `src/main/daemon/`（40 个模块） |
+| `spec/daemon/` | `src/main/daemon/`（43 个模块） |
 | `spec/renderer/` | `src/renderer/` |
 | `spec/shared/` | `src/shared/` |
 | `spec/resources/` | `resources/`（随包第三方内容，**不参与本项目工具链**） |

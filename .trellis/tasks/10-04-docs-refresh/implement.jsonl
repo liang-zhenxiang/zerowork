@@ -1,0 +1,2 @@
+{"file": "docs/ARCHITECTURE.md", "reason": "本任务要改它的 daemon 规模数字，也是模块划分的事实来源"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "要改的模块数就在这里"}

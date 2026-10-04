@@ -54,8 +54,8 @@
 | **修 `good first issue`** | 首次贡献者 | 这类 Issue 的正文里写明了「从哪个文件入手」 |
 | **加功能** | —— | 先在 Issue 里说一声，避免两个人做同一件事 |
 
-**不建议一上来就大改。** 这个项目有两块体量很大的代码（`src/main/daemon/` 约 40 个模块、
-`src/renderer/src/` 下单个 chunk 6.8 万行），它们的现状是**有意的**，
+**不建议一上来就大改。** 这个项目有两块体量很大的代码（`src/main/daemon/` 40 余个模块、
+`src/renderer/src/` 下单个 chunk 近 7 万行），它们的现状是**有意的**，
 理由写在 `docs/ARCHITECTURE.md` 的「设计决策与已否决方案」一节。
 动手前先读那一节，能省下大量来回报。
 
@@ -85,10 +85,11 @@
 
 ### ⚠️ 谨慎改的
 
-- `src/main/daemon/` —— 约 40 个模块、2 万多行，改动前先确认影响面。
+- `src/main/daemon/` —— 43 个模块、约 2.4 万行（实时值看 `npm run check:daemon-graph`），
+  改动前先确认影响面。
   模块之间的相对 import 由 `npm run check:daemon-graph` 守着，
   但**语义耦合**（谁在什么时候初始化)没有自动检查
-- `src/renderer/src/` —— 大块 chunk（`app.js` 单个 6.8 万行），
+- `src/renderer/src/` —— 大块 chunk（`app.js` 单个近 7 万行），
   且与构建产物的命名约定耦合。**改产物命名前必读
   `electron.vite.config.mjs` 的 renderer 段注释**：源码里的 `m.f||(m.f=[...])`
   依赖表是**字面量字符串**，构建工具不会改写它们 —— 产物名一旦带上内容哈希，
