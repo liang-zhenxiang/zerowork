@@ -23,8 +23,9 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { createHarness, ROOT } from "./lib/harness.mjs";
 
 const h = createHarness({ name: "ipc-functional" });
@@ -706,5 +707,46 @@ await h.check("会话分支：在用户消息处分出分支", async () => {
 
 // ── 15. 全程无渲染层异常 ────────────────────────────────────
 await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
+
+/*
+ * ── 16. 导出为 Markdown ────────────────────────────────────
+ * **预置一条有内容的会话文件再导出**，不靠「前面某项大概发过消息」这种前提：
+ * 没有配置模型时 pi 的 preflight 会先抛错、根本不落 user message，而内置命令
+ * （/new、/plan）由 daemon 就地处理、不产生 message 条目 —— 靠它们凑出一条文会话
+ * 是靠不住的（早先那版就写了 `if (r.skipped) return`，那是**裸 return**：
+ * harness 把「回调正常返回」记成 PASS，于是报告里多一行绿、实际一条断言都没跑）。
+ * 从 Node 侧读回导出文件（不是只看 IPC 的返回值）—— 导出功能最可能的失败形态是
+ * 「返回了路径、文件是空的」，只断言返回值抓不到它。
+ */
+await h.check("导出为 Markdown：返回 .md 路径，且文件真的写下了内容", async () => {
+	const sessionsDir = join(h.CONFIG_DIR, "sessions");
+	mkdirSync(sessionsDir, { recursive: true });
+	mkdirSync(h.WORKSPACE_DIR, { recursive: true });
+	const seedPath = join(sessionsDir, "2026-10-03T09-00-00-000Z_ipc-export.jsonl");
+	writeFileSync(
+		seedPath,
+		`${[
+			JSON.stringify({ type: "session", version: 3, id: "ipc-export", timestamp: "2026-10-03T09:00:00.000Z", cwd: h.WORKSPACE_DIR }),
+			JSON.stringify({ type: "message", id: "u1", parentId: null, timestamp: "2026-10-03T09:00:01.000Z", message: { role: "user", content: [{ type: "text", text: "导出这一条" }], timestamp: Date.parse("2026-10-03T09:00:01.000Z") } }),
+			JSON.stringify({ type: "message", id: "a1", parentId: "u1", timestamp: "2026-10-03T09:00:02.000Z", message: { role: "assistant", content: [{ type: "text", text: "好，导出成 Markdown。" }], stopReason: "stop", timestamp: Date.parse("2026-10-03T09:00:02.000Z") } }),
+		].join("\n")}\n`,
+	);
+
+	const r = await win.evaluate(async (path) => {
+		const k = globalThis.kami;
+		try {
+			const out = await k.exportSessionMarkdown(path);
+			return { ok: true, outputPath: out?.outputPath ?? "" };
+		} catch (e) {
+			return { ok: false, err: String(e?.message ?? e).slice(0, 160) };
+		}
+	}, seedPath);
+	assert.ok(r.ok, `导出 Markdown 失败: ${r.err}`);
+	assert.ok(String(r.outputPath).endsWith(".md"), `应返回 .md 路径: ${r.outputPath}`);
+	const text = readFileSync(r.outputPath, "utf8");
+	assert.ok(text.startsWith("# "), `导出的文档应以一级标题开头: ${text.slice(0, 40)}`);
+	assert.ok(text.includes("导出这一条"), "用户消息没进导出");
+	assert.ok(text.includes("好，导出成 Markdown。"), "助手消息没进导出");
+});
 
 await h.finish();

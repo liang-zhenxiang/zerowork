@@ -56,6 +56,7 @@ import { AutomationStore } from "./automation.js";
 import { SessionArchive } from "./archive.js";
 import { readLibraryArtifacts } from "./library.js";
 import { SessionPinStore } from "./pin.js";
+import { hasExportableContent, renderSessionMarkdown } from "./session-markdown.js";
 import {
 	loadMemorySystemPrompt,
 	profilePath,
@@ -4199,6 +4200,65 @@ const handlers = {
     const title = summary?.title ?? bucket.sessionId;
     const outputPath = buildExportPath(exportsDir, title, /* @__PURE__ */ new Date());
     await host.exportHtml(outputPath);
+    return { outputPath };
+  },
+  /**
+   * 导出为 Markdown：把**当前分支**的原始条目渲染成可移植文档。
+   *
+   * 与 HTML 导出同一条链路（同样的定位、恢复、标题、目录、返回形状），只换两处：
+   *   · 渲染器 —— HTML 交给 pi 的 exportToHtml，Markdown 用我们自己的纯函数
+   *     （pi 没有 Markdown 导出，见 session-markdown.js 的文件头）
+   *   · 扩展名 —— `.md`，落在**同一个** exports/ 目录，用户不必记两套规则
+   *
+   * 空会话的判据在这里（不是让渲染器返回空串就写文件）：只有 header、没有任何
+   * 正文条目的会话，写出来的是一篇只有标题的空文档 —— 那比报错更让人困惑。
+   */
+  [INVOKE.sessionExportMarkdown]: async ([path]) => {
+    const target = path;
+    const pathError = validateSessionFilePath(target, getSessionsDir());
+    if (pathError !== void 0) throw new Error(pathError);
+    /*
+     * 条目从哪拿 —— 分两种情况，**刻意不 resumeSession**：
+     *
+     *   · 这条会话正开着（有活宿主）：用活宿主的 getBranch()。leaf 在内存里才是真值，
+     *     用户刚分叉 / 回退过时，磁盘上的「最后一条条目」未必是他正在看的那条分支。
+     *   · 没开着：**只读打开会话文件**取当前分支。
+     *
+     * 为什么不像 HTML 导出那样先 resumeSession：那会建宿主，而建宿主要求**已选模型**
+     * （createHost 在 activeModelKey 为空时直接抛「还没有选择模型」）——
+     * 于是「没配模型就导不出历史会话」，而导出根本不需要模型。这条是 GUI 测试
+     * 在全新配置目录里实测撞出来的（报错原文就是「还没有选择模型」）。
+     * 顺带还去掉了「导出旧会话会把你切到那条会话」这个副作用。
+     */
+    const bucket = findBucketByFile(target);
+    const hostPromise = bucket?.hostPromise;
+    const resolvedTarget = resolve(target);
+    const summary = (await listSessions()).find((s) => resolve(s.path) === resolvedTarget);
+    let entries;
+    let cwd;
+    if (hostPromise !== void 0) {
+      const host = await hostPromise;
+      entries = host.branchEntries();
+      cwd = summary?.cwd ?? bucket.cwd;
+    } else {
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+      const manager = SessionManager.open(target, getSessionsDir());
+      entries = manager.getBranch();
+      cwd = manager.getHeader()?.cwd ?? summary?.cwd ?? "";
+    }
+    if (!hasExportableContent(entries)) throw new Error("该会话还没有内容可导出");
+    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
+    mkdirSync(exportsDir, { recursive: true });
+    const title = summary?.title ?? "";
+    const now = /* @__PURE__ */ new Date();
+    const outputPath = buildExportPath(exportsDir, title, now, ".md");
+    const markdown = renderSessionMarkdown({
+      title,
+      header: { cwd },
+      entries,
+      now,
+    });
+    writeFileSync(outputPath, markdown, "utf8");
     return { outputPath };
   },
   /*

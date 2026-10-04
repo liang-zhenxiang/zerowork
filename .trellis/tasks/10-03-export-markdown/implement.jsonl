@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 的编码规范：适配层纪律、跨模块初始化期依赖"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试规范：三层测试的分工、e2e 骨架与等待谓词"}

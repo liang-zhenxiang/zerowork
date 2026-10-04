@@ -17,8 +17,15 @@ import {
 	sanitizeExportTitle,
 } from "./skills.js";
 
-function buildExportPath(exportsDir, title, now) {
-  return join(exportsDir, `${sanitizeExportTitle(title)}-${formatTimestamp(now)}.html`);
+/**
+ * 导出文件路径：`<exportsDir>/<清洗过的标题>-<时间戳><扩展名>`。
+ *
+ * 扩展名可传（缺省 `.html`）：会话现在能导出成 HTML 与 Markdown 两种格式，
+ * 两者**必须落在同一个目录、用同一套命名**，否则用户在找文件时要记两套规则。
+ * 标题与时间戳的清洗/格式化也共用同一份实现（skills.js）。
+ */
+function buildExportPath(exportsDir, title, now, extension = ".html") {
+  return join(exportsDir, `${sanitizeExportTitle(title)}-${formatTimestamp(now)}${extension}`);
 }
 
 const CHILD_AGENTS_DETAILS_KEY = "subagents";
