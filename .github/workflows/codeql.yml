@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
 
       - name: 初始化 CodeQL
-        uses: github/codeql-action/init@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/init@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           # 本项目的应用代码是 JavaScript（JS + JSDoc），
           # resources/ 下的第三方内容是随包分发的，不属于本工程的源码
@@ -64,6 +64,6 @@ jobs:
               - src/main/daemon
 
       - name: 执行分析并上传结果
-        uses: github/codeql-action/analyze@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
+        uses: github/codeql-action/analyze@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
           category: "/language:javascript-typescript"
