@@ -13260,6 +13260,7 @@ function Sidebar({
   onDeleteTask,
   onArchiveTask,
   onExportTask,
+  onExportMarkdownTask,
   onNewTaskInSpace,
   onRenameWorkspace,
   onRemoveWorkspace,
@@ -13418,14 +13419,38 @@ function Sidebar({
             {
               type: "button",
               className: "space-menu-item",
-              title: task.current ? "导出为 HTML" : "恢复此会话并导出 HTML",
+              /*
+               * 两种导出格式并列。此前只有一项、文案是光秃秃的「导出」——
+               * 用户点完才知道出来的是 HTML。名称写全，选择发生在点之前。
+               * 非当前会话会先被恢复（顺带切过去），tooltip 照既有做法如实说明。
+               */
+              title: task.current
+                ? "导出为 HTML（单文件，双击就能看）"
+                : "恢复此会话并导出为 HTML（单文件，双击就能看）",
               onClick: () => {
                 setMenuPath(void 0);
                 setEditingPath(void 0);
                 setConfirmingPath(void 0);
                 onExportTask(task.path);
               },
-              children: "导出"
+              children: "导出为 HTML"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              // 与 HTML 导出不同：Markdown 导出**不会**把非当前会话切过来（见
+              // `exportMarkdownTask` 的注释），所以 tooltip 里不提「恢复此会话」。
+              title: "导出为 Markdown（纯文本，可贴进文档 / 笔记）",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                onExportMarkdownTask(task.path);
+              },
+              children: "导出为 Markdown"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -13439,20 +13464,6 @@ function Sidebar({
                 setEditingPath(task.path);
               },
               children: "重命名"
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              className: "space-menu-item",
-              onClick: () => {
-                setMenuPath(void 0);
-                setEditingPath(void 0);
-                setConfirmingPath(void 0);
-                onArchiveTask(task.path);
-              },
-              children: "归档"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -68616,6 +68627,28 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [taskList, resyncSnapshot, openArtifact]
   );
+  /*
+   * 导出为 Markdown：toast 出路径 + 交给系统默认程序打开。
+   *
+   * **与 HTML 导出有一处刻意的不同：不去恢复 / 切换会话。**
+   * HTML 导出走 pi 的 `exportToHtml`，它要一个活的 AgentSession，所以 daemon 必须
+   * 先把会话恢复起来 —— 代价是「导出旧会话会把你切过去」，而且建宿主要求已选模型
+   * （没配模型就导不出历史会话）。Markdown 导出只需要条目，daemon 对没开着的会话
+   * 直接只读打开会话文件（见 session-files.js 那条分支），于是这两个副作用一起消失。
+   * 所以这里既不 resyncSnapshot 也不 setView —— 导出不该改变你正在看的东西。
+   */
+  const exportMarkdownTask = reactExports.useCallback(
+    (path2) => {
+      window.kami.exportSessionMarkdown(path2).then(({ outputPath }) => {
+        showToast(`已导出：${outputPath}`, "success");
+        openArtifact(outputPath);
+      }).catch((error) => {
+        showToast(error instanceof Error ? error.message : String(error));
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openArtifact]
+  );
   const branchFromUserMessage = reactExports.useCallback(
     (mode, userIndex, refillText, opts) => {
       const path2 = taskListRef.current?.find((item) => item.current)?.path;
@@ -68920,6 +68953,7 @@ function App() {
         onDeleteTask: deleteTask,
         onArchiveTask: archiveTask,
         onExportTask: exportTask,
+        onExportMarkdownTask: exportMarkdownTask,
         onNewTaskInSpace: newTaskInSpace,
         onRenameWorkspace: renameWorkspace,
         onRemoveWorkspace: removeWorkspace,

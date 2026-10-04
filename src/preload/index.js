@@ -110,6 +110,11 @@ const INVOKE = {
    */
   sessionExport: "session:export",
   /**
+   * 导出为 Markdown：把当前分支渲染成可移植文档，落在同一个 exports/ 目录下。
+   * 与 sessionExport（HTML）同形：path 定位会话，返回 { outputPath }。
+   */
+  sessionExportMarkdown: "session:export-markdown",
+  /**
    * 资料库：汇总全部会话交付过的产物（跨会话去重，带来源会话与失效标记）。
    * **拉式**：只在用户打开资料库页面时调用。
    */
@@ -551,6 +556,7 @@ const bridge = {
   deleteSession: (path) => ipcRenderer.invoke(INVOKE.sessionDelete, path),
   archiveSession: (path, archived) => ipcRenderer.invoke(INVOKE.sessionArchive, path, archived),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
+  exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
   workspaceSnapshot: () => ipcRenderer.invoke(INVOKE.workspaceSnapshot),
   createWorkspace: (name) => ipcRenderer.invoke(INVOKE.createWorkspace, name),
