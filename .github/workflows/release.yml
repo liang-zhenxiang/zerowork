@@ -1,7 +1,8 @@
 # 工作流名称
 name: Release
 # 工作流运行时显示名称
-run-name: 发布 ${{ github.ref_name }}
+# 手工重算说明时 ref_name 是分支名（main），所以优先取输入里的 tag。
+run-name: 发布 ${{ inputs.tag || github.ref_name }}
 
 # 怎样触发工作流
 on:
@@ -11,6 +12,23 @@ on:
     # 下面那段预发布处理逻辑就成了永远走不到的死代码。
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+*"
+
+  # ② 手工重算发布说明（2026-10-04 加，issue #129）
+  #
+  # 为什么需要它：tag 推送这条路上任何一步出错（最典型的是 PR 清单取错基准 ——
+  # v0.4.0 实测过），产物一旦发出去就**没有可复用的修正路径**：重跑那次 run 用的是
+  # **tag 那个提交里的 release.yml**（旧版本，改不动），唯一办法是维护者现场手工
+  # `gh release edit`。这条触发口把「现场想办法」变成「跑一次就能修」。
+  #
+  # 与 tag 推送**共用同一段生成逻辑**（同三个 job），差别只有两处：
+  #   · 检出的 ref 用输入里的 tag（发布说明的依据必须是**发布当时**的 CHANGELOG）；
+  #   · 「构建安装包」job 不跑（资产已经在 Release 上，重建会覆盖或报错）。
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要（重新）生成发布说明的 tag，必须已经存在，例如 v0.4.0"
+        required: true
+        type: string
 
 # 默认只读。写权限**按 job 声明**，不放在工作流层 ——
 # 工作流层的 `contents: write` 会让每个 job 都拿到写权限，
@@ -56,14 +74,37 @@ jobs:
     outputs:
       has-changelog: ${{ steps.changelog.outputs.found }}
       prev-tag: ${{ steps.prs.outputs.prev_tag }}
+    env:
+      # 一次定义、全 job 沿用：tag 推送时是 tag 名，手工重算时是输入里的 tag。
+      # **不要在下面各步里再写 `TAG: ${{ github.ref_name }}`** ——
+      # 那会在手工重算时把它覆盖成 main，于是版本号校验、CHANGELOG 提取、
+      # 清单基准全部对着错误的字串跑（而且都还「能跑通」，只是结果错）。
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # 手工重算时检出的是**那个 tag**：发布说明的依据必须是发布当时的
+          # CHANGELOG 与 package.json，而不是此刻 main 上的（main 可能已经
+          # 有了下一个版本的 [Unreleased] 内容）。
+          ref: ${{ inputs.tag || github.ref }}
           # 发布用不到 git 凭证（上传走 gh CLI 的 token），不持久化
           persist-credentials: false
           # 需要完整历史：既要定位上一个 tag，也要让 GitHub 生成对比链接
           fetch-depth: 0
+
+      # 手工重算时输入是自由文本：先确认这个 tag 真的存在再说别的。
+      # （tag 推送这条路天然不可能踩到 —— GitHub 只在 tag 存在时才触发。）
+      - name: 校验 tag 存在（仅手工重算）
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "::error::tag ${TAG} 不存在（手工重算说明必须给一个已经发布的 tag）"
+            exit 1
+          fi
+          echo "tag ${TAG} 存在，继续"
 
       # -----------------------------------------------------------------------
       # 版本号一致性：tag / CHANGELOG / package.json 三者必须对得上。
@@ -74,7 +115,6 @@ jobs:
       # -----------------------------------------------------------------------
       - name: 校验版本号一致性
         env:
-          TAG: ${{ github.ref_name }}
         run: node scripts/check-release-version.mjs "$TAG"
 
       # -----------------------------------------------------------------------
@@ -83,7 +123,6 @@ jobs:
       - name: 提取 CHANGELOG 中本版本的说明
         id: changelog
         env:
-          TAG: ${{ github.ref_name }}
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -149,7 +188,6 @@ jobs:
         id: prs
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -247,7 +285,6 @@ jobs:
         id: summary
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          TAG: ${{ github.ref_name }}
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -336,7 +373,6 @@ jobs:
       # -----------------------------------------------------------------------
       - name: 组装发布说明
         env:
-          TAG: ${{ github.ref_name }}
           HAS_CHANGELOG: ${{ steps.changelog.outputs.found }}
           PREV_TAG: ${{ steps.prs.outputs.prev_tag }}
         run: |
@@ -411,6 +447,9 @@ jobs:
   installers:
     name: 构建安装包
     needs: [notes]
+    # 手工重算说明时**不构建**：安装包已经在 Release 上，重传只会覆盖或报错，
+    # 而它们本身没有任何问题（要修的只是那段文字）。
+    if: github.event_name == 'push'
     # 用 `./` 而不是 `$/`：两者都可用，选 `./` 是因为 **actionlint 能校验它**
     # （`$/` 不在它认识的 `uses` 格式之内），而本地与 CI 的工作流检查都以 actionlint 为准。
     # `./` 唯一的「缺点」是 zizmor 的 self-repository 审计会建议换成 `$/` ——
@@ -449,6 +488,10 @@ jobs:
     if: always() && needs.notes.result == 'success'
     permissions:
       contents: write
+    env:
+      # 同 notes job：手工重算时是输入里的 tag，不是分支名。
+      # 下面几步的 shell 都直接用 $TAG（`set -u` 下漏定义会直接报未绑定变量）。
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - name: 检出代码
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -472,7 +515,6 @@ jobs:
       - name: 创建 Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -503,9 +545,11 @@ jobs:
           fi
 
       - name: 附上安装包
+        # 手工重算说明时没有安装包可取（installers job 没跑），这一步不该在这里
+        # 报「没有可附上的安装包」的假警告。
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
         run: |
           #!/usr/bin/env bash
           set -euo pipefail
@@ -541,7 +585,7 @@ jobs:
           fi
 
           {
-            echo "### 🚀 Release [${GITHUB_REF_NAME}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${GITHUB_REF_NAME}) 已发布"
+            echo "### 🚀 Release [${TAG}](https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}) 已发布"
             echo ""
             echo "| 环节 | 结果 |"
             echo "| --- | --- |"
