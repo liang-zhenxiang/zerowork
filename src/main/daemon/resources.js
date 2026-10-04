@@ -197,8 +197,11 @@ function loadWelcome(resourcesDir, scenes) {
       prompt: requireStringField(raw, "prompt", at),
       // 绑定的专家是 resources/experts/ 的目录名；存在性由测试跨资源校验
       // （加载器这里只有 welcome 一个目录的视野，看不到 experts/）。
-      expert: requireStringField(raw, "expert", at),
-      cover: requireStringField(raw, "cover", at)
+      expert: requireStringField(raw, "expert", at)
+      // 2026-10-04（#104）：这里此前还要求一个 cover 字段（第三方 CDN 的图片地址）。
+      // 封面改成第一方生成后（renderer 的 case-cover.js 按交付物类型画示意图），
+      // 那个字段就没有了 —— 继续要求它会让整份案例数据加载失败（不是少一张图，
+      // 是案例区整个不出现）。故刻意**不**再校验、也不再下发。
     };
   });
   requireUniqueIds(cases.map((c) => c.id), casesFile);

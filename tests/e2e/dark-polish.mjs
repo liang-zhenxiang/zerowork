@@ -7,10 +7,10 @@
  *      深色下在输入卡外圈炸出一圈浅灰发光边。修法是把渐收进 `--composer-slot-bg`
  *      （亮/暗两块各定义）。本用例直接量**外槽底缘区域的平均亮度**：
  *      修好后它必须与主背景同档（不再明显更亮）。
- *   ② **案例封面**：深色下实拍封面是首屏最亮的四块矩形。修法是
- *      `[data-theme="dark"] .case-cover img { filter: brightness(.86) saturate(.94) }`
- *      + 加载完成淡入。本用例锁 filter 与过渡的**计算值契约**
- *      （不依赖 CDN 是否可达，稳定可断言），淡入的像素证据另存前后截图。
+ *   ② ~~**案例封面**：深色下实拍封面是首屏最亮的四块矩形。~~ **已退役（2026-10-04，#104）**：
+ *      封面改成第一方生成的示意图后，那条 `[data-theme="dark"] .case-cover img` 的
+ *      压暗规则连同它盯着的两条断言一起删掉了 —— 规则没了还留断言就是假通过。
+ *      封面现在的覆盖在 `tests/e2e/offline-covers.mjs`（不出网 + 断网重载 + 深浅两套）。
  *
  * ## 为什么用「区域平均亮度」而不是整屏
  *
@@ -23,8 +23,8 @@
  * 1. 把 `--composer-slot-bg` 从 `[data-theme="dark"]` 块删掉 →
  *    深色下 `.composer-slot` 回退亮色值，本用例的「外槽不再是亮色」这条**变红**
  *    （实测槽底缘平均亮度从 ~30 跳到 ~245），`check:theme-tokens` 同时报红。
- * 2. 把 `[data-theme="dark"] .case-cover img` 的 `filter` 删掉 →
- *    「封面被压暗」这条**变红**。
+ * 2. （已退役，见上）把 `[data-theme="dark"] .case-cover img` 的 `filter` 删掉 →
+ *    「封面被压暗」这条**变红** —— 那条规则与断言在 #104 里一起删掉了。
  *    两次都改回后重新全绿。
  */
 import assert from "node:assert/strict";
@@ -117,20 +117,22 @@ async function setTheme(pref) {
 	await h.waitForSettled();
 }
 
-/** 用真实类名造一个探针，读 `.case-cover img` 的计算样式（不依赖真的加载图片）。 */
-const probeCoverImg = () =>
+/**
+ * 用真实类名造一个探针，读 `.turn-nav-mark::before` 的计算样式。
+ *
+ * 为什么换成它：此前这里探的是 `.case-cover img`（那张 CDN 实图的淡入过渡）。
+ * 封面改成本地生成后那条规则没了（#104），而「reduced-motion 的第 ④ 组真的
+ * 关掉了**过渡**、不只是关 animation」这条纪律必须有东西盯着 ——
+ * `.turn-nav-mark::before` 是第 ④ 组里**真有过渡**的那一个（transform +
+ * background-color 两条），探它才有意义（探一个本来就没有过渡的元素是假通过）。
+ */
+const probeTurnNavMark = () =>
 	win.evaluate(() => {
 		const span = document.createElement("span");
-		span.className = "case-cover";
-		const img = document.createElement("img");
-		span.appendChild(img);
+		span.className = "turn-nav-mark";
 		document.body.appendChild(span);
-		const cs = getComputedStyle(img);
-		const out = {
-			filter: cs.filter,
-			transitionProperty: cs.transitionProperty,
-			transitionDuration: cs.transitionDuration,
-		};
+		const cs = getComputedStyle(span, "::before");
+		const out = { transitionProperty: cs.transitionProperty, transitionDuration: cs.transitionDuration };
 		span.remove();
 		return out;
 	});
@@ -179,53 +181,25 @@ await h.check("外槽渐变的计算值随主题变化（token 双块接线）",
 	await setTheme("dark");
 });
 
-// ── ④ 深色下案例封面被压暗（filter 计算值契约，不依赖 CDN）──────
-const darkCoverProbe = await probeCoverImg();
-await h.check("深色下案例封面被压暗（R2：filter 契约）", () => {
-	assert.ok(
-		/brightness\(\s*0\.86\s*\)/.test(darkCoverProbe.filter),
-		`.case-cover img 深色计算 filter=${darkCoverProbe.filter} —— 缺 brightness(0.86)`,
-	);
-	assert.ok(
-		/saturate\(\s*0\.94\s*\)/.test(darkCoverProbe.filter),
-		`.case-cover img 深色计算 filter=${darkCoverProbe.filter} —— 缺 saturate(0.94)`,
-	);
-});
-
-// 反向对照：浅色下不该有这层压暗
-await setTheme("light");
-const lightCoverProbe = await probeCoverImg();
-await h.check("浅色下案例封面不加压暗（反向对照）", () => {
-	assert.equal(lightCoverProbe.filter, "none", `浅色 .case-cover img 计算 filter=${lightCoverProbe.filter}，应为 none`);
-});
-await setTheme("dark");
-
-// ── ⑤ 案例封面淡入：过渡走既有 token ────────────────────────────
-await h.check("案例封面淡入走既有时长/缓动 token（opacity 过渡）", () => {
-	assert.ok(
-		darkCoverProbe.transitionProperty.includes("opacity"),
-		`transition-property=${darkCoverProbe.transitionProperty} —— 不含 opacity`,
-	);
-	assert.equal(
-		darkCoverProbe.transitionDuration,
-		"0.15s",
-		`transition-duration=${darkCoverProbe.transitionDuration} —— 应为 --dur-fast(150ms)`,
-	);
-});
-
-// ── ⑥ prefers-reduced-motion：淡入被关停 ───────────────────────
-// 反向对照：未开启减弱动效时，探针上确实挂着过渡。
-await h.check("默认动效下封面探针确有过渡（反向对照）", () => {
-	assert.notEqual(darkCoverProbe.transitionDuration, "0s", `transition-duration=${darkCoverProbe.transitionDuration}`);
-});
-
-await win.emulateMedia({ reducedMotion: "reduce" });
-const reducedCoverProbe = await probeCoverImg();
-await h.check("减弱动效下案例封面淡入被关停（R2：transition 要单独关）", () => {
-	assert.equal(
-		reducedCoverProbe.transitionDuration,
+// ── ④ reduced-motion 的第 ④ 组：关的是**过渡**，不是只关动画 ──────────
+// 反向对照：未开启减弱动效时，探针上确实挂着过渡（否则下面那条是假通过）。
+const normalTransition = await probeTurnNavMark();
+await h.check("默认动效下轨道刻度探针确有过渡（反向对照）", () => {
+	assert.notEqual(
+		normalTransition.transitionDuration,
 		"0s",
-		`transition-duration=${reducedCoverProbe.transitionDuration} —— reduced-motion 下淡入没被关停`,
+		`transition-duration=${normalTransition.transitionDuration} —— 探针本来就没有过渡，下面那条会假通过`,
+	);
+});
+
+// ── ④ 续：开启减弱动效后，同一条过渡被关停 ─────────────────────────
+await win.emulateMedia({ reducedMotion: "reduce" });
+const reduced = await probeTurnNavMark();
+await h.check("减弱动效下轨道刻度的过渡被关停（第 ④ 组不是空转）", () => {
+	assert.equal(
+		reduced.transitionDuration,
+		"0s",
+		`transition-duration=${reduced.transitionDuration} —— reduced-motion 下过渡没被关停`,
 	);
 });
 await win.emulateMedia({ reducedMotion: "no-preference" });
