@@ -1338,11 +1338,19 @@ textarea:focus-visible {
 	transition: opacity var(--dur-base) var(--ease-standard);
 }
 
-/* 行内操作钮：hover 行才浮现（opacity + visibility，焦点进入时也保持可见）。
+/* 行内操作钮：hover 行才浮现（opacity + pointer-events，焦点进入时也保持可见）。
    绝对定位压在时间戳那一格上（right: 6px ≈ meta 的 --space-3 右内边距），
    于是 hover 读作"时间戳原地变成操作钮"，而不是"右侧又挤进来一排按钮"。
    里面**只有一个「⋯」**（2026-09-16 改）：此前并排四个 20px 图标、gap 只有 2px，
-   窄栏里挤成一簇、看着像叠在一起 —— 动作全收进 .task-op-menu。 */
+   窄栏里挤成一簇、看着像叠在一起 —— 动作全收进 .task-op-menu。
+
+   隐藏态**只降透明度、不吃事件**，不用 `visibility: hidden`（2026-10-03 修）：
+   `visibility: hidden` 会把里面的按钮整个移出 Tab 序列，于是
+   `.task-item-ops:focus-within` **永远不会触发**（够不着就进不去焦点）——
+   行内那一整组动作（导出/重命名/置顶/归档/删除）对键盘用户是关闭的，
+   而它是全站行操作的唯一入口。改 `pointer-events: none` 之后：Tab 能走进去
+   （走进去即 `:focus-within` → 淡入可见），透明态下仍接不到点击
+   （否则点行尾那一格空白会误触一个看不见的按钮）。 */
 .task-item-ops {
 	position: absolute;
 	top: 6px;
@@ -1350,17 +1358,15 @@ textarea:focus-visible {
 	display: flex;
 	gap: 2px;
 	opacity: 0;
-	visibility: hidden;
-	/* 与 meta 同时长，两样东西才不会一先一后闪（visibility 必须参与过渡：可见→隐藏若立即生效，
-	   opacity 的淡出会看不见，操作钮就成了硬闪）。 */
-	transition: opacity var(--dur-fast) var(--ease-standard), visibility var(--dur-fast);
+	pointer-events: none;
+	transition: opacity var(--dur-fast) var(--ease-standard);
 }
 
 .task-item:hover .task-item-ops,
 .task-item-ops:focus-within {
 	opacity: 1;
-	visibility: visible;
-	transition: opacity var(--dur-base) var(--ease-standard), visibility var(--dur-base);
+	pointer-events: auto;
+	transition: opacity var(--dur-base) var(--ease-standard);
 }
 
 .task-op-btn {
@@ -1501,7 +1507,7 @@ textarea:focus-visible {
 	min-width: 0;
 	padding: var(--space-1) var(--space-2);
 	/* **不预留让位宽度**（理由同 .task-item-body）：组头的「+」「⋯」两个操作钮是普通
-	   flex 子项（.space-group-actions，只切 opacity/visibility，**不脱离排版**），
+	   flex 子项（.space-group-actions，只切 opacity/pointer-events，**不脱离排版**），
 	   宽度本来就常驻，hover 不会改变主按钮的可用宽 —— 这里再写 48px padding-right 是
 	   **第二重让位**：组名可用宽被扣两次（当年 216px 侧栏算下来只剩 ~50px，约 3~4 字，
 	   所以被截成 ".kami…"/"给肉…"）。右侧没有常驻元信息要保护（组计数早已不渲染），删掉即可。 */
@@ -1542,21 +1548,24 @@ textarea:focus-visible {
 
 /* 组级操作（+ 与 ⋯）：与任务行同款的 hover 浮现模式。
    过渡与 .task-item-ops 逐条对齐（含进出场不对称：淡回用 --dur-fast、浮现用
-   --dur-base，docs/DESIGN.md §5.8）—— 两处是同一个交互，此前这里是硬闪、那边是渐变。 */
+   --dur-base，docs/DESIGN.md §5.8）—— 两处是同一个交互，此前这里是硬闪、那边是渐变。
+   隐藏手法也必须对齐：同样用 `opacity + pointer-events`，不用 `visibility: hidden`
+   —— 后者会把「重命名空间 / 移除空间」两个按钮移出 Tab 序列（理由与修法详见
+   .task-item-ops 的注释）。 */
 .space-group-actions {
 	display: flex;
 	gap: 2px;
 	padding-right: var(--space-1);
 	opacity: 0;
-	visibility: hidden;
-	transition: opacity var(--dur-fast) var(--ease-standard), visibility var(--dur-fast);
+	pointer-events: none;
+	transition: opacity var(--dur-fast) var(--ease-standard);
 }
 
 .space-group-header:hover .space-group-actions,
 .space-group-actions:focus-within {
 	opacity: 1;
-	visibility: visible;
-	transition: opacity var(--dur-base) var(--ease-standard), visibility var(--dur-base);
+	pointer-events: auto;
+	transition: opacity var(--dur-base) var(--ease-standard);
 }
 
 /* ⋯ 弹层：卡片视觉复用 .pop-menu（圆角 = --radius-md 10px，与旧硬编码一致），向下展开。 */
@@ -1569,6 +1578,27 @@ textarea:focus-visible {
 	/* 空间连续性：挂在 .space-group-header（position: relative）下方、右侧
 	   （top: 100% + right: 4px），触发点是行右端的「⋯」→ 从触发点右上角生长。 */
 	transform-origin: top right;
+}
+
+/*
+ * 空间不足时向上展开：靠窗口底部的行，菜单挂在它下方会落到 .sidebar-scroll 的可视区
+ * 之外（被裁掉、最后几项点不到）。会话行的 ⋯ 菜单本轮加了「置顶」一项，
+ * 越界的概率明显变大，所以给一个翻转档。
+ *
+ * 判据在 JS 里量（见 Sidebar 的 useLayoutEffect）：菜单的实际高度取决于项数与文案，
+ * CSS 自己算不出来。本规则只负责「翻过来之后长什么样」。
+ *
+ * 关键：**这条必须排在上面所有给菜单定位的规则之后**（`.task-op-menu` 与 `.space-menu`
+ * 都写了 top: 100%）。同特异性规则靠源序决定胜负 —— 第一版把它写在 `.task-op-menu`
+ * 之后、却排在 `.space-menu` 之前，于是 top: 100% 照样生效；而 top 与 bottom 同时存在
+ * 会把绝对定位元素的高度压成 0（实测：菜单盒塌成 14px、子项全部溢出到容器外，
+ * 看起来像「菜单渲染坏了」）。经过与截图见
+ * .trellis/tasks/10-03-session-pin/design.md。
+ */
+.space-menu-up {
+	top: auto;
+	bottom: 100%;
+	transform-origin: bottom right;
 }
 
 .space-menu-item {
@@ -1602,12 +1632,17 @@ textarea:focus-visible {
 	background: var(--ok);
 }
 
-/* 分支会话标记：压在标题之前（同未读点/转圈的位置约定——行尾会被省略号裁掉）。
-   色取 --text-secondary：它是「来源说明」性质的次级标记，不抢标题与状态点的注意力，
-   也不借用状态色（分支不是状态，docs/DESIGN.md §2.4）。
+/* 标题前缀的次级标记：分支会话（「这条是从哪儿来的」）与已置顶（「我钉住了它」）。
+   两者压在标题之前（同未读点/转圈的位置约定——行尾会被省略号裁掉），
+   **共用一条规则**：它们是同一档视觉重量，复制一份数值迟早会漂开。
+   色取 --text-secondary：都是次级标记，不抢标题与状态点的注意力，
+   也不借用状态色（分支与置顶都不是状态，docs/DESIGN.md §2.4）。
    内联 SVG 默认坐在基线上会整体偏上，故下沉 0.18em——量与手法同 .clickable-path-icon
-   （相对字号的量，不引入新的间距/尺寸档位）。 */
-.task-branch-mark {
+   （相对字号的量，不引入新的间距/尺寸档位）。
+   置顶标记 hover 时**不隐藏**（它是常驻形态，不挂在 .task-item-ops 上）：
+   hover 正是用户去看「这行是什么」的时刻，此时把状态抹掉等于状态在需要时消失。 */
+.task-branch-mark,
+.task-pin-mark {
 	display: inline-block;
 	vertical-align: -0.18em;
 	margin-right: var(--space-1);

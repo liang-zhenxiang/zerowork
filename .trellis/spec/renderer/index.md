@@ -99,6 +99,8 @@
 - 硬编码颜色 / 间距 / 圆角，绕过 token
 - 原生 `<select>` —— 用既有的自定义下拉外观
 - 过渡**布局属性**（`width` / `height`）—— 要表现长度变化用 `scaleX`
+- 用 `visibility: hidden` 藏 hover 浮现的控件 —— 它会把按钮移出 Tab 序列
+  （`:focus-within` 永不触发、键盘没有入口）；用 `opacity` + `pointer-events`（DESIGN §7.9）
 - 把「加载中」和「空」混为一谈
 - 在组件里新造类名 / 复制视觉值
 - 隐藏核心功能
