@@ -186,8 +186,28 @@ await h.check("① ⋯ 菜单里「导出为 HTML」与「导出为 Markdown」�
 	await h.shoot("menu-with-export-formats");
 });
 
-// ══ ② 导出真的落盘，且内容是这次对话 ═════════════════════════
+// ══ ② 导出真的落盘（并在同一次点击里捕获成功 toast）═══════════
+/*
+ * ⚠️ toast 只活 2.2 秒（`showToast` 里的 `setTimeout(…, 2200)`），所以它的轮询必须
+ * **在点击之前**就挂上：等文件落盘、再读文件、再断言，这段耗时在 CI 上足以让 toast
+ * 消失（第一次真跑就是这么红的：文件写出来了，toast 判据却超时）。
+ * 一次点击、两个信号并行等 —— 既不重复导出，也不依赖「谁先到」。
+ */
+let exportedToast = null;
 await h.check("② 点「导出为 Markdown」→ exports/*.md 落盘，内容含这次对话", async () => {
+	const toastSeen = waitUntil(
+		() =>
+			win.evaluate(() => {
+				const stack = document.querySelector(".toast-stack");
+				if (stack === null) return null;
+				const node = [...stack.querySelectorAll(".toast")].find((t) =>
+					(t.textContent ?? "").includes("已导出"),
+				);
+				if (node === undefined) return null;
+				return { text: (node.textContent ?? "").trim(), success: node.classList.contains("toast-success") };
+			}),
+		{ timeout: 30_000, desc: "出现「已导出」toast" },
+	);
 	await clickMenuItem("导出为 Markdown");
 	await waitUntil(() => win.evaluate(() => document.querySelector(".task-op-menu") === null), {
 		timeout: 15_000,
@@ -201,6 +221,7 @@ await h.check("② 点「导出为 Markdown」→ exports/*.md 落盘，内容�
 		},
 		{ timeout: 30_000, desc: "exports/ 下出现 .md" },
 	);
+	exportedToast = await toastSeen;
 	const md = readFileSync(file, "utf8");
 
 	assert.ok(md.startsWith(`# ${FIRST_LINE}\n`), `一级标题应是会话标题：${md.slice(0, 60)}`);
@@ -221,19 +242,8 @@ await h.check("② 点「导出为 Markdown」→ exports/*.md 落盘，内容�
 
 // ══ ③ 界面反馈是成功，不是报错 ═══════════════════════════════
 await h.check("③ 界面上是成功反馈（toast 带导出路径），不是错误提示", async () => {
-	const toast = await waitUntil(
-		() =>
-			win.evaluate(() => {
-				const stack = document.querySelector(".toast-stack");
-				if (stack === null) return null;
-				const node = [...stack.querySelectorAll(".toast")].find((t) =>
-					(t.textContent ?? "").includes("已导出"),
-				);
-				if (node === undefined) return null;
-				return { text: (node.textContent ?? "").trim(), success: node.classList.contains("toast-success") };
-			}),
-		{ timeout: 15_000, desc: "出现「已导出」toast" },
-	);
+	const toast = exportedToast;
+	assert.ok(toast !== null, "成功 toast 没出现 —— 见 ② 的失败信息（它与文件是同一次导出的两个信号）");
 	assert.equal(toast.success, true, `导出成功的提示应是 success 样式：${JSON.stringify(toast)}`);
 	assert.ok(toast.text.includes(".md"), `toast 里应带导出路径：${toast.text}`);
 });
