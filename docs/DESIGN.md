@@ -31,10 +31,18 @@ Token 真源有两块：`:root`（亮色基准）与 `[data-theme="dark"]`（暗
 这条由 `scripts/check-theme-tokens.mjs`（`npm run check:theme-tokens`，已收编 lint:all）守护：
 加新颜色 token 忘配暗色会在静态检查就红，不用等暗色截图。
 
-> **这个检查只认「同名 token 对」——它看不见「压根没走 token 的字面量」。**
-> 首页输入卡外槽的渐变（`--composer-slot-bg`）就曾是这样一处逃逸：亮色块用裸字面量、
-> 暗色块漏配，深色下在输入卡外圈炸出一圈发光边，静态检查却全绿。2026-10-03 把它收进
-> token 才拉回覆盖面。检测「字面量逃逸」是另一件事，见 issue #105。
+> **检查有两项，缺一不可**：
+>
+> 1. **同名 token 对**：亮色块随主题变的名字，暗色块必须有覆盖。
+> 2. **字面量逃逸**（2026-10-04 起，#105）：token 块**之外**的声明里出现
+>    hex / `rgb()` / `hsl()` / 命名色 → 报错，除非在 `scripts/check-theme-tokens.mjs`
+>    的 `COLOR_LITERAL_ALLOWED` 里（每条必须写明理由与出处，**过期条目同样报错**）。
+>
+> 第 2 项是被第 1 项的真实盲区逼出来的：首页输入卡外槽的渐变曾是裸字面量
+> （`#f0f0f0` / `#f5f5f5`），暗色块漏配 → 深色下输入卡外圈炸出一圈发光边，
+> 而检查全绿 —— 因为那个块里**一个 token 名字都没有**，无从比对。
+> 同一形态 2026-10-04 又抓到一处：markdown 里的路径徽章底色（`.clickable-path`）
+> 是写死的 `#e9eef2`，深色正文里会冒出一块近白亮片。
 
 驱动方式是**单一路线**：渲染层挂载前同步设 `documentElement` 的 `data-theme` 属性
 （`app.js` 的 `initTheme`；三档 `light` / `dark` / `system`，`system` 档由 JS 求值成显式的
@@ -347,6 +355,8 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 
 | 项 | 取值 | 为什么 |
 | --- | --- | --- |
+| **控件 scrim**（`.attachment-remove`） | `rgba(0,0,0,.55)`、hover `.78` | 挂在缩略图上的删除键要**压住它下面那张图**才能让白 ✕ 可读。语义是「控件 scrim」不是模态背板 —— 收编进 `--overlay` 会把「模态遮罩」的语义污染掉（`app.css` 的 `--overlay` 注释里写了它当时被留下的理由，但**登记一直没落到本表**，2026-10-04 补上） |
+| **全屏看图沉浸遮罩**（`.image-preview-overlay`） | `rgb(0 0 0 / 72%)` | 看大图时要的是「画面外全部退到幕后」，比模态背板的 40% 重一档。同理不并入 `--overlay` |
 | 文件类型分色 | 9 个选择器、7 个色值：`.doc-file-pdf` `#c94f4f`、`.doc-file-word` / `.file-icon-code` `#4a7bc8`、`.doc-file-excel` / `.file-icon-markdown` `#4b9e6b`、`.doc-file-ppt` `#d98a3d`、`.file-icon-config` `#b7903d`、`.file-icon-image` `#8b6bc8`、`.file-icon-media` `#c85a8f` | 按**族**分色（族来自 `shared/doc-formats.ts` 的 `docBadgeOf`），**信息性**不是状态。`--cat-*` 只有 6 槽，塞不下；且这组色要能与各主题共存，塞进分类槽会挤掉真正的分类语义 |
 | 专家头像底 | 8 色（`EXPERT_AVATAR_COLORS`，`app.js`） | 由名字哈希取色、只为「同屏可区分」，**没有语义**。走 token 反而会暗示它有语义 |
 | 档外阴影（5 处声明） | `.preview-panel.fullscreen` `-8px 0 24px rgb(0 0 0 / 6%)`；`.preview-menu` `0 8px 24px rgb(0 0 0 / 18%)`；`.preview-pdf-body .react-pdf__Page` 与 `.office-docx .docx-wrapper>section.docx` 的纸张阴影 `0 1px 4px rgb(0 0 0 / 15%)`（同值两处）；`.mcp-switch-thumb` / `.skill-switch-thumb` `0 1px 3px rgb(0 0 0 / 20%)` | 都是**场景值**：全屏面板向左的投影、预览菜单、「纸」的抬升、开关滑块的贴边投影。归 `--shadow-sm/md` 会让轻的变重、重的变轻 —— 收编的代价大于收益。（原第 6 处 `.capability-chip` 的 `0 12px 32px -8px rgba(0,0,0,.02)` 已于 2026-10-02 收编为 `--shadow-sm`：浅色下两值几乎等值，而暗色下 2% 黑完全不可见——暗色主题接线后这处不再成立，是收编的直接动因） |

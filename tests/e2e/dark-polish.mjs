@@ -204,4 +204,62 @@ await h.check("减弱动效下轨道刻度的过渡被关停（第 ④ 组不是
 });
 await win.emulateMedia({ reducedMotion: "no-preference" });
 
+// ── ⑤ markdown 路径徽章必须随主题变（#105 抓到的那处硬编码底色）────────
+/**
+ * 探针：造一个 `.markdown code.clickable-path`（路径徽章）读它的计算底色。
+ * 不依赖真实会话 —— 这条规则只吃选择器。
+ */
+const probePathChip = () =>
+	win.evaluate(() => {
+		const wrap = document.createElement("p");
+		wrap.className = "markdown";
+		const code = document.createElement("code");
+		code.className = "clickable-path";
+		code.textContent = "src/foo.ts";
+		wrap.appendChild(code);
+		document.body.appendChild(wrap);
+		const cs = getComputedStyle(code);
+		const out = { background: cs.backgroundColor, color: cs.color, raw: cs.background };
+		wrap.remove();
+		return out;
+	});
+
+/**
+ * 一个计算出来的颜色值的 Rec.709 亮度（0–255 刻度）。
+ *
+ * ⚠️ **两种语法都要认**：`rgb(20, 112, 180)` 的分量是 0–255，而 `color-mix()`
+ * 在现代 Chromium 里的计算值是 `color(srgb 0.89 0.93 0.96)` —— 分量是 **0–1**。
+ * 只按前者解析的话会拿 0.89 当 0.89/255 用，算出「亮度 1」这种荒谬数字
+ * （真实踩到：断言因此误判「浅色下徽章底色太暗」）。
+ */
+function luminance(value) {
+	const modern = value.match(/^color\(srgb\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+	if (modern !== null) {
+		return 255 * (0.2126 * Number(modern[1]) + 0.7152 * Number(modern[2]) + 0.0722 * Number(modern[3]));
+	}
+	const nums = (value.match(/[\d.]+/g) ?? []).map(Number);
+	return 0.2126 * nums[0] + 0.7152 * nums[1] + 0.0722 * nums[2];
+}
+
+await h.check("markdown 路径徽章底色随主题变，且深色下不再是亮片（#105）", async () => {
+	await setTheme("light");
+	const light = await probePathChip();
+	await setTheme("dark");
+	const dark = await probePathChip();
+	assert.notEqual(
+		light.background,
+		dark.background,
+		`两套主题下徽章底色相同（${light.background}）—— 它又变成与主题无关的硬编码了`,
+	);
+	assert.ok(
+		luminance(dark.background) < 90,
+		`深色下徽章底色亮度 ${luminance(dark.background).toFixed(0)} 太高：` +
+			`正文里会出现一块近白亮片（修之前正是写死的 #e9eef2）`,
+	);
+	assert.ok(
+		luminance(light.background) > 200,
+		`浅色下徽章底色亮度 ${luminance(light.background).toFixed(0)} 太低：徽章该是浅底 —— 实测 ${JSON.stringify(light)}`,
+	);
+});
+
 await h.finish();
