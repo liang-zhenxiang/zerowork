@@ -68578,18 +68578,34 @@ function App() {
       console.warn("[palette] 记忆写回失败（不影响本次使用）", error);
     });
   }, []);
-  reactExports.useEffect(() => {
-    if (!paletteOpen || paletteMemoryLoadedRef.current) return;
+  /*
+   * 读一次记忆。**在 App 挂载时预取**（不再等第一次打开面板）：等打开时再读，
+   * 读回来那一刻列表会当着用户的面重排一次（收藏「跳」到最上面）——而面板的入场
+   * 动画只有 150ms，这个跳动就发生在动画里，读得越慢越明显。
+   *
+   * 失败时**把闸门放开**允许重试（打开面板时会再试一次）：启动那一刻 daemon 可能
+   * 还没就绪，若就此认定「读过了」，用户会看到「收藏全丢了」——比列表跳一下糟得多。
+   */
+  const loadPaletteMemory = reactExports.useCallback(() => {
+    if (paletteMemoryLoadedRef.current) return;
     paletteMemoryLoadedRef.current = true;
     void Promise.resolve(window.kami.getPaletteMemory())
       .then((result) => {
         if (result?.memory !== void 0) setPaletteMemory(result.memory);
       })
       .catch((error) => {
-        // 读不回来就用空记忆：面板照常能用，只是没有记忆。
-        console.warn("[palette] 记忆读取失败（按空记忆继续）", error);
+        // 读不回来就先用空记忆：面板照常能用，只是这一次没有记忆。
+        paletteMemoryLoadedRef.current = false;
+        console.warn("[palette] 记忆读取失败（按空记忆继续，打开面板时会重试）", error);
       });
-  }, [paletteOpen]);
+  }, []);
+  reactExports.useEffect(() => {
+    loadPaletteMemory();
+  }, [loadPaletteMemory]);
+  reactExports.useEffect(() => {
+    if (!paletteOpen || paletteMemoryLoadedRef.current) return;
+    loadPaletteMemory();
+  }, [paletteOpen, loadPaletteMemory]);
   reactExports.useEffect(() => {
     const onKey = (event) => {
       if (event.key.toLowerCase() !== "k") return;

@@ -111,7 +111,7 @@ matchRank ↑ → kindWeight ↑ → 常用分 ↓ → 原索引 ↑
 
 ```
 App()
- ├─ paletteMemory state（打开面板时 getPaletteMemory() 读一次，失败 → 空记忆）
+ ├─ paletteMemory state（**挂载时** getPaletteMemory() 预取，失败 → 空记忆 + 打开面板时重试）
  ├─ paletteEntries（不变，全集）
  ├─ paletteIdleEntries = orderIdle(actions + 最近5条会话, memory) + 收藏条目
  ├─ <CommandPalette memory onToggleFavorite onPick />

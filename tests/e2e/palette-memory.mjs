@@ -41,6 +41,9 @@
  *   2. **⌘K 是切换键**：上面失败后面板可能还开着，再按 ⌘K 会把它关掉，
  *      而退场动画期间「等面板出现」的谓词会在卸载前那次轮询里为真 →
  *      后续按键全部落空。修法是 `openPaletteClean` 先确认它是关的。
+ *   3. **记忆是异步读回的**（CI 抓到）：⑨ 重启后读完 DOM 就断言顺序，本机够快、
+ *      CI 上慢那几十毫秒 → 首条还是「新建任务」。凡是依赖记忆的断言都必须等
+ *      界面事实（这里等的是只有磁盘数据才可能造成的那个顺序）。
  * 复原后全绿。
  */
 import assert from "node:assert/strict";
@@ -405,6 +408,14 @@ await h.check("⑨ 收藏到上限时明确拒绝并提示；悬空收藏 id 不
 	});
 
 	await openPaletteClean();
+	// ⚠️ **记忆是异步读回的**（首次打开面板时发一次 invoke）：这里必须等界面事实，
+	// 不能读完 DOM 立刻断言 —— 本机够快、CI 上就慢那几十毫秒（真实踩到：
+	// CI 上首条还是「新建任务」，本机全绿）。「打开自动化」排第一也是**记忆已到达**
+	// 的判据：它只可能来自磁盘里那份常用分。
+	await waitUntil(
+		async () => (await optionRows())[0]?.label === "打开自动化",
+		{ timeout: 10_000, desc: "重启后常用分从磁盘读回并参与排序（「打开自动化」应排第一）" },
+	);
 	const rows = await optionRows();
 	assert.ok(rows.length > 0, "悬空收藏不应把列表清空（真实条目照常显示）");
 	assert.equal(
@@ -413,11 +424,7 @@ await h.check("⑨ 收藏到上限时明确拒绝并提示；悬空收藏 id 不
 		"悬空的收藏 id 不应渲染成幽灵行",
 	);
 	assert.equal(rows.filter((row) => row.starred).length, 0, "悬空 id 不应让任何真实条目显示成已收藏");
-	assert.equal(
-		rows[0]?.label,
-		"打开自动化",
-		`重启后常用分应从磁盘读回并参与排序（「打开自动化」分数最高应排第一），实际首条「${rows[0]?.label}」`,
-	);
+	assert.equal(rows[0]?.label, "打开自动化", "常用分最高的条目应排第一");
 
 	// 对当前选中（第一条，未收藏）按 ⌘D：已达上限 → 拒绝 + 提示。
 	await win.keyboard.press(`${MOD}+d`);
