@@ -269,6 +269,14 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 守卫见 `tests/e2e/session-pin.mjs` 的③：Tab 从行主体走进操作钮，
 并断言它**真的可见**（`visibility: hidden` 会让这条同时拿不到焦点、等不到淡入）。
 
+> **例外：命令面板的收藏星标（`.palette-star`，2026-10-04）** —— 它是嵌在行
+> `<button>` 里的 `span`（button 套 button 非法），点击**照样冒泡到行**；
+> 「点星标会不会误触收藏」由 JS 的前置判断守着 —— 未收藏的行上，星标那一格
+> 等于「点行」（执行条目）。因此这里**不写** `pointer-events: none`，依据是实测：
+> 加上它会让 `.palette-star:hover` 永远不触发（拿不到命中目标的元素也没有 `:hover`），
+> 白白丢掉悬停变淡的反馈，而点击行为**毫无变化**。两者的等价性与「去掉前置判断
+> 会怎样」都记录在 `tests/e2e/palette-memory.mjs` 的文件头反向验证里。
+
 ## §10.3 动效与色彩登记
 
 不进 §2.8 三档、或需要偏离默认值的效果，在这里登记：
