@@ -16015,16 +16015,48 @@ const CHIP_ICONS = {
   terminal: IconTerminal
 };
 const PAGE_SIZE = 4;
-function CaseCover({
-  cover,
-  icon: Icon
-}) {
-  const [failed, setFailed] = reactExports.useState(false);
-  // 实图加载完成 → 淡入。CSS 的 opacity 过渡需要一个触发点，否则是惰性的：
-  // 基础态 opacity:0（压在 .case-cover 的 --bg-raised 兜底底上），onLoad 加
-  // .case-cover-img-loaded 才过渡到 1，消除「暗底 ↔ 亮图」的硬切。
-  const [loaded, setLoaded] = reactExports.useState(false);
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover", children: failed ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-fallback", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 28 }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: cover, alt: "", loading: "lazy", className: loaded ? "case-cover-img-loaded" : void 0, onLoad: () => setLoaded(true), onError: () => setFailed(true) }) });
+/*
+ * 案例封面：**第一方生成**（#104），不引任何远程图。
+ *
+ * 画一张「按交付物类型的示意图」：一张纸片（sheet）+ 顶部色条 + 内容（文档是几行字、
+ * 图表是三根柱子、幻灯片是一块版面、研究笔记是带高亮首行的一段）。理由与取舍写在
+ * case-cover.js 的文件头 —— 简单说：不出网、不涉第三方图的再分发授权、深浅两套自动一致。
+ *
+ * 为什么不做成「图标 + 纯色底」了事：那是我方此前的**兜底**形态（加载失败时显示一个
+ * 居中图标），四张卡看着像四个占位符。纸片示意图至少还在说「你会拿到一份东西」。
+ *
+ * 几何（线宽 / 柱高）由案例 id 派生（case-cover.js 的纯函数）：
+ * 同一类目的三条彼此不同，又永远可复现 —— 随机数会让封面每次渲染都抖。
+ * 装饰整体 aria-hidden：卡片本身是个 button，名字来自下方标题，这里没有新信息。
+ */
+function CaseCover({ chipId, caseId }) {
+  const variant = coverVariant(chipId);
+  const accent = coverAccent(chipId);
+  const lines = coverLines(caseId);
+  const bars = coverBars(caseId);
+  let body;
+  if (variant === "chart") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-bars", children: bars.map((height, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-bar", style: { height: `${height}%` } }, index)) });
+  } else if (variant === "slide") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-slide" });
+  } else if (variant === "note") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "case-cover-lines", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line case-cover-line-lead", style: { width: `${lines[0]}%` } }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line", style: { width: `${lines[1]}%` } }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line", style: { width: `${lines[2]}%` } })
+    ] });
+  } else {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-lines", children: lines.map((width, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line", style: { width: `${width}%` } }, index)) });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+    className: `case-cover case-cover-${variant}`,
+    style: { "--case-accent": accent },
+    "aria-hidden": "true",
+    children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "case-cover-sheet", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-bar-top", style: { width: `${coverBarWidth(caseId)}%` } }),
+      body
+    ] })
+  });
 }
 function HomeView({
   ready,
@@ -16260,7 +16292,7 @@ function HomeView({
           if (c.expert !== void 0) onSelectExpert(c.expert);
         },
         children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CaseCover, { cover: c.cover, icon: iconForCase(c.chipId) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(CaseCover, { chipId: c.chipId, caseId: c.id }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-title", children: c.title })
       ] }, c.id)) })
     ] })
@@ -29725,6 +29757,8 @@ import {
 	scorerOf,
 	toggleFavorite
 } from "./palette-memory.js";
+// 案例封面的几何内核（#104 起封面由第一方生成，不再引第三方 CDN 图）。
+import { coverAccent, coverBarWidth, coverBars, coverLines, coverVariant } from "./case-cover.js";
 // 会话置顶的纯逻辑（排序 + 折叠窗口）在 session-pin.js 里，单测直接 import 它 ——
 // 见该文件头注：这两条判断在界面上只表现为「顺序对不对」，是 GUI 断言最说不清的一类。
 import { isPinned, sortSessionsByPin, taskListWindow } from "./session-pin.js";

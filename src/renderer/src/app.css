@@ -3325,58 +3325,98 @@ textarea:focus-visible {
 	overflow: hidden;
 	border: 0.5px solid var(--border);
 	border-radius: var(--radius-lg);
-	/* 封面 = 案例库的实图（CDN）；图标 + 统一单色底降级为兜底 ——
-	   远程图加载失败时由 CaseCover 换成图标，底色仍是这一层。 */
-	background: var(--bg-raised);
-	color: var(--text-secondary);
+	/* 封面 = **第一方生成的示意图**（#104）。底色是「分类色淡淡地洗一层」：
+	   color-mix 混的是既有 token（--bg-raised）与分类色板里的那一槽，
+	   因此亮暗两套自动跟随，不为本功能新增任何 token。
+	   --case-accent 由 CaseCover 按类目内联给出（未知类目回第一槽）。 */
+	--case-accent: var(--cat-1);
+	background:
+		linear-gradient(150deg,
+			color-mix(in srgb, var(--case-accent) 16%, var(--bg-raised)) 0%,
+			var(--bg-raised) 72%);
+	color: var(--case-accent);
 	transition: background var(--dur-fast) var(--ease-standard);
 }
 
-/* 封面实图铺满封面位，圆角继承容器（图片自身不带圆角会切角溢出）。 */
-.case-cover img {
-	display: block;
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-	border-radius: inherit;
-	/* 加载完成前不显像素，先压在 .case-cover 的 --bg-raised 兜底底上；加载完成由
-	   CaseCover 的 onLoad 加 .case-cover-img-loaded 再淡入 —— 消除「暗底 ↔ 亮图」
-	   的硬切（§5.8）。opacity 是 §5.1 允许的视觉属性，不触发布局、不占受控例外。
-	   过渡走既有 --dur-fast(--dur 三档) + --ease-standard(§3.2 两条曲线之一)，
-	   不另立时长 —— 过渡是**过渡**不是动画，reduced-motion 下在第 ④ 组单独关。
+/* ── 封面里那张「纸片」──────────────────────────────────────────────
 
-	   ⚠️ **基础态 opacity:0 是一条硬依赖，不是无害的动画起点**：它靠
-	   CaseCover 的 onLoad 加 .case-cover-img-loaded 才可见。**若 onLoad 不触发
-	   （最典型是缓存命中、事件在 React 挂上监听前就已过去），封面会停在不可见
-	   —— 四张案例卡全空白，比原先的「闪一下」更糟。**
-	   在本应用（Electron/Chromium、客户端渲染、无 SSR）下实测这条依赖可靠：
-	   首次加载 + 两次整页 reload（走 HTTP 缓存，即上述最可疑的路径）共 3 轮，
-	   4/4 张图 computed opacity 均为 1、complete=true、带 loaded 类 —— 故**刻意
-	   不加** img.complete 兜底或定时器补丁（那些是为了掩盖不可靠而引入的复杂度）。
-	   日后若换渲染方式（如引入 SSR/水合），必须重新验证这条。 */
-	opacity: 0;
-	transition: opacity var(--dur-fast) var(--ease-standard);
-}
+   画法：一张居中的纸（sheet）+ 顶部一条分类色短条 + 内容。三种内容：
+   .case-cover-lines（文档 / 研究笔记的文字行）、.case-cover-slide（幻灯片版面）、
+   .case-cover-bars（图表的竖条）。
 
-.case-cover img.case-cover-img-loaded {
-	opacity: 1;
-}
-
-/* 深色下把实拍封面收进暗环境：深色首屏原先最亮的四块矩形是别人的实拍图，
-   视线先被图片吸走再回到输入卡，与 §3.9 的盒子预算反向。只压亮度、略降饱和
-   （纯降亮度会让画面发灰），不动 cases.json / 不动 CDN / 不碰授权面（另见 #104）。
-   用 filter 而不是给卡片加一层遮罩盒子 —— 加盒子违反 §3.9 且牵动案例槽几何。 */
-[data-theme="dark"] .case-cover img {
-	filter: brightness(0.86) saturate(0.94);
-}
-
-/* 图标兜底：铺满封面位并居中（图片加载失败时显示）。 */
-.case-cover-fallback {
+   纸片用 --bg 而不是纯白：深色下它就成了「暗色纸」，与**真·画布**的关系一致
+   （深色界面里的文档预览本来就是深色的），不会在暗环境里炸出一块白。
+   阴影借用 --shadow-sm 这一档（§6 阴影三档里的轻浮层），不另立数值。 */
+.case-cover-sheet {
 	position: absolute;
-	inset: 0;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
 	display: flex;
-	align-items: center;
+	flex-direction: column;
+	gap: 5px;
+	width: 62%;
+	height: 62%;
+	padding: 9px 10px;
+	border-radius: 6px;
+	background: var(--bg);
+	box-shadow: var(--shadow-sm);
+	overflow: hidden;
+}
+
+/* 顶部色条：类目标识（高度固定，宽度由案例 id 派生、内联给出）。
+   宽度之所以不写死：它是第一眼看到的东西，三张卡都用同一个长度的话，
+   余光里就是同一张图。 */
+.case-cover-bar-top {
+	height: 3px;
+	border-radius: 2px;
+	background: var(--case-accent);
+	opacity: 0.85;
+}
+
+/* 内容行：宽度由案例 id 派生（内联给出），行高固定。 */
+.case-cover-lines {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
 	justify-content: center;
+	gap: 5px;
+}
+
+.case-cover-line {
+	display: block;
+	height: 3px;
+	border-radius: 2px;
+	background: var(--text-secondary);
+	opacity: 0.28;
+}
+
+/* 研究笔记：首行是分类色（「这一页有个重点」），其余仍是灰行。 */
+.case-cover-line-lead {
+	background: var(--case-accent);
+	opacity: 0.75;
+}
+
+/* 幻灯片：一块 16:9 的版面占满纸面（比文字行更像「一页」）。 */
+.case-cover-slide {
+	display: block;
+	flex: 1;
+	border-radius: 3px;
+	background: color-mix(in srgb, var(--case-accent) 22%, var(--bg-raised));
+}
+
+/* 图表：三根竖条贴在纸面底部，高度内联给出。 */
+.case-cover-bars {
+	display: flex;
+	flex: 1;
+	align-items: flex-end;
+	gap: 5px;
+}
+
+.case-cover-bar {
+	flex: 1;
+	border-radius: 2px 2px 0 0;
+	background: color-mix(in srgb, var(--case-accent) 62%, var(--bg));
 }
 
 /* hover 无上浮无阴影（与 task-item 等全站卡片 hover 语言一致）：封面底色加深一档。 */
@@ -11510,11 +11550,10 @@ button.agent-row {
 	}
 
 	/* ④ 沿袭既有行为：轨道刻度与预览卡只关过渡（本块此前放在中段）。
-	   案例封面淡入（2026-10-03）也是过渡、不是动画 —— 上面 ③ 关的是 animation，
-	   关不到它，必须在这里单列：关掉后实图直接出现，不再从兜底暗底淡入。 */
+	   2026-10-04（#104）：案例封面改成第一方生成的示意图后，这里不再需要
+	   单列 `.case-cover img` —— 它本来关的是那张 CDN 实图的淡入过渡。 */
 	.turn-nav-mark::before,
-	.turn-nav-preview,
-	.case-cover img {
+	.turn-nav-preview {
 		transition: none;
 	}
 }
