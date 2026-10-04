@@ -156,8 +156,24 @@ jobs:
 
           : > pr-list.md
 
-          # 找上一个 tag（按版本号排序，排除当前这个）
-          prev="$(git tag --sort=-v:refname | grep -v "^${TAG}$" | head -n 1 || true)"
+          # 找上一个 tag（按版本号排序，排除当前这个）。
+          #
+          # ⚠️ **稳定版必须跳过预发布 tag**（2026-10-04 修，v0.4.0 实测）：
+          # beta 渠道每次合并 main 都会打一个 `vX.Y.Z-beta.N`，于是「按版本序取上一个
+          # tag」在稳定版发布时会取到**最后一个 beta**（`v0.4.0-beta.16` 比 `v0.4.0`
+          # 小、比其他 tag 大），清单里只剩发布 PR 自己 —— v0.4.0 的清单实测只有 #127
+          # 一条，而那一版实际合并了 9 个 PR。预发布之间互比仍然用完整列表：
+          # beta 的读者要的正是「相对上一个 beta 多了什么」。
+          #
+          # 取「排除自己之后最大的那个」而不是「严格小于自己的最大者」：这一步只在
+          # **当前 tag 是最新 tag** 时运行（发布即最新），少一层版本序比较也就少一处
+          # 依赖 `sort -V` 行为的可移植性风险。
+          if [[ "$TAG" == *-* ]]; then
+            tags="$(git tag --sort=-v:refname | grep -v "^${TAG}$" || true)"
+          else
+            tags="$(git tag --sort=-v:refname | grep -v "^${TAG}$" | grep -vE '^v[0-9]+\.[0-9]+\.[0-9]+-' || true)"
+          fi
+          prev="$(printf '%s\n' "$tags" | head -n 1 || true)"
 
           if [[ -z "$prev" ]]; then
             echo "::notice::没有找到上一个 tag（首次发布），跳过变更清单"
