@@ -232,3 +232,66 @@ describe("rankEntries —— 实体数据未就绪时不抛错", () => {
 		expect(rankEntries(undefined, "")).toEqual({ items: [], total: 0 });
 	});
 });
+
+/**
+ * 第四级：常用分（命令面板的「记住你」，见 palette-memory.js）。
+ *
+ * 这一组的核心不是「高分靠前」，而是**高分排在哪些位置之后** —— 位置错了就是
+ * 「我打字了它还拿历史压我」。所以每条断言都写成「谁在谁前面」的成对比较。
+ */
+describe("rankEntries —— 第四级：常用分（可选 scoreOf）", () => {
+	/** 用 id 查分的 scoreOf；分数表之外的条目一律 0。 */
+	const scorer = (scores) => (entry) => scores[entry?.id] ?? 0;
+
+	it("同分同类时常用分高的在前", () => {
+		const list = [e({ id: "a", title: "新建任务" }), e({ id: "b", title: "新建任务" })];
+		const { items } = rankEntries(list, "新", { scoreOf: scorer({ a: 1, b: 5 }) });
+		expect(items.map((x) => x.id)).toEqual(["b", "a"]);
+	});
+
+	it("常用分**不能**压过匹配质量：精确命中永远在前，哪怕它一次没用过", () => {
+		const exact = e({ id: "exact", kind: "action", title: "设置" });
+		const substring = e({ id: "sub", kind: "action", title: "打开设置面板" });
+		const { items } = rankEntries([substring, exact], "设置", { scoreOf: scorer({ sub: 99 }) });
+		expect(items.map((x) => x.id)).toEqual(["exact", "sub"]);
+	});
+
+	it("常用分**不能**压过类别权重：同分时动作仍先于实体", () => {
+		const action = e({ id: "act", kind: "action", title: "新建任务" });
+		const automation = e({ id: "auto", kind: "automation", title: "新建任务" });
+		const { items } = rankEntries([action, automation], "新", { scoreOf: scorer({ auto: 99 }) });
+		expect(items.map((x) => x.id)).toEqual(["act", "auto"]);
+	});
+
+	it("常用分在**原索引之前**：同分同类同热度才回到原顺序", () => {
+		const list = [
+			e({ id: "a", title: "新建任务" }),
+			e({ id: "b", title: "新建任务" }),
+			e({ id: "c", title: "新建任务" }),
+		];
+		const { items } = rankEntries(list, "新", { scoreOf: scorer({ a: 2, c: 2 }) });
+		// a 与 c 同分 → 保持原序；b 是 0 分 → 落到最后
+		expect(items.map((x) => x.id)).toEqual(["a", "c", "b"]);
+	});
+
+	it("回归锁：不传 scoreOf 时行为与加它之前逐字节一致", () => {
+		const list = [
+			e({ id: "a", title: "新建任务" }),
+			e({ id: "b", title: "新建任务" }),
+		];
+		const withoutOption = rankEntries(list, "新");
+		const withIdentity = rankEntries(list, "新", { scoreOf: () => 0 });
+		expect(withoutOption.items.map((x) => x.id)).toEqual(["a", "b"]);
+		expect(withoutOption).toEqual(withIdentity);
+	});
+
+	it("scoreOf 返回非法值（NaN / 字符串 / undefined）时当 0 处理，不污染排序", () => {
+		const list = [e({ id: "a", title: "新建任务" }), e({ id: "b", title: "新建任务" })];
+		const { items } = rankEntries(list, "新", { scoreOf: () => Number.NaN });
+		expect(items.map((x) => x.id)).toEqual(["a", "b"]);
+		const { items: items2 } = rankEntries(list, "新", {
+			scoreOf: (entry) => (entry.id === "a" ? "大" : undefined),
+		});
+		expect(items2.map((x) => x.id)).toEqual(["a", "b"]);
+	});
+});

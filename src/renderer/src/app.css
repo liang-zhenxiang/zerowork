@@ -2476,6 +2476,50 @@ textarea:focus-visible {
 	font-weight: 500;
 }
 
+/* 收藏星标：行内的点击目标（切换收藏），也是「已收藏」的形状标记。
+
+   未收藏时空心、且只在悬停或键盘选中那一行上浮现 —— 满屏的空心星是噪声，
+   而「没有入口」又让鼠标用户无从收藏。已收藏时实心常显（形状差异 = 不依赖
+   颜色的状态信号，§7.6）。
+
+   ⚠️ 这里**刻意不写 `pointer-events: none`**（与 §7.9 那条同族规则不同）：
+   星标嵌在行 `<button>` 里，点它照样冒泡到行；「点星标会不会误触收藏」由
+   app.js 里那个 `favorited &&` 前置判断守着 —— 未收藏的行上，星标那一格
+   等于「点行」（执行条目），不会把行尾变成收藏陷阱。反过来，加上
+   `pointer-events: none` 会让下面的 `.palette-star:hover` **永远不触发**
+   （拿不到命中目标的元素也没有 :hover），白白丢掉悬停变淡的反馈 ——
+   两者在行为上实测等价，所以留下能保住反馈的那一个。 */
+.palette-star {
+	display: inline-flex;
+	align-self: center;
+	flex: 0 0 auto;
+	color: var(--text-secondary);
+	opacity: 0;
+}
+
+/* 名字占满剩余宽度：星标因此落在**固定的一列**上（行与行对齐），而不是
+   紧贴名字、随名字长短左右浮动。只作用于命令面板 —— `.ac-*` 是与 / 补全
+   下拉共用的，那一边的排版不该被这里改到（见上方 .command-palette 的说明）。 */
+.command-palette .ac-label {
+	flex: 1;
+}
+
+.ac-item:hover .palette-star,
+.ac-item.active .palette-star,
+.palette-star[data-on="true"] {
+	opacity: 1;
+}
+
+/* 已收藏用可点标识色（--accent）——颜色是**加成**，不是唯一信号：
+   实心 / 空心、以及屏读名里的「已收藏」都不依赖它。 */
+.palette-star[data-on="true"] {
+	color: var(--accent);
+}
+
+.palette-star:hover {
+	opacity: 0.75;
+}
+
 .command-palette-foot {
 	display: flex;
 	align-items: center;

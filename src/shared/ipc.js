@@ -321,6 +321,17 @@ const INVOKE = {
    * 渲染层 data-theme 的生效联动在 main / renderer（daemon 不碰 Electron API）。
    */
   setThemePreference: "settings:set-theme",
+  /* ── 命令面板的记忆（收藏 + 常用项） ───────────────────────────── */
+  /**
+   * 读命令面板的记忆（{ favorites, usage }）。未配置时 daemon 回空记忆 ——
+   * 「干净配置下首屏与没有这个功能时一模一样」是刻意的（不改老用户的首屏）。
+   */
+  getPaletteMemory: "settings:get-palette-memory",
+  /**
+   * 写命令面板的记忆。daemon 只负责校验与落盘（读改写，不丢其他键）；
+   * 非法形状一律抛错 —— 因为写进去的东西必须能原样读回来。
+   */
+  setPaletteMemory: "settings:set-palette-memory",
   /* ── 更新渠道与更新器（spec: update-channels） ─────────────────── */
   /** 读更新渠道偏好（"stable" | "beta"，缺省 stable——beta 是显式选择）。 */
   getUpdateChannel: "settings:get-update-channel",

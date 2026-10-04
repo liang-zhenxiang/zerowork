@@ -57,6 +57,52 @@ function isThemePreference(value) {
   return typeof value === "string" && THEMES.includes(value);
 }
 
+// 命令面板记忆（收藏 + 常用分）的上限。与渲染层的
+// `src/renderer/src/palette-memory.js` **同名常量必须同值** —— 那边管住正常写入，
+// 这边管住手改过的文件；两边不一致的后果是「面板里明明还能收藏，重启后少一条」。
+const PALETTE_FAVORITES_MAX = 20;
+const PALETTE_USAGE_MAX = 200;
+
+/**
+ * 命令面板记忆的校验判据 —— **读侧与写侧共用这一份**（照 isThemePreference 的写法）：
+ * 读侧据此丢弃非法值、写侧据此拒绝非法值，于是不会出现「写入时合法、读回时被丢」
+ * 这种口径漂移。
+ *
+ * 形状：{ favorites: string[], usage: { [id]: { score: number, lastAt: number } } }
+ *
+ * 返回 undefined 表示「没有 / 整体不可用」；返回对象表示可用（可能为空对象）。
+ * 局部脏数据（某一条分数是字符串）只丢那一条，不让整块记忆失效 —— 与
+ * skillOverrides 的处理口径一致。
+ */
+function readPaletteMemory(value) {
+  if (value === void 0) return void 0;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    console.error("偏好文件的 paletteMemory 应为对象（{ favorites, usage }），已忽略：", value);
+    return void 0;
+  }
+  const record = value;
+  const rawFavorites = Array.isArray(record.favorites) ? record.favorites : [];
+  const favorites = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const id of rawFavorites) {
+    if (typeof id !== "string" || id === "" || seen.has(id)) continue;
+    seen.add(id);
+    favorites.push(id);
+    if (favorites.length >= PALETTE_FAVORITES_MAX) break;
+  }
+  const usage = {};
+  const rawUsage = typeof record.usage === "object" && record.usage !== null && !Array.isArray(record.usage) ? record.usage : {};
+  for (const [id, entry] of Object.entries(rawUsage)) {
+    if (id === "" || typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const score = entry.score;
+    if (typeof score !== "number" || !Number.isFinite(score) || score <= 0) continue;
+    const lastAt = typeof entry.lastAt === "number" && Number.isFinite(entry.lastAt) ? entry.lastAt : 0;
+    usage[id] = { score, lastAt };
+    if (Object.keys(usage).length >= PALETTE_USAGE_MAX) break;
+  }
+  return { favorites, usage };
+}
+
 function filterEnabledSkills(skills, overrides) {
   return skills.filter((skill) => isSkillEnabled(skill.name, overrides));
 }
@@ -88,6 +134,7 @@ function readPreferences() {
     const permissions = readPermissions(record.permissions);
     const thinkingLevel = isThinkingLevel(record.thinkingLevel) ? record.thinkingLevel : void 0;
     const theme = isThemePreference(record.theme) ? record.theme : void 0;
+    const paletteMemory = readPaletteMemory(record.paletteMemory);
     const styleId = typeof record.styleId === "string" ? record.styleId : void 0;
     const memoryEnabled = typeof record.memoryEnabled === "boolean" ? record.memoryEnabled : void 0;
     const agentTeamsEnabled = typeof record.agentTeamsEnabled === "boolean" ? record.agentTeamsEnabled : void 0;
@@ -121,6 +168,7 @@ function readPreferences() {
       ...defaultWorkspacePath !== void 0 ? { defaultWorkspacePath } : {},
       ...thinkingLevel !== void 0 ? { thinkingLevel } : {},
       ...theme !== void 0 ? { theme } : {},
+      ...paletteMemory !== void 0 ? { paletteMemory } : {},
       ...styleId !== void 0 ? { styleId } : {},
       ...memoryEnabled !== void 0 ? { memoryEnabled } : {},
       ...agentTeamsEnabled !== void 0 ? { agentTeamsEnabled } : {},
@@ -225,6 +273,7 @@ export {
 	getPath$1,
 	isSkillEnabled,
 	isThemePreference,
+	readPaletteMemory,
 	readPermissions,
 	readPreferences,
 	readRuntimePrefs,

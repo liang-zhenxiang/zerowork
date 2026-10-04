@@ -123,6 +123,7 @@ import {
 	getEffectiveWorkspaceRoot,
 	isSkillEnabled,
 	isThemePreference,
+	readPaletteMemory,
 	readPreferences,
 	writePreferences,
 } from "./preferences.js";
@@ -4576,6 +4577,23 @@ const handlers = {
       throw new Error(`未知的外观档位：${String(theme)}`);
     }
     writePreferences({ ...readPreferences(), theme });
+  },
+  /* ── 命令面板的记忆（收藏 + 常用分） ───────────────────────────── */
+  // 未配置回空记忆（不是「回一份常用动作清单」）：干净配置下的首屏必须与
+  // 没有这个功能时一模一样，缺省语义收在这一个出口（同 theme / memoryEnabled）。
+  [INVOKE.getPaletteMemory]: async () => ({
+    memory: readPreferences().paletteMemory ?? { favorites: [], usage: {} }
+  }),
+  // 校验与落盘都在这一个出口，且**与读侧共用一份判据**（readPaletteMemory）：
+  // 写侧拒绝非法值，是为了保证「写进去的东西一定能原样读回来」；
+  // 读改写不丢其他键（同 setStyle / setThemePreference 的口径）。
+  [INVOKE.setPaletteMemory]: async ([memory]) => {
+    const normalized = readPaletteMemory(memory);
+    if (normalized === void 0) {
+      throw new Error("无效的命令面板记忆：应为 { favorites: string[], usage: Record<id, { score, lastAt }> }");
+    }
+    writePreferences({ ...readPreferences(), paletteMemory: normalized });
+    return { memory: normalized };
   },
   /* ── 记忆开关（spec: add-memory-system） ──────────────────────── */
   // 未配置回 true（缺省开启）：偏好文件保持「没写就是没写」，

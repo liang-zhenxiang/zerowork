@@ -13099,6 +13099,19 @@ const IconPin = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, child
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M10.5 4h3v6l2.5 3H8l2.5-3z" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 13v7" })
 ] });
+/*
+ * 星形：命令面板的「已收藏」标记（也是鼠标切换收藏的点击目标）。
+ *
+ * 实心（fill: currentColor）与未收藏时的**空心**是两种形状，不靠颜色区分
+ * ——docs/DESIGN.md §7.6 的硬要求。用五角星是因为它是「收藏」的通语，
+ * 不需要旁边的文字解释；具体闭合路径见下（手写几何，不引图标库）。
+ */
+const IconStar = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children:
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 3.6l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.8l5.9-.9z" })
+});
+const IconStarFilled = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children:
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 3.6l2.6 5.3 5.9.9-4.2 4.1 1 5.8-5.3-2.8-5.3 2.8 1-5.8L3.5 9.8l5.9-.9z", fill: "currentColor", stroke: "none" })
+});
 const IconImage = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "3", y: "4", width: "18", height: "16", rx: "2" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "9", cy: "9.5", r: "1.6" }),
@@ -29702,6 +29715,16 @@ function gfm(options) {
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
 import { rankEntries, matchRank, KIND_WEIGHT } from "./command-palette-core.js";
+// 命令面板的「记忆」（收藏 + 常用分）同样是纯逻辑，单测直接 import 它 ——
+// 排序位置（frecency 不能压匹配质量）与衰减规则都在那边钉死，组件只管画。
+import {
+	EMPTY_MEMORY,
+	FAVORITES_MAX,
+	orderIdle,
+	recordUse,
+	scorerOf,
+	toggleFavorite
+} from "./palette-memory.js";
 // 会话置顶的纯逻辑（排序 + 折叠窗口）在 session-pin.js 里，单测直接 import 它 ——
 // 见该文件头注：这两条判断在界面上只表现为「顺序对不对」，是 GUI 断言最说不清的一类。
 import { isPinned, sortSessionsByPin, taskListWindow } from "./session-pin.js";
@@ -67820,7 +67843,11 @@ const PALETTE_IDLE_SESSIONS = 5;
 const PALETTE_EXIT_MS = 150;
 const PALETTE_LISTBOX_ID = "command-palette-listbox";
 const PALETTE_MOD = navigator.platform.includes("Mac") ? "⌘" : "Ctrl";
+/** 收藏键的提示文案：只在底栏出现一次，与实际绑的键**同源**（不做假提示）。 */
+const PALETTE_FAVORITE_KEY = "D";
+const PALETTE_FAVORITE_HINT = `${PALETTE_MOD}+${PALETTE_FAVORITE_KEY}`;
 const PALETTE_GROUP_LABELS = {
+  favorite: "收藏",
   action: "动作",
   settings: "设置",
   session: "会话",
@@ -67881,9 +67908,21 @@ function paletteActionEntries(ctx) {
  * null，退化成纯 KIND_WEIGHT（动作在最上，与调用方给的引导顺序一致）。
  * 组内保持 rankEntries 的顺序（匹配质量已在那里排好，这里不重排）。
  */
-function paletteGroups(items, query) {
+function paletteGroups(items, query, favoriteIds) {
+  /*
+   * 空查询 + 有收藏时，先把收藏抽成一个**跨类别的伪分组**放在最上（按收藏顺序）。
+   *
+   * 为什么不能只靠「排到各自 kind 组的最前」：下面的组序是「最佳 rank → 类别权重」，
+   * 空查询下 rank 全为 null，于是组序退化成纯类别权重 —— 动作组永远在最上。
+   * 一个被收藏的会话因此永远压不过任何一个动作，「置顶」在视觉上名不副实。
+   * 用一个空查询专属的分组表达，才配得上「置顶」这个词（design.md §3）。
+   */
+  const favoriteList = query === "" && favoriteIds !== void 0
+    ? items.filter((item) => favoriteIds.has(item.id))
+    : [];
+  const rest = favoriteList.length === 0 ? items : items.filter((item) => !favoriteIds.has(item.id));
   const byKind = new Map();
-  for (const item of items) {
+  for (const item of rest) {
     const list = byKind.get(item.kind);
     if (list === undefined) byKind.set(item.kind, [item]);
     else list.push(item);
@@ -67901,9 +67940,10 @@ function paletteGroups(items, query) {
     if (a.best !== b.best) return a.best - b.best;
     return (KIND_WEIGHT[a.kind] ?? Number.POSITIVE_INFINITY) - (KIND_WEIGHT[b.kind] ?? Number.POSITIVE_INFINITY);
   });
-  return groups.map((group) => ({ kind: group.kind, items: group.items }));
+  const shaped = groups.map((group) => ({ kind: group.kind, items: group.items }));
+  return favoriteList.length === 0 ? shaped : [{ kind: "favorite", items: favoriteList }, ...shaped];
 }
-function CommandPalette({ open, onClose, entries, idleEntries }) {
+function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, onToggleFavorite }) {
   const [query, setQuery] = reactExports.useState("");
   const [active, setActive] = reactExports.useState(0);
   const [mounted, setMounted] = reactExports.useState(open);
@@ -67933,11 +67973,21 @@ function CommandPalette({ open, onClose, entries, idleEntries }) {
   }, [open]);
   // 空查询走引导集（常用动作 + 最近会话），有查询才在全集里搜。
   const source = query === "" ? idleEntries : entries;
-  const { items, total } = reactExports.useMemo(
-    () => rankEntries(source, query, { limit: PALETTE_LIMIT }),
-    [source, query]
+  const favoriteIds = reactExports.useMemo(
+    () => new Set(Array.isArray(memory?.favorites) ? memory.favorites : []),
+    [memory]
   );
-  const groups = reactExports.useMemo(() => paletteGroups(items, query), [items, query]);
+  // 常用分查询函数（frecency）：有查询时参与排序链的第四级；空查询下 rankEntries
+  // 直接短路，顺序由 orderIdle 在 App 侧排好。
+  const scoreOf = reactExports.useMemo(() => scorerOf(memory), [memory]);
+  const { items, total } = reactExports.useMemo(
+    () => rankEntries(source, query, { limit: PALETTE_LIMIT, scoreOf }),
+    [source, query, scoreOf]
+  );
+  const groups = reactExports.useMemo(
+    () => paletteGroups(items, query, favoriteIds),
+    [items, query, favoriteIds]
+  );
   const flat = reactExports.useMemo(() => groups.flatMap((group) => group.items), [groups]);
   const flatLength = flat.length;
   // 结果集缩小时把选中项夹回范围内（否则 aria-activedescendant 指向不存在的 id）。
@@ -67955,6 +68005,9 @@ function CommandPalette({ open, onClose, entries, idleEntries }) {
     // 先关面板再执行：关闭归还焦点、解除背景 inert，被打开的目标（如设置）才能
     // 拿到干净的前置状态，避免两个模态互相嵌套（design §7）。首版不支持连续执行。
     onClose();
+    // 记一次使用（frecency）。放在 run 之前：即使被打开的目标之后出了错，
+    // 「我确实用了它」这件事也已经发生。写回是 fire-and-forget（见 App 侧注释）。
+    onRun?.(item);
     item.run();
   };
   const onCompositionStart = () => {
@@ -67978,6 +68031,13 @@ function CommandPalette({ open, onClose, entries, idleEntries }) {
     } else if (event.key === "Enter") {
       event.preventDefault();
       pick(flat[activeIndex]);
+    } else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === PALETTE_FAVORITE_KEY.toLowerCase()) {
+      // 收藏/取消收藏当前选中项。与 Enter 一样先 preventDefault：macOS 上 ⌘D 是
+      // 「加书签」，部分环境会把它交给宿主。切换后面板**不关**——收藏是整理动作，
+      // 关掉会让「连着钉几个」变成反复唤起。
+      event.preventDefault();
+      const current = flat[activeIndex];
+      if (current !== void 0) onToggleFavorite?.(current.id);
     } else if (event.key === "Escape") {
       event.preventDefault();
       onClose();
@@ -68054,6 +68114,7 @@ function CommandPalette({ open, onClose, entries, idleEntries }) {
                         const index = cursor++;
                         const selected = index === activeIndex;
                         const Icon = PALETTE_KIND_ICONS[item.kind];
+                        const favorited = favoriteIds.has(item.id);
                         return /* @__PURE__ */ jsxRuntimeExports.jsxs(
                           "button",
                           {
@@ -68062,15 +68123,36 @@ function CommandPalette({ open, onClose, entries, idleEntries }) {
                             role: "option",
                             tabIndex: -1,
                             "aria-selected": selected,
+                            // 收藏状态对屏读可见（星形图标是 aria-hidden 的装饰）。
+                            // 不收藏时不设 aria-label：行的可访问名就是它自己的文字。
+                            "aria-label": favorited ? `${item.title}，已收藏` : void 0,
                             className: `ac-item${selected ? " active" : ""}`,
                             onMouseEnter: () => setActive(index),
                             onMouseDown: (event) => {
                               event.preventDefault();
+                              // 星标是行内的**点击目标**：命中它就切换收藏、不执行该条目。
+                              // 外层仍是 <button>，所以星标只能做 span（button 套 button 非法）；
+                              // 键盘路径由 ⌘D 承担，两条路表达同一件事。
+                              if (favorited && event.target.closest(".palette-star") !== null) {
+                                onToggleFavorite?.(item.id);
+                                return;
+                              }
                               pick(item);
                             },
                             children: [
                               Icon !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 15, className: "ac-icon" }),
                               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-label", children: item.title }),
+                              // 星标：收藏时实心常显，未收藏时空心、只在悬停/选中行上浮现
+                              // （既给了鼠标入口，又不给满屏的空心星加噪声）。形状差异是
+                              // 不依赖颜色的状态信号（docs/DESIGN.md §7.6）。
+                              /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+                                className: "palette-star",
+                                "data-on": favorited ? "true" : void 0,
+                                title: favorited ? `已收藏（${PALETTE_FAVORITE_HINT} 取消）` : `收藏（${PALETTE_FAVORITE_HINT}）`,
+                                children: favorited
+                                  ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconStarFilled, { size: 13 })
+                                  : /* @__PURE__ */ jsxRuntimeExports.jsx(IconStar, { size: 13 })
+                              }),
                               item.hint !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-hint", children: item.hint })
                             ]
                           },
@@ -68088,7 +68170,7 @@ function CommandPalette({ open, onClose, entries, idleEntries }) {
               {
                 className: "command-palette-foot",
                 children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "↑↓ 选择　Enter 打开　Esc 关闭" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `↑↓ 选择　Enter 打开　${PALETTE_FAVORITE_HINT} 收藏　Esc 关闭` }),
                   // 结果数单独播报（只播报数量，不播报整列表）。aria-live 只在有查询时有内容。
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-live": "polite", children: countText })
                 ]
@@ -68449,6 +68531,16 @@ function App() {
   const [paletteExtras, setPaletteExtras] = reactExports.useState({ skills: [], connectors: [], automations: [] });
   const paletteExtrasLoadedRef = reactExports.useRef(false);
   /*
+   * 命令面板的记忆（收藏 + 常用分），真源在 daemon 的 preferences.json。
+   *
+   * **只在首次打开面板时读一次**，不做「每次打开都读」：写回是 fire-and-forget
+   * 的异步 invoke，而读-改-写之间没有锁 —— 每次打开都读，就可能读到上一次写入
+   * 尚未落盘的旧值，把用户刚收藏的那条「变没」。一次读 + 之后全在本地的 state
+   * 上推进，不存在这个竞争（单窗口应用，没有第二个写者）。
+   */
+  const [paletteMemory, setPaletteMemory] = reactExports.useState(EMPTY_MEMORY);
+  const paletteMemoryLoadedRef = reactExports.useRef(false);
+  /*
    * 技能 / 连接器 / 自动化三项首次打开面板时拉一次，缓存后不再重取（design §1）。
    * 用 state 承接是因为 entries 要随数据到达重算；ref 只做"已拉过"的闸门。
    * 用 allSettled：任一项失败只让它自己留空数组，其余实体照常可搜——
@@ -68472,6 +68564,32 @@ function App() {
     if (!paletteOpen || paletteExtrasLoadedRef.current) return;
     loadPaletteExtras();
   }, [paletteOpen, loadPaletteExtras]);
+  /*
+   * 记忆写回：界面先走，磁盘跟上。
+   *
+   * **刻意不做成 await / 不阻塞、也不回滚界面**：面板记忆是体验增强，不是数据 ——
+   * 写失败最坏的后果是「下次启动少了这次收藏」，而把它做成阻塞式的代价是每一次
+   * 执行条目都多一次磁盘往返。失败只记一条 warn（不弹 toast：用户按了 Enter，
+   * 功能已经完成了，弹一个与他的动作无关的错误只会让人以为哪里坏了）。
+   */
+  const persistPaletteMemory = reactExports.useCallback((next) => {
+    setPaletteMemory(next);
+    void Promise.resolve(window.kami.setPaletteMemory(next)).catch((error) => {
+      console.warn("[palette] 记忆写回失败（不影响本次使用）", error);
+    });
+  }, []);
+  reactExports.useEffect(() => {
+    if (!paletteOpen || paletteMemoryLoadedRef.current) return;
+    paletteMemoryLoadedRef.current = true;
+    void Promise.resolve(window.kami.getPaletteMemory())
+      .then((result) => {
+        if (result?.memory !== void 0) setPaletteMemory(result.memory);
+      })
+      .catch((error) => {
+        // 读不回来就用空记忆：面板照常能用，只是没有记忆。
+        console.warn("[palette] 记忆读取失败（按空记忆继续）", error);
+      });
+  }, [paletteOpen]);
   reactExports.useEffect(() => {
     const onKey = (event) => {
       if (event.key.toLowerCase() !== "k") return;
@@ -69007,10 +69125,37 @@ function App() {
     // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
   }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openSkillsAt, openAutomations, resumeTask, newTaskInSpace, useExpert]);
   const paletteIdleEntries = reactExports.useMemo(() => {
-    const actions = paletteEntries.filter((entry) => entry.kind === "action");
-    const recent = paletteEntries.filter((entry) => entry.kind === "session").slice(0, PALETTE_IDLE_SESSIONS);
-    return [...actions, ...recent];
-  }, [paletteEntries]);
+    const byId = new Map(paletteEntries.map((entry) => [entry.id, entry]));
+    // 收藏的条目可能**不在**引导集里（一条更早的会话、一个技能、一个自动化）——
+    // 收藏要真的置顶，就得从全集里把它们补进来，否则「钉住了却看不见」。
+    const favorites = paletteMemory.favorites.map((id) => byId.get(id)).filter((entry) => entry !== void 0);
+    const favoriteIds = new Set(favorites.map((entry) => entry.id));
+    const recentIds = new Set(
+      paletteEntries.filter((entry) => entry.kind === "session").slice(0, PALETTE_IDLE_SESSIONS).map((entry) => entry.id)
+    );
+    const base = paletteEntries.filter(
+      (entry) => !favoriteIds.has(entry.id) && (entry.kind === "action" || recentIds.has(entry.id))
+    );
+    // orderIdle 负责整条空查询排序（收藏 → 常用分降序 → 原顺序）；干净记忆下
+    // 它原样返回，所以没收藏过、也没用过的新用户看到的首屏与这个功能上线前一致。
+    return orderIdle([...favorites, ...base], paletteMemory);
+  }, [paletteEntries, paletteMemory]);
+  // 收藏切换：上限到顶时给出**明确反馈**，不静默失败（收藏是用户的短名单，
+  // 悄悄丢一条比拒绝更糟）。上限常量与 palette-memory.js 同源。
+  const togglePaletteFavorite = reactExports.useCallback((id) => {
+    const result = toggleFavorite(paletteMemory, id);
+    if (!result.ok) {
+      if (result.reason === "limit") {
+        showToast(`收藏已满（最多 ${FAVORITES_MAX} 个），先取消一个再收藏`, "warning");
+      }
+      return;
+    }
+    persistPaletteMemory(result.memory);
+  }, [paletteMemory, persistPaletteMemory, showToast]);
+  const recordPaletteUse = reactExports.useCallback((item) => {
+    if (item === void 0) return;
+    persistPaletteMemory(recordUse(paletteMemory, item.id, Date.now()));
+  }, [paletteMemory, persistPaletteMemory]);
   const resumeRunSession = reactExports.useCallback(
     (sessionId) => {
       const hit = taskList?.find((t) => t.id === sessionId);
@@ -69352,7 +69497,10 @@ function App() {
         open: paletteOpen,
         onClose: () => setPaletteOpen(false),
         entries: paletteEntries,
-        idleEntries: paletteIdleEntries
+        idleEntries: paletteIdleEntries,
+        memory: paletteMemory,
+        onRun: recordPaletteUse,
+        onToggleFavorite: togglePaletteFavorite
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts })

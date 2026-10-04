@@ -447,6 +447,60 @@ await h.check("设置：testDraftModel 缺必填项时返回结构化失败（�
 
 // ── ⑧ 事件订阅：每个 on* 都能订阅并注销 ─────────────────────
 
+/**
+ * 命令面板的记忆（收藏 + 常用分）。
+ *
+ * 两条**写读往返**断言，因为这对通道的契约就是「写进去的东西能原样读回来」：
+ *   · 读：没配置过必须是**有形状的空记忆**（不是 undefined）—— 渲染层据此直接
+ *     当作初始值用，返回 undefined 会在「干净配置」这条最常见路径上炸；
+ *   · 写：合法值落盘后读回一致；非法值（数组、数字、字符串）**被拒绝**，
+ *     而不是写进去一个读不回来的东西。
+ */
+await h.check("命令面板记忆：未配置时有形状；写读往返一致", async () => {
+	const initial = await call("getPaletteMemory");
+	assert.ok(!initial.hang, "getPaletteMemory 挂起");
+	assert.equal(initial.ok, true, `读未配置的记忆不应失败：${json(initial)}`);
+	assert.deepEqual(
+		{ favorites: initial.value?.memory?.favorites, usage: initial.value?.memory?.usage },
+		{ favorites: [], usage: {} },
+		`未配置时应回空记忆，实际 ${json(initial.value)}`,
+	);
+
+	const written = { favorites: ["action:stats"], usage: { "action:stats": { score: 2, lastAt: 1_700_000_000_000 } } };
+	const put = await call("setPaletteMemory", written);
+	assert.ok(!put.hang, "setPaletteMemory 挂起");
+	assert.equal(put.ok, true, `写入合法记忆不应失败：${json(put)}`);
+	const back = await call("getPaletteMemory");
+	assert.deepEqual(back.value?.memory, written, `写进去的应能原样读回来，实际 ${json(back.value)}`);
+
+	// 整体非法（连对象都不是）一律拒绝 —— 写进去的东西必须能原样读回来。
+	for (const bad of [[], 42, "x", null]) {
+		const rejected = await call("setPaletteMemory", bad);
+		assert.ok(!rejected.hang, `setPaletteMemory(${json(bad)}) 挂起`);
+		assert.equal(rejected.ok, false, `非法记忆应被拒绝，实际 ${json(rejected)}`);
+	}
+	// 拒绝之后，磁盘上仍是上一步那份合法值（不是被写坏）。
+	const after = await call("getPaletteMemory");
+	assert.deepEqual(after.value?.memory, written, `被拒之后不应污染既有记忆，实际 ${json(after.value)}`);
+
+	// 局部脏数据是**清洗**而不是拒绝（与 skillOverrides 同口径：丢坏的那条，
+	// 不让整块失效）。这条与上面的「拒绝」是两种不同的契约，不要混为一谈。
+	const cleaned = await call("setPaletteMemory", {
+		favorites: ["action:stats", 7, "", "action:stats"],
+		usage: { "action:stats": { score: 3, lastAt: 5 }, junk: { score: "NaN" } },
+	});
+	assert.ok(!cleaned.hang, "带局部脏数据的写入挂起");
+	assert.equal(cleaned.ok, true, `局部脏数据应被清洗而不是拒绝，实际 ${json(cleaned)}`);
+	assert.deepEqual(
+		cleaned.value?.memory,
+		{ favorites: ["action:stats"], usage: { "action:stats": { score: 3, lastAt: 5 } } },
+		`清洗结果不对：${json(cleaned.value)}`,
+	);
+	// 收尾：把记忆清回空，别让本用例的写入影响后续用例。
+	const reset = await call("setPaletteMemory", { favorites: [], usage: {} });
+	assert.equal(reset.ok, true, `清空记忆不应失败：${json(reset)}`);
+});
+
 await h.check("事件订阅：全部 on* 可订阅、返回注销函数、注销不抛", async () => {
 	const r = await win.evaluate(() => {
 		const k = globalThis.kami;
