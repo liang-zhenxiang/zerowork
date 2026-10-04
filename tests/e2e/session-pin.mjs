@@ -23,6 +23,7 @@
  *   ⑩ 归档：会话从侧栏收起、置顶记录保留；**取消归档后置顶原样回来**
  *   ⑪ 重命名：置顶跟着走（同一个会话文件，path 不变）
  *   ⑫ 删除：会话消失、列表不抛错，置顶记录成为**不显示的悬空项**（按设计不自动清理）
+ *   ⑬ **矮窗口**（600px 高，CI runner 的几何）下菜单项仍然点得到、置顶真的生效
  *
  * ## 为什么用「预置会话文件」而不是跑模型
  *
@@ -183,6 +184,17 @@ const clickMenuItem = async (label) => {
 			(b) => (b.textContent ?? "").trim() === l,
 		);
 		if (btn === undefined) return null;
+		/*
+		 * 先把这一项滚进可视区，再断言、再点。
+		 *
+		 * 菜单挂在行上、处在 `.sidebar-scroll` 这个滚动容器里：窗口矮的时候
+		 * （CI 的 runner 实测可视区只有 204px，而菜单 6 项约 190px + 边距，
+		 * 两个方向都放不下）菜单必然有一部分在可视区之外 —— 但它是**可滚动**的，
+		 * 真实用户往下滚一下就能点到。测试照做：不然这里断言的就不是
+		 * 「能不能点到」，而是「窗口够不够高」。滚动之后仍会断言它确实在可视区内，
+		 * 所以「菜单渲染在了滚动内容之外 / 根本没渲染」这类真问题照样会红。
+		 */
+		btn.scrollIntoView({ block: "nearest" });
 		const rect = btn.getBoundingClientRect();
 		const scroller = document.querySelector(".sidebar-scroll");
 		const view = scroller?.getBoundingClientRect();
@@ -499,6 +511,65 @@ await h.check("⑫ 删除：会话消失、列表不抛错，置顶记录成为�
 	// 悬空记录按设计**保留**（不自动清理：会话文件可能只是暂时不在，见 pin.js 文件头）。
 	const index = JSON.parse(readFileSync(PINS_FILE, "utf8"));
 	assert.ok(typeof index[TASKS[5].path] === "number", `置顶记录按设计保留：${JSON.stringify(index)}`);
+});
+
+// ══ ⑬ 矮窗口：菜单两边都放不下时仍然点得到 ════════════════════════
+/*
+ * 这条是 CI 抓出来的环境差异，不是补的「顺手多测一点」：runner 上的窗口比本地矮得多，
+ * 侧栏可视区只有约 200px，而 6 项菜单本身就近 190px —— **上下都放不下**，
+ * 于是「向下展开」的下半截被裁在可视区外。真实用户在这种情况下往下滚一下就能点到；
+ * 菜单在滚动容器里是可滚动的，所以这是可用的，只是不能假设「一打开就整块可见」。
+ *
+ * 断言的是结果：把窗口压到 CI 那样矮之后，走同一条「点菜单项」的路（它内部会先把
+ * 目标项滚进可视区），置顶**真的生效**。
+ */
+await h.check("⑬ 矮窗口（600px 高）下菜单项仍点得到，置顶真的生效", async () => {
+	await h.app().evaluate(({ BrowserWindow }) => {
+		const win = BrowserWindow.getAllWindows()[0];
+		if (win !== undefined) win.setSize(1280, 600);
+	});
+	await h.waitForSettled();
+
+	// 任务区若被折叠成 5 行就展开，保证「最后一行」足够靠下。
+	await win.evaluate(() => {
+		const more = document.querySelector(".sidebar-scroll .task-list-more");
+		if (more !== null) more.click();
+	});
+	await h.waitForSettled();
+
+	const opened = await win.evaluate(() => {
+		const rows = [...document.querySelectorAll(".sidebar-scroll .task-list > .task-item")];
+		const last = rows[rows.length - 1];
+		const btn = last?.querySelector(".task-item-ops .task-op-btn");
+		if (btn === undefined || btn === null) return false;
+		btn.click();
+		return true;
+	});
+	assert.ok(opened, "最后一行应有 ⋯ 按钮");
+	await waitUntil(() => win.evaluate(() => document.querySelector(".task-op-menu") !== null), {
+		timeout: 15_000,
+		desc: "矮窗口下 ⋯ 菜单展开",
+	});
+
+	/*
+	 * 目标：**任意一行**（这里选当前最后一行）在矮窗口里也能被置顶。
+	 * clickMenuItem 会先把目标项滚进可视区再断言、再点 —— 与真实用户的操作一致。
+	 */
+	const title = await win.evaluate(() => {
+		const rows = [...document.querySelectorAll(".sidebar-scroll .task-list > .task-item")];
+		return (rows[rows.length - 1]?.querySelector(".task-item-title")?.textContent ?? "").trim();
+	});
+	await clickMenuItem("置顶");
+
+	// 结果断言：它真的排到了任务区最前，并带上了钉标记。
+	const layout = await waitUntil(
+		async () => {
+			const next = await readLayout();
+			return next.tasks[0]?.title === title && next.tasks[0].pinned === true ? next : null;
+		},
+		{ timeout: 15_000, desc: `矮窗口下「${title}」被置顶到最前` },
+	);
+	assert.equal(layout.tasks[0].pinned, true, `「${title}」应带钉标记`);
 });
 
 await h.finish();

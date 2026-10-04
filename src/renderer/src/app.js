@@ -13347,10 +13347,20 @@ function Sidebar({
      * 不翻转时菜单的自然位置就是「行底之下」，于是判据写成「行底 + 菜单高 vs 容器底」。
      */
     const menuHeight = menu.offsetHeight;
-    const rowBottom = row.getBoundingClientRect().bottom;
-    const next =
-      rowBottom + menuHeight > scroller.getBoundingClientRect().bottom - MENU_FLIP_MARGIN;
-    setMenuFlipUp(next);
+    const rowRect = row.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    /*
+     * 只有「下方放不下、上方放得下」时才翻。
+     *
+     * 少了后半句会在矮窗口里帮倒忙：侧栏可视区比菜单还矮时两边都放不下，
+     * 翻转只是把它从「下面被裁」换成「上面被裁」——CI 的 runner 就是这么翻车的
+     * （实测可视区只有 204px、菜单 6 项约 190px + 边距，两个方向都塞不下）。
+     * 塞不下时保持默认的「向下展开」：菜单在滚动容器里是**可滚动**的，
+     * 用户往下滚一下就够得到，而翻上去会让他先往回滚。
+     */
+    const fitsBelow = rowRect.bottom + menuHeight <= scrollerRect.bottom - MENU_FLIP_MARGIN;
+    const roomAbove = rowRect.top - menuHeight >= scrollerRect.top + MENU_FLIP_MARGIN;
+    setMenuFlipUp(!fitsBelow && roomAbove);
   }, [menuPath, menuFlipUp]);
   reactExports.useEffect(() => {
     if (menuCwd === void 0 && menuPath === void 0) return;
