@@ -48,7 +48,7 @@
 | `src/renderer/src/vendor-xlsx.js`（SheetJS Community Edition 的 ESM 构建，**原样复制上游 `package/xlsx.mjs`，含其版权头**） | Apache-2.0 | SheetJS LLC（`/*! xlsx.js (C) 2013-present SheetJS -- http://sheetjs.com */` 随文件保留） |
 | `src/renderer/src/vendor-lodash.js` | MIT | John-David Dalton 及 lodash 贡献者 |
 | `src/renderer/src/vendor-jszip.js` + `vendor-jszip-2.js` | MIT（或 GPLv3，双许可） | Stuart Knightley 及 JSZip 贡献者 |
-| `resources/fonts/README.md`（MiSans 字体来源与许可条款；**字体二进制未入库**） | 小米《MiSans 字体知识产权许可协议》—— 全球免费商用，但**嵌入式使用须「在软件中特别注明使用了 MiSans 字体」** | 小米科技有限责任公司 |
+| `resources/fonts/README.md`（MiSans 的**决策记录**；字体二进制从未入库，界面也早已不含它） | 小米《MiSans 字体知识产权许可协议》—— **本应用当前不使用、不随包 MiSans**，故该协议的「应用内注明」义务**不适用**（见下方 2026-10-05 的核实） | 小米科技有限责任公司 |
 
 **发布前需要权利人逐项处置**（三选一）：
 
@@ -59,16 +59,15 @@
 - [ ] 各 MIT 资产 —— **可以随包分发**，但必须保留其 LICENSE 与归属声明
       （已保留，勿删）
 - [ ] 其余（UmaDev 归属注释、vendored 库声明、uv 来源）—— 保留即可
-- [ ] **MiSans 的「应用内注明」义务 —— 目前未履行**。许可条款要求「在软件中
-      特别注明使用了 MiSans 字体」，而应用内注明位置取决于「关于」页，**当前没有关于页**，
-      所以这条义务处于未完成状态。`resources/fonts/README.md` 是仓库内的注明，
-      **不等于软件内的注明**。发布前须补上「关于」页或改用其他方式随应用呈现该声明
-
-### 关于其余 `resources/` 内容
-
-除上表所列，`resources/` 下还有专家包、预装插件、回复风格、提示词片段、
-docx 技能与引擎、首屏数据等。它们随本仓库一并以 Apache-2.0 分发。
-
+- [x] ~~**MiSans 的「应用内注明」义务 —— 目前未履行**~~ **已核实为「不适用」，2026-10-05**。
+      原记录说「MiSans 留在 `--font-body` 最末位兜底」，但**实现里早已不是这样**：
+      `app.css` 的 `--font-body` 现为 `"PingFang SC", -apple-system, BlinkMacSystemFont,
+      "Segoe UI", sans-serif`（**无 MiSans**），`@font-face` 声明已于 2026-09-20 移除，
+      renderer 构建根下也没有 `fonts/` 目录（woff2 从未入库）。
+      **不使用的字体没有注明义务** —— 所以这一条不是「欠着」，而是「不必做」。
+      文档此前两处（本文件与 `resources/fonts/README.md`）都停留在旧状态，本次一并纠正。
+      若将来重新随包 MiSans，那条注明必须加回**应用内**的「关于 → 第三方组件」
+      （清单在 `src/renderer/src/attributions.js`，单测锁着「不列已不随包的东西」）。
 - [ ] 权利人确认对这部分内容**拥有著作权或已取得可再分发的授权**，
       且该授权覆盖**公开开源分发**（不只是内部使用）
 - [ ] 若不覆盖，则对照 `resources/` 各目录逐项完成**替换或移除**
@@ -115,7 +114,13 @@ npx license-checker --summary
 
 - [ ] **第 2 节带许可声明的资产**：`pdf`（Anthropic 专有）与 `content-factory`
       （付费第三方技能）已取得授权 / 替换 / 移除；MIT 资产的许可声明已保留
-- [ ] **MiSans 的应用内注明义务已履行**（补「关于」页或等效呈现）——
+- [x] **随包第三方组件的应用内注明已履行（2026-10-05）**：MIT 与 Apache-2.0 都要求
+      分发副本里保留版权与许可声明，而用户手上是安装包、不是仓库 —— 所以
+      「设置 → 关于」新增「第三方组件」一段，逐项列出**实际随包**的库、许可、权利人与用途
+      （KaTeX / SheetJS / lodash / JSZip / PDF.js），并指向本文件为完整清单。
+      清单是纯数据模块 `src/renderer/src/attributions.js`，由单测锁住两个方向：
+      随包的 vendored 依赖必须在清单里、**已不随包的（如 MiSans）不许出现**。
+- [x] ~~**MiSans 的应用内注明义务已履行**（补「关于」页或等效呈现）——~~ 见上：**不适用**。
       这是唯一一条「资产已合规、但义务尚未执行」的条目
 - [ ] 第 2 节其余内容：随包内容的授权状态已由权利人确认
 - [ ] 第 1 节：`EXTERNAL_REQUESTS.md` 已过目，无开关的请求已决定保留 / 替换 / 移除

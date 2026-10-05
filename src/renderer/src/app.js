@@ -29759,6 +29759,8 @@ import {
 } from "./palette-memory.js";
 // 案例封面的几何内核（#104 起封面由第一方生成，不再引第三方 CDN 图）。
 import { coverAccent, coverBarWidth, coverBars, coverLines, coverVariant } from "./case-cover.js";
+// 「关于」页的第三方组件与许可（纯数据；单测锁着它与随包的 vendored 依赖一致）。
+import { APP_LICENSE, BUNDLED_COMPONENTS, FULL_NOTICES_LOCATION } from "./attributions.js";
 // 会话置顶的纯逻辑（排序 + 折叠窗口）在 session-pin.js 里，单测直接 import 它 ——
 // 见该文件头注：这两条判断在界面上只表现为「顺序对不对」，是 GUI 断言最说不清的一类。
 import { isPinned, sortSessionsByPin, taskListWindow } from "./session-pin.js";
@@ -65031,6 +65033,33 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
         (window.kami?.appVersion ?? __APP_VERSION__)
       ] })
     ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "许可" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
+        APP_LICENSE.id,
+        " · ",
+        APP_LICENSE.holder
+      ] })
+    ] }) }),
+    /* 第三方组件：随包分发就必须在应用内保留归属（MIT 与 Apache-2.0 都要求）。
+       清单在 attributions.js（纯数据；单测锁着它与随包的 vendored 依赖一致、
+       以及 MiSans 之类的「已不随包」项不许混进来）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-subhead", children: "第三方组件" }),
+    BUNDLED_COMPONENTS.map((component) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: component.name }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
+        component.license,
+        " · ",
+        component.holder,
+        " · ",
+        component.use
+      ] })
+    ] }) }, component.name)),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "settings-foot", children: [
+      "以上组件的完整清单与许可原文见仓库的 ",
+      /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: FULL_NOTICES_LOCATION.url, children: FULL_NOTICES_LOCATION.file }),
+      " —— 应用内只保留归属声明，避免与仓库那份各自漂移。"
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "诊断" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "用量、缓存命中率与各组件运行状态" }),

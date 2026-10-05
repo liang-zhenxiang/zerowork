@@ -7092,6 +7092,16 @@ textarea:focus-visible {
 	overflow-wrap: anywhere;
 }
 
+/* 分区内的小节标题（「关于」页的「第三方组件」用它开一段）。
+   档位照 .settings-section-head h2 的下一档：字号同为 --text-body、
+   颜色降一档到次文色 —— 靠**字重与颜色**区分层级，不新造字号。 */
+.settings-subhead {
+	margin: var(--space-5) 0 0;
+	color: var(--text-secondary);
+	font-size: var(--text-body);
+	font-weight: 500;
+}
+
 /* ── 设置页「审计中心」分区（spec: add-managed-runtimes 阶段 4）────── */
 
 /* 一行一条的留痕：列表容器/行/工具栏/标签全部复用既有档位

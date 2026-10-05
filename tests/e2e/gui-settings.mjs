@@ -122,6 +122,77 @@ for (const [label, slug] of EXPECTED) {
 	});
 }
 
+/*
+ * 关于页的第三方组件注明（2026-10-05，#19 的可执行部分）。
+ *
+ * 为什么它必须**看得见**而不是「在 DOM 里」：MIT 与 Apache-2.0 要求分发副本里
+ * 保留版权与许可声明 —— 用户手上是安装包，不是仓库，这条注明得真的显示出来。
+ * 所以这里断言的是**渲染可见性**（getClientRects 非空 = 真的画出来了）与文本内容，
+ * 而不是查询选择器命中（隐藏元素同样会被命中）。MiSans 已于 2026-09-20 移除，
+ * 因此它**不该**出现在这里 —— 列了等于声称用了它，反而失实（反向断言在下面）。
+ */
+await h.check("「关于」页：第三方组件与许可注明真的渲染出来", async () => {
+	await openGroup("关于");
+	const r = await win.evaluate(() => {
+		const section = document.querySelector(".settings-panel .settings-section");
+		if (section === null) return { error: "找不到关于页的 section" };
+		const visible = (el) => el !== null && el.getClientRects().length > 0;
+		const rows = [...section.querySelectorAll(".provider-row")].map((row) => ({
+			name: row.querySelector(".provider-name")?.textContent?.trim() ?? "",
+			meta: row.querySelector(".provider-meta")?.textContent?.trim() ?? "",
+			visible: visible(row),
+		}));
+		const subhead = [...section.querySelectorAll(".settings-subhead")].find((n) =>
+			(n.textContent ?? "").includes("第三方组件"),
+		);
+		const foot = section.querySelector(".settings-foot a");
+		return {
+			rows,
+			subheadVisible: visible(subhead ?? null),
+			footText: foot?.textContent?.trim() ?? null,
+			footVisible: visible(foot ?? null),
+			text: section.innerText,
+		};
+	});
+	assert.equal(r.error, undefined, r.error);
+	assert.ok(r.subheadVisible, "「第三方组件」小节标题没渲染出来");
+	assert.ok(r.footVisible, "指向完整清单的那一行没渲染出来");
+
+	const byName = new Map(r.rows.map((row) => [row.name, row]));
+	for (const name of ["ZeroWork", "许可", "KaTeX", "SheetJS Community Edition（xlsx）", "lodash", "JSZip", "PDF.js（pdfjs-dist）"]) {
+		const row = byName.get(name);
+		assert.ok(row !== undefined, `关于页缺少「${name}」这一行。现有：${r.rows.map((x) => x.name).join(" / ")}`);
+		assert.ok(row.visible, `「${name}」那一行在 DOM 里但没渲染出来（getClientRects 为空）`);
+	}
+	// 许可标识要真的露出来（只写名字不写许可，等于没做归属）
+	assert.match(byName.get("KaTeX").meta, /MIT/);
+	assert.match(byName.get("SheetJS Community Edition（xlsx）").meta, /Apache-2\.0/);
+	assert.match(byName.get("许可").meta, /Apache-2\.0/);
+	assert.equal(r.footText, "THIRD_PARTY_NOTICES.md", `指向完整清单的链接文字应是文件名，实际「${r.footText}」`);
+	// 反向：MiSans 已不随包（2026-09-20 移除），注明里**不该**出现它
+	assert.ok(
+		!r.text.includes("MiSans"),
+		"关于页出现了 MiSans —— 它自 2026-09-20 起已从字体栈与随包内容中移除，列上等于声称用了它",
+	);
+	await h.shoot("settings-about-attribution");
+
+	// 深色下同样要看得见（这一段是**义务**，不是装饰；深色是它最容易被吞掉的地方）
+	await win.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+	await h.waitForSettled();
+	const dark = await win.evaluate(() => {
+		const section = document.querySelector(".settings-panel .settings-section");
+		const rows = [...(section?.querySelectorAll(".provider-row") ?? [])];
+		return {
+			visible: rows.filter((row) => row.getClientRects().length > 0).length,
+			text: section?.innerText ?? "",
+		};
+	});
+	assert.ok(dark.visible >= 7, `深色下关于页的行没渲染出来（可见 ${dark.visible} 行）`);
+	assert.ok(dark.text.includes("Apache-2.0"), "深色下许可注明不见了");
+	await h.shoot("settings-about-attribution-dark");
+	await win.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+});
+
 await h.check("关闭设置后对话框消失", async () => {
 	await win.evaluate(() => {
 		const btn = document.querySelector('[aria-label="关闭设置"]');
