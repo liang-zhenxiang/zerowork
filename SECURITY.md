@@ -315,6 +315,12 @@ Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**�
   有发现就开/更新一个 Issue —— 这就是「vendored 依赖谁来盯」的答案：
   静态门禁守清单的**准确性**，定时任务守清单的**时效性**。
 
+  > **安全页上有一条 CodeQL 告警是带理由关闭的**：`scripts/check-vendored-advisories.mjs`
+  > 会把 vendor bundle 的版本号发往 `api.osv.dev`，于是 `js/file-access-to-http` 会报它。
+  > 报得没错 —— 查公告本来就要把版本号告诉漏洞库；发出去的只有一个受形态白名单约束的
+  > `x.y.z`、没有用户数据，目标也是公开数据库。判断与理由写在那个脚本的文件头，
+  > 改它之前请按那三条重新判断一遍。
+
   它维护一张**带理由的豁免表**（`advisories` 字段在 `check-vendored-deps.mjs` 的
   `VERSION_MARKER` 里）。现有唯一一条豁免就是 SheetJS：OSV 对 npm 包 `xlsx` 没有
   `fixed` 事件，所以 0.20.3 也会被报「受影响」—— 豁免条目里写明「上游修在哪个版本、
