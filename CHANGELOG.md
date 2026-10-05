@@ -26,6 +26,29 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+### 安全
+
+- **随包的 SheetJS 从 0.18.5 升到 0.20.3 —— 修掉两个 high，并给这类代码配上了「有人盯」**
+  （[#61](https://github.com/liang-zhenxiang/zerowork/issues/61)）。此前错在哪：
+  `src/renderer/src/vendor-xlsx.js` 是**随安装包分发**的预打包产物，带着原型污染
+  （CVE-2023-30533）与 ReDoS（CVE-2024-22363）两个 high 公告，触发条件正是
+  **解析用户提供的表格文件**（预览 `.csv` / `.xls`）—— 而 **Dependabot 与 `npm audit`
+  都看不见它**：它不是 npm 依赖、原包已被移出生产依赖、Dependabot 里还显式 ignore 了
+  `xlsx`，升级 `package.json` 也不改变随包的字节。两个公告的修复版本只发在
+  SheetJS 自有渠道（npm 上 0.18.5 就是最后一版），所以这次取官方
+  `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`（压缩包 sha256 与入库文件
+  sha256 都记在 `SECURITY.md` 里可复核），**原样复制 `package/xlsx.mjs`** ——
+  顺带修掉它此前连上游版权头一并被删掉的问题（Apache-2.0 第 4 条要求保留归属声明）。
+  同时补上两半机制：静态门禁 `check-vendored-deps.mjs` 继续守**清单准不准**，
+  新增 `check-vendored-advisories.mjs` + 每周一次的 `vendored-advisories.yml` 守
+  **清单还新不新**（拿「库 + 版本」查 OSV.dev，有未豁免的公告就开/更新 Issue）——
+  Dependabot 看不到这类文件，这件事必须有自己的机制。豁免带理由**且会被反过来校验**：
+  SheetJS 那两条在 OSV 里没有 `fixed` 事件（npm 上从来没有修复版，所以修好了也会被报
+  「受影响」），豁免条目写明上游修复版本，而脚本会检查「手上的版本 ≥ 上游修复版本」——
+  低于它照样失败。回归测试 5 条（版本不低于修复版本、导出面、csv/xls → xlsx 完整往返）
+  与 1 条 GUI 用例（真开一个 `.csv`，断言转换后的工作簿被渲染出来）。
+  反向验证：把 bundle 换回 0.18.5 → 三处守卫同时变红（清单版本 / 公告巡检 / 单测）。
+
 ## [0.4.0] - 2026-10-04
 
 本轮主题：**第一印象与肌肉记忆** —— 让陌生人第一眼看懂，让老用户一键到位。

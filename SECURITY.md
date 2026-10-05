@@ -123,15 +123,16 @@
 
 写在这里而不是藏起来 —— 一个诚实的威胁模型比一个看起来完整的更有用。
 
-- **随包的 vendored 依赖带已知高危漏洞，而审计工具看不到它。**
-  `src/renderer/src/vendor-xlsx.js` 是 SheetJS 0.18.5 的预打包产物，**随安装包分发**，
-  带原型污染（[GHSA-4r6h-8v6p-xvw6](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)）与
-  ReDoS（[GHSA-5pgg-2g8v-p4x9](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)）
-  两个 high 公告，二者**都没有 npm 上的修复版本**（`xlsx` 停在 0.18.5）。
-  触发条件正是**解析用户提供的表格文件** —— 本产品的核心功能。
-  当前状态：**已知、未修、有跟踪**（[Issue #61](https://github.com/liang-zhenxiang/zerowork/issues/61)）。
-  **这一条的要点不是「有一个漏洞」，而是「有一类代码没有任何工具在盯」** ——
-  为什么审计工具看不见、以及全部 `vendor-*.js` 的清单，见下文
+- **随包的 vendored 依赖不在任何审计工具的视野里**（漏洞那个具体问题已于 2026-10-05 修掉，
+  这条结构性风险仍在）。
+  `src/renderer/src/vendor-xlsx.js` 是 SheetJS 的预打包产物、**随安装包分发**，
+  它此前是 0.18.5，带原型污染（[GHSA-4r6h-8v6p-xvw6](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)）
+  与 ReDoS（[GHSA-5pgg-2g8v-p4x9](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)）两个 high 公告，
+  触发条件正是**解析用户提供的表格文件**。现在已升到 0.20.3（覆盖两条的修复版本，
+  来源与指纹见下文），并补齐了「谁在盯」：静态门禁守清单准确性、每周一次的公告巡检守时效性。
+  **但那条结构性的问题没有随升级消失** —— 这些文件不在 npm 依赖图里，
+  Dependabot 与 `npm audit` 永远看不到它们，升级 `package.json` 也不改变随包的字节。
+  为什么审计工具看不见、以及全部 `vendor-*.js` 的清单与巡检机制，见下文
   「随包的 vendored 依赖：审计盲区」。
 - **仓库根的生产依赖有 1 条 high 未修**（`brace-expansion`，由
   `@earendil-works/pi-coding-agent` 传递引入，`npm audit fix` 可修）。
@@ -227,27 +228,49 @@ Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**�
 
 | 文件 | 库 | 版本 | 如何被加载 |
 | --- | --- | --- | --- |
-| `src/renderer/src/vendor-xlsx.js` | SheetJS Community Edition（npm 包名 `xlsx`） | 0.18.5 | `office-xlsx.js` 的 `XlsxPreview` 在预览 `.csv` / `.xls` 时**动态 import 懒加载** |
+| `src/renderer/src/vendor-xlsx.js` | SheetJS Community Edition（npm 包名 `xlsx`，**0.19.3 起只发自有 CDN、npm 上停在 0.18.5**） | 0.20.3 | `office-xlsx.js` 的 `XlsxPreview` 在预览 `.csv` / `.xls` 时**动态 import 懒加载** |
 | `src/renderer/src/vendor-lodash.js` | lodash | 4.18.1 | 被 `workspace.js` / `office-xlsx.js` / `office-pptx.js` **静态 import** |
 | `src/renderer/src/vendor-jszip.js` | JSZip | 3.10.2 | 被 `workspace.js` / `office-docx.js` / `office-pptx.js` **静态 import** |
 | `src/renderer/src/vendor-jszip-2.js` | JSZip —— 打包器拆出的**再导出薄壳**（244 字节，自身无版本号） | 3.10.2（同 `vendor-jszip.js`） | 被 `office-docx.js` / `office-pptx.js` 静态 import 取默认导出 |
 | `src/renderer/vendor-katex.js`（在 chunk 扫描目录之外：静态并入 app chunk，无独立产物） | KaTeX + remark-math + rehype-katex（esbuild 整链打包，`scripts/vendor-katex.mjs` 可再生生成） | 0.19.0 | 被 `app.js` **静态 import**：消息流的数学公式渲染（$$ 围栏式）。字体与样式在 `katex.css` / `katex-fonts/`（核心子集 13 个 woff2），经 `index.html` 随包、离线可用 |
 
 > **版本号取自 bundle 内的版本标记，不是猜的**：`vendor-xlsx.js` 的
-> `XLSX.version = "0.18.5"`、`vendor-lodash.js` 的 `var VERSION = "4.18.1"`、
+> `XLSX.version = '0.20.3'`、`vendor-lodash.js` 的 `var VERSION = "4.18.1"`、
 > `vendor-jszip.js` 的 `n.version = "3.10.2"`。
 > `scripts/check-vendored-deps.mjs` 会逐字核对**这张表与 bundle 里的版本标记**，
 > 并保证新出现的 `vendor-*.js` 必须先登记在册。
 >
-> **这四个里目前只有 SheetJS 带已知公告。** 列出其余三个不是为了凑数 ——
+> **四个里目前没有任何一个带未修复的已知公告**（SheetJS 那两个 high 已于 2026-10-05 升级修掉，
+> 见下）。列出其余三个不是为了凑数 ——
 > 「当前没问题」与「有人在盯」是两件事，而这里缺的正是后者。
 
-**已识别的风险：SheetJS 0.18.5**
+**SheetJS：两个 high 已修复（2026-10-05），但「工具看不见」这层结构没变**
 
 | 公告 | 严重度 | 修在 |
 | --- | --- | --- |
 | [Prototype Pollution in sheetJS](https://github.com/advisories/GHSA-4r6h-8v6p-xvw6)（CVE-2023-30533） | high | 0.19.3 |
 | [SheetJS Regular Expression Denial of Service](https://github.com/advisories/GHSA-5pgg-2g8v-p4x9)（CVE-2024-22363） | high | 0.20.2 |
+
+- **处置**：`vendor-xlsx.js` 从 0.18.5 升到 **0.20.3**（同时覆盖上表两条的修复版本）。
+  0.20.3 是社区版当前的最高版本（0.20.4 及以后在 CDN 上不存在，实测 404）。
+  **本次起改为「原样复制上游文件」**：不再重排版、也不再删掉上游的版权头 ——
+  此前那份复制品连 `/*! xlsx.js (C) 2013-present SheetJS */` 一并被删掉了，
+  而 Apache-2.0 第 4 条要求保留归属声明（同一个动作修掉两件事）。
+  来源与指纹（可复核）：
+
+  | 项 | 值 |
+  | --- | --- |
+  | 来源 | `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`（官方自有分发，非 npm） |
+  | 包内文件 | `package/xlsx.mjs`（ESM 构建，导出面与旧版一致且多一个 `default`） |
+  | 压缩包 sha256 | `8dc73fc3b00203e72d176e85b50938627c7b086e607c682e8d3c22c02bb99fe8` |
+  | 入库文件 sha256 | `1a0fb062ee9781b13f6687371b202aaefc53b6ce55b530c027e01f9c087b77db` |
+
+- **⚠️ 修好之后，npm 侧的工具仍会报它 —— 这是预期的，不是没修**：
+  OSV / GitHub Advisory 对 npm 包 `xlsx` 记的是 `{"introduced": "0"}` 且**没有 `fixed` 事件**
+  （因为 npm 上从来没有修复版：0.18.5 就是最后一个 npm 发布）。于是任何「按 npm 包名 + 版本」
+  去查的自动化（含本仓库新增的 `scripts/check-vendored-advisories.mjs`）都会说「受影响」，
+  哪怕我们手上这份是 0.20.3。这类**假阳性**必须在机制里带着理由豁免掉，
+  否则下一个人会把一个正确的修复当成没做。
 
 - **触发条件**：预览 **`.csv` / `.xls`** 文件时，`XlsxPreview` 动态加载
   `vendor-xlsx.js`，并用 `XLSX.read()` 解析该文件的字节（`office-xlsx.js:104969-104974`）——
@@ -280,8 +303,26 @@ Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**�
 
 **复查落点**
 
-`scripts/check-vendored-deps.mjs` 把上面那张表变成机器可查的：新出现的
-`vendor-*.js` 不登记会失败，表里的版本与 bundle 里的版本标记不一致也会失败。
-它**故意不联网** —— 查漏洞数据库会让一个静态门禁变成网络依赖
-（理由同 `scripts/check-docs.mjs` 的「不做的事」），所以
-「版本与公告状态的比对」仍是**定期的人工事项**，跟踪在 Issue #61。
+两个脚本，分工不同：
+
+- **`scripts/check-vendored-deps.mjs`（静态，进 `lint:all`）** 把上面那张表变成机器可查的：
+  新出现的 `vendor-*.js` 不登记会失败，表里的版本与 bundle 里的版本标记不一致也会失败。
+  它**故意不联网** —— 查漏洞数据库会让一个静态门禁变成网络依赖
+  （理由同 `scripts/check-docs.mjs` 的「不做的事」）。
+- **`scripts/check-vendored-advisories.mjs`（联网，定时跑，2026-10-05 新增）** 补齐另一半：
+  拿上面那张表里的「库 + 版本」去查 [OSV.dev](https://osv.dev/)，有未豁免的公告就非零退出。
+  由 `.github/workflows/vendored-advisories.yml` **每周一跑一次**（也可手动触发），
+  有发现就开/更新一个 Issue —— 这就是「vendored 依赖谁来盯」的答案：
+  静态门禁守清单的**准确性**，定时任务守清单的**时效性**。
+
+  > **安全页上有一条 CodeQL 告警是带理由关闭的**：`scripts/check-vendored-advisories.mjs`
+  > 会把 vendor bundle 的版本号发往 `api.osv.dev`，于是 `js/file-access-to-http` 会报它。
+  > 报得没错 —— 查公告本来就要把版本号告诉漏洞库；发出去的只有一个受形态白名单约束的
+  > `x.y.z`、没有用户数据，目标也是公开数据库。判断与理由写在那个脚本的文件头，
+  > 改它之前请按那三条重新判断一遍。
+
+  它维护一张**带理由的豁免表**（`advisories` 字段在 `check-vendored-deps.mjs` 的
+  `VERSION_MARKER` 里）。现有唯一一条豁免就是 SheetJS：OSV 对 npm 包 `xlsx` 没有
+  `fixed` 事件，所以 0.20.3 也会被报「受影响」—— 豁免条目里写明「上游修在哪个版本、
+  我们手上是哪个版本、为什么可以豁免」，**并且脚本会校验「我们记录的版本 ≥ 上游修复版本」**，
+  低于它照样失败（豁免不是「永远闭嘴」）。
