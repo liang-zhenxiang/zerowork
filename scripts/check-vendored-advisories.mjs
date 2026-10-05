@@ -36,6 +36,17 @@
 import { versionFromBundle, VERSION_MARKER } from "./check-vendored-deps.mjs";
 
 const OSV_ENDPOINT = "https://api.osv.dev/v1/query";
+
+/**
+ * 允许发往 OSV 的版本形态：**只有** `x.y.z`。
+ *
+ * 版本号是从 bundle 正文里读出来的（文件数据），而这个脚本会把它放进一个**外联请求**里，
+ * 所以先按最小形态白名单卡一道：形态不对就不发，直接报错退出。
+ * （CodeQL 的 `file-data-in-outbound-request` 报的正是这条数据流 —— 它报得**对**：
+ * 数据确实从文件流向网络。这里的处置不是把它点掉，而是把它压到最小：
+ * 一个只可能是版本号、且形态受白名单约束的字符串。）
+ */
+const VERSION_SHAPE = /^\d+\.\d+\.\d+$/;
 const USE_COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, text) => (USE_COLOR ? `\u001b[${code}m${text}\u001b[0m` : text);
 const green = (t) => paint("32", t);
@@ -85,6 +96,10 @@ async function main() {
 		const { version, error } = versionFromBundle(file, registry);
 		if (error !== undefined) {
 			failures.push(`${file}：${error}`);
+			continue;
+		}
+		if (!VERSION_SHAPE.test(version)) {
+			failures.push(`${file}：解析出的版本「${version}」不是 x.y.z 形态，拒绝发往外联接口`);
 			continue;
 		}
 		let vulns;
