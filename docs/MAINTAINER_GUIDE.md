@@ -198,6 +198,7 @@ fork 来的 PR 其工作流需要维护者**逐次人工 approve** 才会跑；
 | `.github/workflows/dependency-review.yml` | PR | 引入有漏洞的依赖时拦截 |
 | `.github/workflows/ai-review.yml` | PR | **opt-in** 的 AI 代码审查（配了 `ANTHROPIC_API_KEY` 才跑） |
 | `.github/dependabot.yml` | 每周一 | 为 Actions 与根目录的 npm 依赖提更新 PR |
+| `.github/workflows/vendored-advisories.yml` | 每周一 + 手动 | 拿随包 `vendor-*.js` 的「库 + 版本」查 OSV.dev，有未豁免的公告就开/更新 Issue（**这**是「vendored 依赖谁来盯」的答案 —— Dependabot 看不到它们） |
 
 ### 如果自动化行为不符合预期
 

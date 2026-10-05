@@ -1,5 +1,5 @@
 /**
- * 文件预览渲染器端到端测试：工作区里的 `.xlsx` / `.pptx` / `.js` / `.json`
+ * 文件预览渲染器端到端测试：工作区里的 `.xlsx` / `.csv` / `.pptx` / `.js` / `.json`
  * → 在「工作空间文件」里点开 → **真的渲染出内容、且各自的样式表已生效**。
  *
  * 补的是一处零覆盖：产物面板里「工作空间文件」这一视图、以及**全部懒加载预览渲染器**
@@ -60,6 +60,11 @@ const XLSX_MARK = "ZEROWORK_XLSX_7788";
 // 工作表名会渲染在底部标签上（表格是 canvas 画的，单元格文本不在 DOM 里）——
 // 「只有真解析了工作簿才会出现」的那个锚点就是它。
 const XLSX_SHEET = "探针表";
+// csv / xls 走的是**另一条路**：进预览前先由随包的 SheetJS 把文本/旧格式转成 xlsx
+// （vendor-xlsx.js）。这条路的锚点是「转换后工作簿的表名」—— SheetJS 给 csv 的默认名
+// 就是 `Sheet1`，只有转换真的跑过才会出现这个名字（见下面那条用例）。
+const CSV_NAME = "表格探针.csv";
+const CSV_SHEET = "Sheet1";
 const PPTX_NAME = "演示探针.pptx";
 const PPTX_MARK = "ZEROWORK_PPTX_5566";
 // 代码 / 配置预览走的是**同一类懒加载块**（monaco 的 code-preview，以及它按需加载的
@@ -256,9 +261,14 @@ const WORKSPACE_DIR = h.WORKSPACE_DIR;
 
 writeXlsx(join(WORKSPACE_DIR, XLSX_NAME));
 await writePptx(join(WORKSPACE_DIR, PPTX_NAME));
+writeFileSync(
+	join(WORKSPACE_DIR, CSV_NAME),
+	`项目,金额\n标记行,ZEROWORK_CSV_9900\n合计,42\n`,
+	"utf8",
+);
 writeFileSync(join(WORKSPACE_DIR, JS_NAME), `// ${JS_MARK}\nexport const previewProbe = () => 42;\n`, "utf8");
 writeFileSync(join(WORKSPACE_DIR, JSON_NAME), `{\n  "mark": "${JSON_MARK}",\n  "n": 1\n}\n`, "utf8");
-console.log(`✓ 夹具已生成：${XLSX_NAME} / ${PPTX_NAME} / ${JS_NAME} / ${JSON_NAME}`);
+console.log(`✓ 夹具已生成：${XLSX_NAME} / ${CSV_NAME} / ${PPTX_NAME} / ${JS_NAME} / ${JSON_NAME}`);
 
 const mock = await startMockModel();
 
@@ -473,6 +483,45 @@ await h.check("XLSX：预览容器出现且**真的解析了工作簿**", async 
 	);
 	assert.ok(r.tabWidth > 0, "工作表标签宽度为 0 —— 有样式表但布局没生效");
 	console.log(`      xlsx 预览：${r.canvas} 个 canvas，工作表标签「${r.tabName}」（宽 ${r.tabWidth}px，样式表已生效）`);
+});
+
+await h.check("CSV：走 SheetJS 转换成工作簿后渲染（vendor-xlsx 那条路）", async () => {
+	// 上一条（xlsx）结束时预览标签还开着，先关掉回到文件列表。
+	await closePreviewTab();
+	await clickFileRow(CSV_NAME);
+	// 锚点是**转换后工作簿的表名**：`.csv` 进预览前会被 vendor-xlsx.js 读成工作簿
+	// 再写成 xlsx 字节，SheetJS 给 csv 的默认表名是 `Sheet1`。
+	// 转换没跑（换了 bundle / 导出面不对 / 懒加载失败）时，这个名字不会出现。
+	const r = await waitForComplete(
+		`csv 预览渲染出表「${CSV_SHEET}」且 office-xlsx.css 生效`,
+		(sheetName) => {
+			const office = document.querySelector(".preview-office");
+			if (office === null) {
+				return { complete: false, found: false, sample: (document.body.innerText || "").slice(-300) };
+			}
+			const tab = office.querySelector(".luckysheet-sheets-item-name");
+			const tabName = tab === null ? null : (tab.textContent || "").trim();
+			const hrefs = [...document.styleSheets].map((s) => (s.href || "").split("/").pop());
+			const canvas = office.querySelectorAll("canvas").length;
+			return {
+				complete: tabName === sheetName && canvas > 0 && hrefs.includes("office-xlsx.css"),
+				found: true,
+				tabName,
+				canvas,
+				hrefs,
+			};
+		},
+		{ arg: CSV_SHEET },
+	);
+	await h.shoot("csv-preview");
+	assert.ok(r.found, `没有出现 .preview-office —— csv 预览没打开`);
+	assert.equal(
+		r.tabName,
+		CSV_SHEET,
+		`表名不是「${CSV_SHEET}」：说明 .csv 没有被 SheetJS 转成工作簿（这条路的表名来自转换结果）`,
+	);
+	assert.ok(r.canvas > 0, "没有 canvas —— 表格网格没画出来");
+	console.log(`      csv 预览：${r.canvas} 个 canvas，转换后的表名「${r.tabName}」`);
 });
 
 await h.check("PPTX：预览容器出现且渲染出幻灯片文本", async () => {

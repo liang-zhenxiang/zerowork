@@ -42,7 +42,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // vendor bundle 可能落在两处：src/renderer/src/（动态 import 型，有独立产物）或
 // src/renderer/（静态并入 app chunk 型，无独立产物、也在 chunk 契约扫描之外——
 // vendor-katex.js 是第一例）。两处都扫，登记行里的路径写哪处都认。
-const SRC_DIRS = [path.join(ROOT, 'src/renderer/src'), path.join(ROOT, 'src/renderer')];
+export const SRC_DIRS = [path.join(ROOT, 'src/renderer/src'), path.join(ROOT, 'src/renderer')];
 const SECURITY = path.join(ROOT, 'SECURITY.md');
 
 /** 清单所在的章节标题（`SECURITY.md`）。只取这一节里的表格行。 */
@@ -59,10 +59,31 @@ const SECTION_HEADING = /^###\s+随包的 vendored 依赖/;
  * 里没有任何可机读的版本号）本身就是一个值得记进 SECURITY.md 的结论，
  * 而不是把这条检查绕过。
  */
-const VERSION_MARKER = {
+export const VERSION_MARKER = {
 	'vendor-xlsx.js': {
 		lib: 'SheetJS Community Edition',
-		re: /XLSX\.version\s*=\s*"([^"]+)"/,
+		// 2026-10-05（#61）：这份 bundle 现在**原样复制**上游 `package/xlsx.mjs`
+		// （0.20.3 起不再重排版、也不再删掉上游版权头），所以版本标记是上游的单引号写法。
+		// 上一条正则要求双引号 —— 它当初就是按「重排版过的产物」写的，形态变了就该改这里，
+		// 而不是放宽成「随便什么引号都行」（那会把「没人重排版过」这件事也一起放过）。
+		re: /XLSX\.version\s*=\s*'([^']+)'/,
+		// 供「定期查公告」用（scripts/check-vendored-advisories.mjs）：
+		// 这份 bundle 是哪个生态的哪个包、以及已知公告里可以带理由豁免的条目。
+		osv: { ecosystem: 'npm', name: 'xlsx' },
+		advisoryExemptions: [
+			{
+				id: 'GHSA-4r6h-8v6p-xvw6',
+				fixedIn: '0.19.3',
+				why:
+					'OSV / GitHub Advisory 对 npm 包 xlsx 只记 introduced:0、**没有 fixed 事件** —— ' +
+					'npm 上从来没有修复版（0.18.5 是最后一次 npm 发布）。上游修在 0.19.3，我们手上是 0.20.3。',
+			},
+			{
+				id: 'GHSA-5pgg-2g8v-p4x9',
+				fixedIn: '0.20.2',
+				why: '同上（ReDoS 那条上游修在 0.20.2，我们手上是 0.20.3）。',
+			},
+		],
 	},
 	'vendor-lodash.js': {
 		lib: 'lodash',
@@ -141,7 +162,7 @@ function versionsIn(cell) {
 }
 
 /** bundle 里的版本标记。返回 { version } 或 { error }。 */
-function versionFromBundle(file, registry) {
+export function versionFromBundle(file, registry) {
 	const source = readFileSync(
 		SRC_DIRS.map((dir) => path.join(dir, file)).find((f) => existsSync(f)) ?? path.join(SRC_DIRS[0], file),
 		'utf8',
@@ -247,7 +268,8 @@ function main() {
 		);
 		process.stdout.write(
 			dim(
-				'  这只保证清单是准的 —— 「版本 ↔ 公告状态」的比对仍需人工定期做，见 SECURITY.md 与 Issue #61。\n',
+				'  这只保证清单是准的 —— 「版本 ↔ 公告状态」的比对由 check-vendored-advisories.mjs\n' +
+					'  定期做（每周一次的工作流），见 SECURITY.md 的「复查落点」。\n',
 			),
 		);
 		if (unchecked.length > 0) {
@@ -267,4 +289,8 @@ function main() {
 	return 1;
 }
 
-process.exit(main());
+// 被别的脚本 import 时不要跑 main（那份脚本要用这里的 VERSION_MARKER / 版本解析）。
+// `node scripts/check-vendored-deps.mjs` 直接跑时 argv[1] 就是这个文件，照旧执行。
+if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+	process.exit(main());
+}

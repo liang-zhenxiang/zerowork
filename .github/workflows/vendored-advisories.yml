@@ -1,0 +1,107 @@
+# 随包 vendored 依赖的公告巡检（issue #61）
+#
+# 为什么需要它：`src/renderer/src/vendor-*.js` 是**随安装包分发**的预打包产物，
+# 但它们不在 npm 依赖图里 —— Dependabot 与 npm audit 都看不见，
+# 而升级 package.json 也不改变随包的字节。于是「有没有新公告」这件事
+# 在加这个工作流之前**没有任何机制在盯**（真实事故见 SECURITY.md）。
+#
+# 分工：静态门禁 `scripts/check-vendored-deps.mjs`（进 lint:all）守**清单准不准**，
+# 这里守**清单还新不新**。
+#
+# ⚠️ 刻意**不**放进 ci.yml：查漏洞数据库是不可靠的外部依赖，
+# 放进去会让某个 PR 因为上游数据库抽风而红。这里每周一次，
+# 发现新公告就开/更新一个 Issue。
+name: Vendored 依赖公告巡检
+
+run-name: Vendored 依赖公告巡检
+
+on:
+  schedule:
+    # 每周一 01:23 UTC（避开整点 —— 整点是 GitHub 的高峰）
+    - cron: "23 1 * * 1"
+  workflow_dispatch:
+
+# 默认只读；开 Issue 的写权限按 job 声明
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  advisories:
+    name: 查公告
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: 安装 Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 巡检（OSV.dev）
+        id: scan
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          set +e
+          node scripts/check-vendored-advisories.mjs --json > advisories.json
+          code=$?
+          set -e
+          echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
+          cat advisories.json
+          if [[ "$code" == "2" ]]; then
+            echo "::error::公告巡检没能完成（网络或接口失败）—— 与「查了没问题」不是一回事"
+            exit 1
+          fi
+          if [[ "$code" == "1" ]]; then
+            echo "::warning::发现未豁免的公告，接下来开/更新 Issue"
+          fi
+
+      - name: 有发现就开/更新 Issue
+        if: steps.scan.outputs.exit_code == '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 标题固定：同一个标题只保留一个，避免每周刷一个新 Issue
+          ISSUE_TITLE: "security: vendored 依赖出现未豁免的公告"
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+
+          # 正文直接用脚本自己的输出（带每条 ID、链接与处置建议），不在这里重排一遍 ——
+          # 「同一份信息两处各写一遍」正是这个仓库反复踩过的坑。
+          {
+            echo "随包分发的 vendor-*.js 里出现了**未豁免**的已知公告。"
+            echo ""
+            echo "这一批文件不在 npm 依赖图里：Dependabot 与 npm audit 都看不见它们，"
+            echo "升级 package.json 也不会改变随包的字节（原因见 SECURITY.md 的「审计盲区」一节）。"
+            echo ""
+            echo "由 Vendored 依赖公告巡检工作流自动发现："
+            echo "https://github.com/${GITHUB_REPOSITORY}/actions/workflows/vendored-advisories.yml"
+            echo ""
+            echo "处置：升级对应的 bundle（并同步 SECURITY.md 的清单与 VERSION_MARKER），"
+            echo "或在 VERSION_MARKER 的 advisoryExemptions 里写明理由与上游修复版本。"
+            echo ""
+            echo "巡检时间：$(date -u '+%Y-%m-%d %H:%M UTC')（run ${GITHUB_RUN_ID}）"
+            echo ""
+            echo '```json'
+            cat advisories.json
+            echo '```'
+          } > issue-body.md
+
+          existing="$(gh issue list --state open --search "$ISSUE_TITLE in:title" --json number --jq '.[0].number // empty')"
+          if [[ -n "$existing" ]]; then
+            echo "更新既有 Issue #${existing}"
+            gh issue comment "$existing" --body-file issue-body.md
+          else
+            echo "新建 Issue"
+            gh issue create --title "$ISSUE_TITLE" --body-file issue-body.md --label security
+          fi
