@@ -212,6 +212,36 @@ const readGuideRows = () =>
 /** 按钮文案去掉尾部的「 →」。 */
 const buttonLabel = (action) => (action === null ? null : action.replace(/\s*→\s*$/, "").trim());
 
+/**
+ * 「改动之前的现状」有**两对**（文案, 按钮）—— 未命中本机服务时，第 2 步必须
+ * **恰好**落到其中一对，不许混搭（新文案配旧按钮同样是错的）。
+ *
+ * ## 为什么是两对而不是一对
+ *
+ * 出现哪一句由 `judgeModelReadiness()` 决定，而它看的是**这台机器配没配服务商**，
+ * 与本功能毫无关系：
+ *
+ * | 判据 | `guideText()` 给出 |
+ * | --- | --- |
+ * | 一个 `available` 模型都没有 → `{kind:"no-model-at-all"}` | 第一对 |
+ * | 有可用模型但没选中它 → `{kind:"model-not-usable"}` | 第二对 |
+ *
+ * 判据在 `src/renderer/src/app.js:15159`（`no-model-at-all` 在 `:15161`、
+ * `model-not-usable` 在 `:15163`），文案在 `app.js:15165` 的 `guideText()`。
+ *
+ * 两条真实环境各走一边，**写死一对必然在另一边红**（这是 PR #149 在 CI 上红的根因）：
+ *   - CI runner：没有任何服务商 → `available` 为空 → 第一对
+ *   - 本机开发机：`ANTHROPIC_AUTH_TOKEN` 让 Anthropic 可用 → 第二对
+ *
+ * 复现 CI 那一侧：`env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY npm run test:gui:local-model-discovery`
+ *
+ * ⚠️ 改 `guideText()` 时这里要同步；两对都改掉而这条测试仍绿，说明判据被削成了同义反复。
+ */
+const CURRENT_GUIDE_PAIRS = [
+	{ text: "还没有可用模型，现在还不能开始对话", action: "去设置里填 API Key" },
+	{ text: "还没有选定要用哪个模型", action: "去选一个模型" },
+];
+
 /** 「本机模型服务」区块的全部可读形态。 */
 const readLocalSection = () =>
 	win.evaluate(() => {
@@ -245,10 +275,13 @@ const localRow = (section, name) => (section?.rows ?? []).find((row) => row.name
  * 做法：临时挂一个探针元素读 `var(--danger)` 的**计算值**（token 的单一真源在 app.css，
  * 深浅两套不同，不能写死 rgb），再逐个元素比对 color / background / 四边 border。
  * 比「有没有红点」这种肉眼判断可证伪得多。
+ *
+ * `nth` 取第几个匹配元素（默认 0，与 `querySelector` 同义）；传入下标才能把范围收到
+ * 清单里的**某一行**上，失败信息才指得准。
  */
-const scanDanger = (selector) =>
-	win.evaluate((sel) => {
-		const scope = document.querySelector(sel);
+const scanDanger = (selector, nth = 0) =>
+	win.evaluate(({ sel, index }) => {
+		const scope = document.querySelectorAll(sel)[index] ?? null;
 		if (scope === null) return { present: false, danger: [] };
 		const probe = document.createElement("span");
 		probe.setAttribute("aria-hidden", "true");
@@ -269,7 +302,7 @@ const scanDanger = (selector) =>
 			hits.push(`${el.tagName.toLowerCase()}.${cls} —— ${(el.textContent ?? "").trim().slice(0, 40)}`);
 		}
 		return { present: true, danger: hits };
-	}, selector);
+	}, { sel: selector, index: nth });
 
 /**
  * 首页首屏（清单 + 输入区）的可见文字与 toast 数。
@@ -405,21 +438,40 @@ await waitUntil(() => win.evaluate(() => document.querySelector(".home-guide") !
 });
 await h.shoot("home-unmatched-light");
 
-await h.check("未命中：首页第 2 步逐字保持现状（还没有选定要用哪个模型 / 去选一个模型）", async () => {
+await h.check("未命中：首页第 2 步恰好是「现状」两对文案之一，且不出现命中形态", async () => {
 	const rows = await readGuideRows();
 	assert.ok(rows.length >= 3, `清单行数=${rows.length}，读不到三步`);
 	const model = rows[1];
-	assert.equal(
-		model.text,
-		"还没有选定要用哪个模型",
-		`未命中时第 2 步文案不是现状那句：${JSON.stringify(model.text)}`,
+	const action = buttonLabel(model.action);
+	/*
+	 * 未命中本机服务时**不得**出现命中形态 —— 这才是这条断言真正要守的东西：
+	 * 我们加了探测功能，但不许它把未命中的第 2 步改样（冒出「正在探测」、
+	 * 冒出「没探到」、或者没探到却给出「接上」按钮）。
+	 * （`本机 … 正在运行` 与按钮 `接上` 同源于 app.js 的 `connectable`，
+	 *   后者只在 `!modelReady` 且探测命中时才挂上。）
+	 *
+	 * 这一条**排在整对匹配之前**：一个「未命中却显示命中形态」的缺陷同时会让下面那条
+	 * 断言也失败，先跑这里，失败信息才指向真正的原因（而不是「不在那两对里」）。
+	 */
+	assert.ok(
+		!model.text.includes("正在运行") && action !== "接上",
+		`未命中本机服务，第 2 步却是命中形态：text=${JSON.stringify(model.text)} action=${JSON.stringify(action)}`,
 	);
-	assert.equal(
-		buttonLabel(model.action),
-		"去选一个模型",
-		`未命中时第 2 步的按钮不是现状那个：${JSON.stringify(model.action)}`,
+	/*
+	 * 整对匹配（见 `CURRENT_GUIDE_PAIRS` 的注释）：两对里的**任意一对**都合法，
+	 * 但必须整对 —— 新文案配旧按钮同样是错的，所以不拆成两条各判一半。
+	 */
+	const allowed = CURRENT_GUIDE_PAIRS.map((pair) => `${pair.text} / ${pair.action}`).join("　或　");
+	assert.ok(
+		CURRENT_GUIDE_PAIRS.some((pair) => pair.text === model.text && pair.action === action),
+		`未命中时第 2 步不是「现状」的任何一对：text=${JSON.stringify(model.text)} ` +
+			`action=${JSON.stringify(action)}；允许的是 ${allowed}`,
 	);
 	assert.ok(model.clickable, "未完成的第 2 步应当是整行可点的（.home-guide-row-action）");
+	// 探测未命中不是错误：这一行不许挂 danger 色（`--danger` 的计算值随深浅主题变，不能写死）
+	const danger = await scanDanger(".home-guide-row", 1);
+	assert.ok(danger.present, "读不到清单第 2 行，无从断言它有没有 danger 色");
+	assert.deepEqual(danger.danger, [], `未命中时第 2 步出现了 danger 色元素：${danger.danger.join("；")}`);
 });
 
 await h.check("未命中：首屏不出现「没探到 / 未探到 / 失败 / 错误」字样，也没有 danger 色元素", async () => {
