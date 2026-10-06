@@ -21,9 +21,11 @@ import {
 	LOCAL_PLACEHOLDER_API_KEY,
 	buildProviderInput,
 	classifyListResponse,
+	findLocalCandidate,
 	listEndpointModels,
 	loopbackBaseUrl,
 	parseModelList,
+	pickLocalModel,
 	probeLocalEndpoints,
 	providerIdFor,
 	resolveCandidates,
@@ -749,5 +751,103 @@ describe("probeLocalEndpoints", () => {
 		// 仍然注入 fetchImpl：这条用例不许真的联网（默认候选表是真实端口）。
 		const results = await probeLocalEndpoints({ candidates: undefined, fetchImpl: okFetch });
 		expect(results.length).toBe(LOCAL_ENDPOINT_CANDIDATES.length);
+	});
+});
+
+// ── 接入流程的两个纯判定 ──────────────────────────────────────────
+
+describe("findLocalCandidate —— 只认候选表里的 id", () => {
+	it("按 id 找到候选，返回的就是表里那一项", () => {
+		const { candidates } = resolveCandidates(undefined);
+		const found = findLocalCandidate(candidates, "ollama");
+		expect(found).toBe(candidates.find((c) => c.id === "ollama"));
+	});
+
+	it("未知 id → undefined（调用方据此如实报「未知的本机服务」）", () => {
+		const { candidates } = resolveCandidates(undefined);
+		expect(findLocalCandidate(candidates, "nope")).toBeUndefined();
+		// 服务商 id 形态（带前缀）不是候选 id —— 两个命名空间不许串
+		expect(findLocalCandidate(candidates, "local-ollama")).toBeUndefined();
+	});
+
+	it("空串 / 只有空白 / 非字符串 → undefined（不抛）", () => {
+		const { candidates } = resolveCandidates(undefined);
+		for (const bad of ["", "   ", undefined, null, 42, {}]) {
+			expect(findLocalCandidate(candidates, bad), String(bad)).toBeUndefined();
+		}
+	});
+
+	it("两端的空白被容忍（通道两端的差异不该读成「未知的服务」）", () => {
+		const { candidates } = resolveCandidates(undefined);
+		expect(findLocalCandidate(candidates, "  ollama  ")?.id).toBe("ollama");
+	});
+
+	it("candidates 不是数组时返回 undefined，不抛", () => {
+		expect(findLocalCandidate(undefined, "ollama")).toBeUndefined();
+		expect(findLocalCandidate(null, "ollama")).toBeUndefined();
+		expect(findLocalCandidate("ollama", "ollama")).toBeUndefined();
+	});
+
+	it("注入过端口之后仍然只按 id 找（端口变了不改变匹配规则）", () => {
+		const { candidates } = resolveCandidates({ ZEROWORK_LOCAL_ENDPOINTS: "ollama=51234" });
+		expect(findLocalCandidate(candidates, "ollama")?.port).toBe(51234);
+	});
+});
+
+describe("pickLocalModel —— 只接用户点的那一个，不做回退", () => {
+	const models = [
+		{ id: "llama3.2", name: "llama3.2" },
+		{ id: "qwen2.5:7b", name: "qwen2.5:7b" },
+	];
+
+	it("命中时返回清单里的那一项", () => {
+		const picked = pickLocalModel(models, "qwen2.5:7b");
+		expect(picked.ok).toBe(true);
+		expect(picked.model).toBe(models[1]);
+	});
+
+	it("模型 id 里的冒号 / 斜杠原样匹配（不被切成两段）", () => {
+		const withSlash = [{ id: "org/model", name: "org/model" }];
+		expect(pickLocalModel(withSlash, "org/model").model.id).toBe("org/model");
+	});
+
+	it("两端的空白被容忍", () => {
+		const picked = pickLocalModel(models, "  llama3.2  ");
+		expect(picked.ok).toBe(true);
+		expect(picked.model.id).toBe("llama3.2");
+	});
+
+	it("不在清单里 → 报错，且**不回落**到清单里的第一个", () => {
+		const picked = pickLocalModel(models, "gpt-4o");
+		expect(picked.ok).toBe(false);
+		expect(picked.model).toBeUndefined();
+		expect(picked.error).toContain("gpt-4o");
+	});
+
+	it("清单为空时的说法与「没有这个模型」不同（两种处置不一样）", () => {
+		const empty = pickLocalModel([], "llama3.2");
+		const missing = pickLocalModel(models, "llama3.2-x");
+		expect(empty.ok).toBe(false);
+		expect(empty.error).not.toBe(missing.error);
+		expect(empty.error).toContain("一个模型都没有");
+	});
+
+	it("没指定模型 → 报错（不静默挑一个）", () => {
+		for (const bad of ["", "   ", undefined, null, 42]) {
+			const picked = pickLocalModel(models, bad);
+			expect(picked.ok, String(bad)).toBe(false);
+			expect(picked.model).toBeUndefined();
+		}
+	});
+
+	it("清单不是数组时按空清单处理，不抛", () => {
+		expect(pickLocalModel(undefined, "llama3.2").ok).toBe(false);
+		expect(pickLocalModel(null, "llama3.2").ok).toBe(false);
+	});
+
+	it("清单里的坏条目不会让整次判定炸掉", () => {
+		const messy = [null, "llama3.2", { id: "" }, { id: "llama3.2", name: "llama3.2" }];
+		expect(pickLocalModel(messy, "llama3.2").ok).toBe(true);
+		expect(pickLocalModel(messy, "other").ok).toBe(false);
 	});
 });

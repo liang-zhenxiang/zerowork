@@ -255,6 +255,44 @@ const INVOKE = {
    * 「填完就试」，不必先存一遍再回来改。
    */
   testDraftModel: "settings:test-draft-model",
+  /**
+   * 探测本机回环地址上的常见模型服务（首页上手清单第 2 步与设置→模型页共用）。
+   *
+   * **只探 `127.0.0.1` 上写死的那几个端口**（Ollama 11434 / LM Studio 1234 /
+   * vLLM 8000 / LocalAI 8080 / Jan 1337），各发一次 `GET {base}/v1/models`；
+   * 不扫网段、不遍历端口区间、不出网。候选表与归类规则收在
+   * daemon/local-endpoints.js，本通道只负责把它交给界面。
+   *
+   * 入参：无。返回 `{ candidates, ignored }`。
+   *   - `candidates: Array<{ id, label, baseUrl, state, models, detail? }>` ——
+   *     顺序与候选表一致；`state` 是**四态互斥枚举**
+   *     `"ready" | "empty" | "auth-required" | "unreachable"`，
+   *     `models: Array<{ id, name }>`（非 ready 时为空数组）。
+   *     `unreachable` 是**预期内的常态**（绝大多数用户没装本机服务），
+   *     界面不得呈现为错误、不得计任何失败数；`empty`（服务在跑但零模型）
+   *     与它必须可辨。
+   *   - `ignored: Array<{ id, value, reason }>` —— 环境变量
+   *     `ZEROWORK_LOCAL_ENDPOINTS` 里被忽略的片段（如实报出，不静默）。
+   *
+   * 不 throw：探测失败一律由 `state` 表达（可预期的失败用返回值表达，
+   * 同 testModel 那条约定的理由）。
+   */
+  probeLocalEndpoints: "settings:probe-local-endpoints",
+  /**
+   * 接入一个**探测到的**本机模型服务（首页第 2 步的「接上」/设置页每行的「接入」）。
+   *
+   * 入参：`[candidateId, modelId]` —— **只接受候选表里的 candidateId**，
+   * 渲染层塞不进任意 baseUrl（地址永远由 daemon 侧的候选表构造）。
+   * daemon 会**重新探一次这个端点**取权威的模型清单，不信任渲染层传来的模型列表。
+   *
+   * 返回 `{ ok: true, providerId, modelKey }` 或 `{ ok: false, error }` ——
+   * 失败同样用返回值表达，`error` 会写清是**哪一步**失败的（探测 / 写配置 / 选中）。
+   * 成功时已写入服务商（复用 saveCustomProvider 这条既有写路径，含一个本机服务
+   * 用的占位凭据 —— 不带任何凭据的模型会被判为不可用）并已选中 `modelKey`。
+   *
+   * 不写用户凭据：本机服务不需要 Key，占位值只是一张「让模型可被选中」的门票。
+   */
+  connectLocalEndpoint: "settings:connect-local-endpoint",
   /** 读回联网搜索配置（不含 key，只给 provider + 是否已配）。 */
   getWebSearchConfig: "settings:get-web-search-config",
   /** 保存联网搜索配置（服务商 + API Key，Key 落偏好文件）。 */
@@ -598,6 +636,8 @@ const bridge = {
   refreshCatalog: () => ipcRenderer.invoke(INVOKE.refreshCatalog),
   testModel: (modelKey) => ipcRenderer.invoke(INVOKE.testModel, modelKey),
   testDraftModel: (draft, modelId, apiKey) => ipcRenderer.invoke(INVOKE.testDraftModel, draft, modelId, apiKey),
+  probeLocalEndpoints: () => ipcRenderer.invoke(INVOKE.probeLocalEndpoints),
+  connectLocalEndpoint: (candidateId, modelId) => ipcRenderer.invoke(INVOKE.connectLocalEndpoint, candidateId, modelId),
   getWebSearchConfig: () => ipcRenderer.invoke(INVOKE.getWebSearchConfig),
   setWebSearchConfig: (input) => ipcRenderer.invoke(INVOKE.setWebSearchConfig, input),
   clearWebSearchConfig: () => ipcRenderer.invoke(INVOKE.clearWebSearchConfig),

@@ -69,6 +69,15 @@ import {
 } from "./schedule.js";
 import { ensureBuiltinProviders } from "./models.js";
 import {
+	buildProviderInput,
+	findLocalCandidate,
+	listEndpointModels,
+	loopbackBaseUrl,
+	pickLocalModel,
+	probeLocalEndpoints,
+	resolveCandidates,
+} from "./local-endpoints.js";
+import {
 	AUDIT_PANEL_LIMIT,
 	clearAuditRecords,
 	clipAuditDetail,
@@ -4504,6 +4513,77 @@ const handlers = {
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
+  },
+  /* ── 本机模型服务（探测 + 一键接入） ─────────────────────────────── */
+  /**
+   * 探测本机回环地址上的常见模型服务。首页上手清单与设置→模型页各在需要时拉一次
+   * —— **不缓存**：缓存会引入「界面显示的是旧状态」，而探测本身很便宜。
+   *
+   * 候选表的端口可由 ZEROWORK_LOCAL_ENDPOINTS 覆盖（只为 e2e 可复现：真实机器上
+   * 11434 可能真的跑着 Ollama）。**只覆盖端口** —— 不能新增候选、不能改主机名，
+   * 所以「只探回环、只探固定几项」不因为可测而失效；环境变量里的坏片段由
+   * resolveCandidates 收进 ignored，**如实报给界面**（可诊断的降级，不是静默）。
+   *
+   * 不 throw：每一项的失败由自己的 state 表达（道理同 testModel 上方的注释）。
+   */
+  [INVOKE.probeLocalEndpoints]: async () => {
+    const { candidates, ignored } = resolveCandidates(process.env);
+    return { candidates: await probeLocalEndpoints({ candidates }), ignored };
+  },
+  /**
+   * 接入一个**探测到的**本机模型服务：建服务商 + 选中模型，复用既有写路径。
+   *
+   * 顺序有意义，且**重新探一次**（不信任渲染层传来的模型清单 —— 它可能是几十秒
+   * 前的快照，而服务上的模型随时会变）：
+   *   1. 在候选表里找 candidateId —— 只接受候选表里的 id，渲染层塞不进任意地址；
+   *   2. 探这一个端点，拿权威的模型清单；
+   *   3. 清单里必须有请求的那个模型 —— 不在就如实报错，**不静默换成清单里的第一个**
+   *      （「点的是 A、接上的是 B」比失败更难发现）；
+   *   4. buildProviderInput → saveCustomProvider（**不另开写路径**，含本机服务的占位凭据）；
+   *   5. isUsable 复核 —— 不成立就如实报错，不静默成功；
+   *   6. 复用 setModel 那段 handler（那条同时负责写 activeModelKey、落 preferences、
+   *      同步当前会话）—— 复制它的实现迟早会与它漂移。
+   *
+   * 失败一律用返回值表达，并注明**是哪一步**失败的（throw 会被 IPC 层裹成通用文案）。
+   */
+  [INVOKE.connectLocalEndpoint]: async ([candidateId, modelId]) => {
+    const { candidates } = resolveCandidates(process.env);
+    const candidate = findLocalCandidate(candidates, candidateId);
+    if (candidate === void 0) {
+      const given = typeof candidateId === "string" ? candidateId : String(candidateId);
+      return { ok: false, error: `未知的本机服务：${given}` };
+    }
+    const probed = await listEndpointModels({ baseUrl: loopbackBaseUrl(candidate.port) });
+    if (probed.state === "unreachable" || probed.state === "auth-required") {
+      return { ok: false, error: `接入失败：${probed.detail ?? "该服务当前不可用"}` };
+    }
+    const picked = pickLocalModel(probed.models, modelId);
+    if (!picked.ok) return { ok: false, error: picked.error };
+    const input = buildProviderInput(candidate, probed.models);
+    if (input === void 0) {
+      return { ok: false, error: "该服务上没有任何可用模型，请先在本机服务里下载一个模型再试" };
+    }
+    const catalog = await getCatalog();
+    try {
+      await catalog.saveCustomProvider(input);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: `写配置失败：${detail}` };
+    }
+    const modelKey = `${input.id}/${picked.model.id}`;
+    if (!catalog.isUsable(modelKey)) {
+      return {
+        ok: false,
+        error: `服务商已保存，但模型「${modelKey}」仍不可用：该服务可能要求鉴权，请改用「＋ 添加模型」手工配置`
+      };
+    }
+    try {
+      await handlers[INVOKE.setModel]([modelKey]);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      return { ok: false, error: `服务商已保存，但选中模型失败：${detail}` };
+    }
+    return { ok: true, providerId: input.id, modelKey };
   },
   /* ── 权限设置 ───────────────────────────────────────────────────── */
   [INVOKE.getPermissions]: async () => buildPermissionInfo(activePermissions),

@@ -112,6 +112,22 @@ function upsertCustomProvider(path, input) {
     }
     if (Object.keys(compat).length > 0) entry.compat = compat;
   }
+  /*
+   * apiKey 不在表单模型里（CustomModelInput 没有该字段），只有两处来源：
+   * 一键接入本机服务时由 daemon 写入的占位凭据（pi 对 Ollama 的官方写法），
+   * 以及用户手编 models.json。upsert 是白名单重建，不继承就会把它抹掉 ——
+   * 而 pi 的 getProviderAuthStatus() 拿不到密钥时把该服务商的模型判为不可用，
+   * 于是「接入 → 去设置页编辑一次 → 模型又变成选不中」且没有任何提示。
+   * 口径与 thinkingLevelMap 一致：输入里给了非空值就写，没给就原样继承旧条目。
+   * （不写空串：pi 的 schema 要求 apiKey 至少 1 个字符。）
+   */
+  const nextApiKey =
+    typeof input.apiKey === "string" && input.apiKey.trim() !== ""
+      ? input.apiKey.trim()
+      : typeof existing?.apiKey === "string" && existing.apiKey !== ""
+        ? existing.apiKey
+        : void 0;
+  if (nextApiKey !== void 0) entry.apiKey = nextApiKey;
   const next = {
     ...config,
     providers: { ...config.providers, [input.id]: entry }

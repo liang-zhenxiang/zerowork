@@ -163,6 +163,44 @@ function providerIdFor(candidate) {
 }
 
 /**
+ * 从候选表里按 id 找一项 —— **接入流程的第一道门**。
+ *
+ * 只认候选表里的 id，渲染层塞不进任意地址：找不到就返回 `undefined`，
+ * 调用方据此如实报「未知的本机服务」，而不是拿它去拼一个 URL。
+ * id 先 `trim()`：通道两端的空白差异不该被读成「未知的服务」。
+ */
+function findLocalCandidate(candidates, candidateId) {
+  const list = Array.isArray(candidates) ? candidates : [];
+  const wanted = typeof candidateId === "string" ? candidateId.trim() : "";
+  if (wanted === "") return void 0;
+  return list.find((candidate) => candidate !== null && typeof candidate === "object" && candidate.id === wanted);
+}
+
+/**
+ * 从权威的模型清单里挑出要接入的那一个。
+ *
+ * 返回 `{ ok: true, model }` 或 `{ ok: false, error }`，`error` 是**可直接展示**的
+ * 一句话（区分「指定了不存在的模型」与「服务上一个模型都没有」—— 前者多半是清单
+ * 变了，后者是用户还没下模型，处置完全不同）。
+ *
+ * 刻意**不做回退**：请求的模型不在清单里就报错，不静默换成清单里的第一个 ——
+ * 「用户点的是 A、接上的是 B」比失败更难发现。
+ */
+function pickLocalModel(models, modelId) {
+  const list = Array.isArray(models) ? models : [];
+  const wanted = typeof modelId === "string" ? modelId.trim() : "";
+  if (wanted === "") return { ok: false, error: "没有指定要接入的模型" };
+  if (list.length === 0) {
+    return { ok: false, error: "该服务上一个模型都没有，请先在本机服务里下载一个模型再试" };
+  }
+  const found = list.find((model) => model !== null && typeof model === "object" && model.id === wanted);
+  if (found === void 0) {
+    return { ok: false, error: `该服务上没有「${wanted}」这个模型，请重新探测后再试` };
+  }
+  return { ok: true, model: found };
+}
+
+/**
  * 把探测结果转成 saveCustomProvider 的入参（**不新建写路径**）。
  *
  * 零模型（或一个合法模型都挑不出来）时返回 `undefined` —— 调用方据此给出
@@ -415,10 +453,12 @@ export {
   PROVIDER_ID_PREFIX,
   buildProviderInput,
   classifyListResponse,
+  findLocalCandidate,
   isLoopbackUrl,
   listEndpointModels,
   loopbackBaseUrl,
   parseModelList,
+  pickLocalModel,
   probeLocalEndpoints,
   providerIdFor,
   resolveCandidates,

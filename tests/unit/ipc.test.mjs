@@ -5,6 +5,7 @@
  * 只会在运行时表现为「某个功能静默失效」——最需要测试兜住的那类代码。
  */
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import {
 	INVOKE,
 	PUSH,
@@ -41,6 +42,38 @@ describe("IPC 通道常量", () => {
 
 	it("daemonStatus 通道存在（消除 daemon ready 推送的启动竞态）", () => {
 		expect(INVOKE.daemonStatus).toBe("daemon:status");
+	});
+
+	it("本机模型服务的两条通道已登记（探测 / 一键接入）", () => {
+		expect(INVOKE.probeLocalEndpoints).toBe("settings:probe-local-endpoints");
+		expect(INVOKE.connectLocalEndpoint).toBe("settings:connect-local-endpoint");
+	});
+
+	/**
+	 * preload 不 import 本模块（既有架构），INVOKE 是**两份手工同步的副本**
+	 * ——文件里明写了「改通道名两处都要改」。人记不住这件事，让这条断言记：
+	 * 只改一处时，新通道会静默失效（渲染层调到一个 daemon 不认的通道名）。
+	 */
+	it("shared 与 preload 的 INVOKE 表逐条一致（两份手工副本不许漂移）", () => {
+		const tableOf = (relativePath) => {
+			const source = readFileSync(new URL(relativePath, import.meta.url), "utf8");
+			const start = source.indexOf("const INVOKE = {");
+			expect(start, `${relativePath} 里找不到 INVOKE 表`).toBeGreaterThan(-1);
+			const end = source.indexOf("\n};", start);
+			expect(end, `${relativePath} 的 INVOKE 表没有收尾`).toBeGreaterThan(start);
+			const table = new Map();
+			for (const line of source.slice(start, end).matchAll(/^\s*([A-Za-z]\w*):\s*"([^"]+)",$/gm)) {
+				table.set(line[1], line[2]);
+			}
+			return table;
+		};
+		const shared = tableOf("../../src/shared/ipc.js");
+		const preload = tableOf("../../src/preload/index.js");
+		expect(shared.size).toBeGreaterThan(50);
+		expect([...shared.keys()].filter((k) => !preload.has(k)), "preload 缺少这些通道").toEqual([]);
+		expect([...preload.keys()].filter((k) => !shared.has(k)), "preload 多出这些通道").toEqual([]);
+		const mismatched = [...shared].filter(([k, v]) => preload.get(k) !== v);
+		expect(mismatched, `通道值不一致：${mismatched.map(([k]) => k).join(", ")}`).toEqual([]);
 	});
 
 	it("默认全局快捷键为 Shift+Alt+W", () => {
