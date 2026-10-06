@@ -18,11 +18,24 @@ import {
 
 const SECURITY = readFileSync(new URL("../../SECURITY.md", import.meta.url), "utf8");
 
-/** SECURITY.md「随包的 vendored 依赖」清单里的库名（第 2 格）。 */
+/**
+ * SECURITY.md「随包的 vendored 依赖」那一节的清单里，各行的库名（第 2 格）。
+ *
+ * ⚠️ **只在那一节里找，不扫全文** —— 这条一开始扫的是全文（凡是提到 vendor-*.js 的表格行
+ * 都算），于是 2026-10-06 加了一节「依赖告警的分级处置」之后它当场误判：那节里有一行写
+ * 「（`src/renderer/src/vendor-*.js`）| 0（原 2 个 high）| …」，被当成了一条 vendored 依赖，
+ * 于是断言「这个库没在关于页里」失败。CI 抓到的（本地那次跑在改文档之前 —— 我的验证缺口）。
+ * 与 `scripts/check-vendored-deps.mjs` 一样按**节标题**圈定范围，是这份解析该有的写法。
+ */
 function vendoredLibNames() {
-	const row = (line) => line.trimStart().startsWith("|") && /`[^`]*vendor-[^`]*\.js`/.test(line);
-	return SECURITY.split("\n")
-		.filter(row)
+	const lines = SECURITY.split("\n");
+	const start = lines.findIndex((line) => /^###\s+随包的 vendored 依赖/.test(line));
+	expect(start, "SECURITY.md 里找不到「随包的 vendored 依赖」那一节").toBeGreaterThanOrEqual(0);
+	const rest = lines.slice(start + 1);
+	const end = rest.findIndex((line) => /^#{2,3}\s/.test(line));
+	const section = end < 0 ? rest : rest.slice(0, end);
+	return section
+		.filter((line) => line.trimStart().startsWith("|") && /`[^`]*vendor-[^`]*\.js`/.test(line))
 		.map((line) => line.split("|").slice(1, -1)[1]?.trim() ?? "")
 		.filter((name) => name !== "");
 }
