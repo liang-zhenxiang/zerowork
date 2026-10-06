@@ -7327,6 +7327,14 @@ textarea:focus-visible {
 	background: var(--bg-sidebar);
 }
 
+/* 但「本机模型服务」区（设置 → 模型）的行**不是**跳转面：那一行只有右侧按钮是
+   动作，挂上行 hover 底会让人去点行本身。上面那条是后代选择器，新区块一旦也用
+   .provider-list 就会自动命中 —— 显式关掉。属性选择器（不是类名）：0 个新视觉值。
+   反向验证：删掉本条，该区的行 hover 会变灰。 */
+[data-local-services] .provider-row:hover .provider-main {
+	background: transparent;
+}
+
 /* 已配置的服务商亮点，未配置的灰点 —— 一眼扫出哪些能用。 */
 .provider-dot {
 	width: 7px;
@@ -8818,6 +8826,10 @@ textarea:focus-visible {
 	font-size: var(--text-meta);
 	color: var(--text-secondary);
 	font-weight: 400;
+	/* 本类此前全仓零引用（只有定义、没有调用点），补上 margin 才好在区块里当
+	   「标题下的一句说明」用（设置 → 模型 → 本机模型服务）。相邻兄弟的垂直
+	   margin 会折叠，与头部的 --space-3 是同一档，不产生档外值。 */
+	margin: var(--space-3) 0;
 }
 
 /* 技能行复用 provider-main 的布局，但整行不可点、不响应 hover。 */
@@ -10846,7 +10858,8 @@ textarea:focus-visible {
 .turn-header.clickable:active,
 .metafold-row:active,
 .stat-table-clickable tbody tr:active,
-.timeline-row.clickable:active {
+.timeline-row.clickable:active,
+.home-guide-row-action:active {
 	background: color-mix(in srgb, var(--text) 8%, transparent);
 }
 
@@ -10960,7 +10973,8 @@ textarea:focus-visible {
 .settings-nav-item,
 .ws-item,
 .ws-action,
-.task-diag-step-btn {
+.task-diag-step-btn,
+.home-guide-row-action {
 	transition: transform var(--dur-fast) var(--ease-standard),
 		background-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard),
 		border-color var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);

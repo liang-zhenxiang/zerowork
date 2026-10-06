@@ -15169,6 +15169,24 @@ function guideText(readiness) {
   return { title: "还没有选定要用哪个模型", action: "去选一个模型" };
 }
 /*
+ * 从一轮本机服务探测里挑出「首页推荐接入的那一个」。
+ *
+ * 规则写死：只认**可达且有模型**的候选，取模型数最多的；并列取候选表靠前的
+ * （daemon 返回的顺序即候选表顺序）。这条与设置页列表的排序**同源** ——
+ * 首页推荐的那条永远是设置页的第一行，多服务时行为可预期。
+ *
+ * 探测结果没回来 / 一个都没命中 / 探到了但零模型 → 返回 undefined，
+ * 首页那一步保持现状文案（不显示任何「没探到」的字样）。
+ */
+function pickBestLocalCandidate(candidates) {
+  let best;
+  for (const candidate of candidates ?? []) {
+    if (!Array.isArray(candidate?.models) || candidate.models.length === 0) continue;
+    if (best === void 0 || candidate.models.length > best.models.length) best = candidate;
+  }
+  return best;
+}
+/*
  * 首页「最近会话」——把「第二次打开」的路径从两跳（会话列表 → 找）缩成一跳。
  * 显示条件与上手清单互补：有历史会话就出现（老用户的首页不再只有静态引导）；
  * 新用户看不到它，只看到清单。视觉语言与 home-guide 一致（--bg-raised 次级面、
@@ -15197,13 +15215,25 @@ function OnboardingChecklist({
   cwd: cwd2,
   onOpenSettings,
   onOpenWorkspace,
-  onFocusComposer
+  onFocusComposer,
+  onError
 }) {
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
   const [workspaces, setWorkspaces] = reactExports.useState(void 0);
   const [sessions, setSessions] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
   const [expanded, setExpanded] = reactExports.useState(false);
+  const [localCandidate, setLocalCandidate] = reactExports.useState(void 0);
+  const [connecting, setConnecting] = reactExports.useState(false);
+  /*
+   * 双触发守卫（行 + 行内按钮两条路径、以及连点）。
+   *
+   * 为什么需要它：这一行整行可点、行内又有一个按钮，两条路径都会走到同一个动作
+   * 函数里（见下面的 stopPropagation 与 onKeyDown 守卫 —— 那两条消除的是**同一次
+   * 事件**的双重派发，这条兜住的是**用户真的连点两下**）。这个动作是「写配置 +
+   * 选中模型」，跑两遍不是幂等的。
+   */
+  const connectGuard = reactExports.useRef(false);
   const load = reactExports.useCallback(() => {
     setError(void 0);
     Promise.all([
@@ -15219,6 +15249,26 @@ function OnboardingChecklist({
   reactExports.useEffect(() => {
     load();
   }, [load, cwd2]);
+  /*
+   * 探一次本机模型服务（挂载时一次，不缓存、不推送）。
+   *
+   * 三条刻意的取舍：
+   *   1. **异步、不阻塞首屏**：结果没回来时这一步显示现状文案，回来后原地更新
+   *      （首屏不出现「正在探测…」这类 loading 行 —— 绝大多数用户没装本机服务，
+   *      一句 1 秒后自我撤销的加载文字只会在首屏凭空制造「页面在加载什么」）。
+   *   2. **失败静默**：探测失败（IPC 断 / 全部未命中）都不是错误，不显示任何字样。
+   *   3. 只在挂载时探一次：探测很便宜，但没必要跟着 cwd 反复探。
+   */
+  reactExports.useEffect(() => {
+    let alive = true;
+    window.kami.probeLocalEndpoints().then((result) => {
+      if (alive) setLocalCandidate(pickBestLocalCandidate(result?.candidates));
+    }).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   if (error !== void 0 || snapshot === void 0 || workspaces === void 0 || sessions === void 0) return null;
   const readiness = judgeModelReadiness(modelId ?? snapshot.activeModelId, snapshot.models);
   const modelReady = readiness.kind === "ready";
@@ -15237,6 +15287,29 @@ function OnboardingChecklist({
     ) });
   }
   const text2 = guideText(readiness);
+  // 本机服务命中（可达且有模型）且模型这一步还没完成 —— 才把「去选一个模型」
+  // 换成「接上本机 X」。已经选定可用模型时这一步本就是 done，不出现「接上」：
+  // 那一步完成了，不该再让用户接一个。判据函数本身不动（judgeModelReadiness）。
+  const connectable = !modelReady ? localCandidate : void 0;
+  const connectLocal = () => {
+    if (connectGuard.current || connectable === void 0) return;
+    const model = connectable.models[0];
+    if (model === void 0) return;
+    connectGuard.current = true;
+    setConnecting(true);
+    window.kami.connectLocalEndpoint(connectable.id, model.id).then((result) => {
+      if (result?.ok === true) {
+        // 清单只在挂载与 cwd 变化时拉数据、没有推送通道 —— 接入后必须自己重拉一次，
+        // 否则「点完这一步变成已完成」不会发生（activeModelKey 变了但界面不知道）。
+        load();
+        return;
+      }
+      onError?.(result?.error ?? "接入失败");
+    }).catch((e) => onError?.(`接入失败：${e instanceof Error ? e.message : String(e)}`)).finally(() => {
+      connectGuard.current = false;
+      setConnecting(false);
+    });
+  };
   const rows = [
     {
       key: "workspace",
@@ -15250,9 +15323,15 @@ function OnboardingChecklist({
       key: "model",
       done: modelReady,
       icon: IconKey,
-      label: modelReady ? "已选定可用模型" : text2.title,
-      action: text2.action,
-      go: () => onOpenSettings("models")
+      // done 时「已选定可用模型」；命中时带服务名与模型数；其余（未命中 / 探测中 /
+      // 命中但零模型）**逐字保持现状** —— 那三种状态对用户能做的动作是同一个。
+      label: modelReady ? "已选定可用模型" : connectable !== void 0 ? `本机 ${connectable.label} 正在运行（${connectable.models.length} 个模型）` : text2.title,
+      // 按钮不写服务名：服务名长短不一（LM Studio 9 个字符）会把按钮宽度撑得浮动，
+      // 反而挤走左边文案的换行位置 —— 而服务名就在同一行左边，不存在歧义。
+      action: connectable !== void 0 ? connecting ? "接入中…" : "接上" : text2.action,
+      pending: connecting,
+      disabled: connecting,
+      go: connectable !== void 0 ? connectLocal : () => onOpenSettings("models")
     },
     {
       key: "message",
@@ -15285,6 +15364,10 @@ function OnboardingChecklist({
           tabIndex: row.done ? void 0 : 0,
           onClick: row.done ? void 0 : row.go,
           onKeyDown: row.done ? void 0 : (event) => {
+            /* 事件来自行内按钮时不在这里处理：按钮自己会派发一次 click。
+               少了这一句，键盘在按钮上按 Enter 会走两条路（按钮原生 click 冒泡
+               + 本行的 keydown），同一个动作跑两次。 */
+            if (event.target !== event.currentTarget) return;
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
               row.go();
@@ -15298,8 +15381,14 @@ function OnboardingChecklist({
               {
                 type: "button",
                 className: "mini-btn",
-                onClick: row.go,
-                children: [
+                disabled: row.disabled === true,
+                onClick: (event) => {
+                  /* 行内按钮的点击不再冒泡到整行 —— 否则同一次鼠标点击会派发两次
+                     （按钮 click + 行 click）。仓库既有先例：ModelCard 的「测试」。 */
+                  event.stopPropagation();
+                  row.go();
+                },
+                children: row.pending === true ? row.action : [
                   row.action,
                   " →"
                 ]
@@ -16204,6 +16293,7 @@ function HomeView({
             modelId,
             cwd: cwd2,
             onOpenSettings,
+            onError,
             onOpenWorkspace: () => setWsPickerOpen(true),
             onFocusComposer: () => composerRef.current?.focus()
           }
@@ -63652,7 +63742,7 @@ function CustomForm({ initial, busy, onCancel, onSave }) {
           type: "password",
           value: apiKey,
           autoComplete: "off",
-          placeholder: isEdit ? "留空表示不修改已保存的 Key" : "本地服务可留空",
+          placeholder: isEdit ? "留空表示不修改已保存的 Key" : "本地服务通常不需要鉴权；留空会让模型不可选，先填个占位值",
           onChange: (e) => setApiKey(e.target.value)
         }
       ),
@@ -64210,6 +64300,152 @@ function AddModelDialog({ providers, onClose, onSaved }) {
     )
   );
 }
+/* ── 设置 → 模型：本机模型服务 ─────────────────────────────────────
+ * 一块**动作**区（你要接哪个），所以排在「当前模型」之后、「服务商」（记录区）
+ * 之前。行语言整块复用「服务商」区的类名与结构 —— 新区块的观感应当是
+ * 「一直就在那儿」，而不是一个长得不一样的新功能。
+ *
+ * 「探到了」的三种状态必须可辨（docs/DESIGN.md §4 的同族纪律）：
+ *   ready         可达且有模型 → 绿点 +「N 个模型」+「接入」
+ *   empty         可达但零模型 → 绿点 +「已探到，但还没有模型」+ 指引语
+ *                 （**不给按钮**：一个点了必然失败的按钮比没有按钮更糟）
+ *   auth-required 可达但要鉴权 → 绿点 + daemon 给的鉴权说明（本功能不碰密钥）
+ * 未探到（unreachable）**不是错误**：默认折叠在一句话之后，展开才是一行灰点 ——
+ * 一个没装本机服务的用户不该在设置页看到一片红叉。
+ */
+function normalizeLocalBaseUrl(value) {
+  return typeof value === "string" ? value.trim().replace(/\/+$/, "") : "";
+}
+function localEndpointHost(baseUrl) {
+  return typeof baseUrl === "string" ? baseUrl.replace(/^https?:\/\//, "").replace(/\/v1\/?$/, "") : "";
+}
+function localModelCount(candidate) {
+  return Array.isArray(candidate?.models) ? candidate.models.length : 0;
+}
+function isLocalServiceHit(candidate) {
+  return candidate?.state === "ready" || candidate?.state === "empty" || candidate?.state === "auth-required";
+}
+function LocalServicesSection({ snapshot, busy, run }) {
+  const [probe, setProbe] = reactExports.useState(void 0);
+  const [probing, setProbing] = reactExports.useState(false);
+  const [error, setError] = reactExports.useState(void 0);
+  const [connected, setConnected] = reactExports.useState(void 0);
+  const [expanded, setExpanded] = reactExports.useState(false);
+  const [connectingId, setConnectingId] = reactExports.useState(void 0);
+  const probeNow = reactExports.useCallback(() => {
+    setProbing(true);
+    window.kami.probeLocalEndpoints().then((result) => {
+      setProbe(result?.candidates ?? []);
+      setError(void 0);
+    }).catch((e) => setError(e instanceof Error ? e.message : String(e))).finally(() => setProbing(false));
+  }, []);
+  reactExports.useEffect(() => {
+    probeNow();
+  }, [probeNow]);
+  /*
+   * 「已接入」的判据：探测项的 baseUrl 与某个自定义服务商的 baseUrl 相等。
+   *
+   * **不按名字比**（用户可以改名），也不按 id 比（手编一个同 id、指向别的端口的
+   * 条目会被误判成已接入）。settingsSnapshot 的 provider 条目里没有 baseUrl，
+   * 所以要把自定义服务商的配置读回来 —— 个数通常是个位数，这个代价可接受。
+   */
+  reactExports.useEffect(() => {
+    let alive = true;
+    const owned = snapshot.providers.filter((provider) => provider.custom === true);
+    Promise.all(owned.map((provider) => window.kami.readCustomProvider(provider.id).catch(() => void 0))).then((inputs) => {
+      if (!alive) return;
+      setConnected(new Set(inputs.filter((input) => input !== void 0).map((input) => normalizeLocalBaseUrl(input.baseUrl)).filter((url) => url !== "")));
+    }).catch(() => {
+      if (alive) setConnected(new Set());
+    });
+    return () => {
+      alive = false;
+    };
+  }, [snapshot]);
+  const connect = (candidate) => {
+    const model = candidate.models[0];
+    if (model === void 0) return;
+    setConnectingId(candidate.id);
+    void run(async () => {
+      const result = await window.kami.connectLocalEndpoint(candidate.id, model.id);
+      // daemon 用返回值表达失败（throw 会被 IPC 层裹成通用文案），在这里翻成
+      // 页面级错误 —— 复用设置页既有的 ErrorState 通道，错误原因原样带过来。
+      if (result?.ok !== true) throw new Error(result?.error ?? "接入失败");
+    }).finally(() => setConnectingId(void 0));
+  };
+  const candidates = probe ?? [];
+  // 排序：有模型的在前、按模型数降序；零模型的按候选表顺序排在后。
+  // 单次稳定排序即可得到这个结果（并列保持候选表顺序，与首页推荐的选取规则同源）。
+  const hits = [...candidates].filter(isLocalServiceHit).sort((a, b) => localModelCount(b) - localModelCount(a));
+  const missed = candidates.filter((candidate) => !isLocalServiceHit(candidate));
+  const hitUrls = new Set(hits.map((candidate) => normalizeLocalBaseUrl(candidate.baseUrl)));
+  const hitRow = (candidate) => {
+    const count = localModelCount(candidate);
+    const host = localEndpointHost(candidate.baseUrl);
+    const status = count > 0 ? `${count} 个模型` : candidate.state === "auth-required" ? "已探到，但要求鉴权" : "已探到，但还没有模型";
+    const urls = connected ?? new Set();
+    const isConnected = count > 0 && normalizeLocalBaseUrl(candidate.baseUrl) !== "" && urls.has(normalizeLocalBaseUrl(candidate.baseUrl));
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+        /* 绿点说的是「服务在」（--ok 的语义位含「已连接」），「没模型 / 要鉴权」
+           由**文字**承担 —— 状态不只靠颜色。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-dot on" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: candidate.label }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: host === "" ? status : `${host} · ${status}` }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+        count === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-hint", children: candidate.state === "auth-required" ? candidate.detail ?? "该服务要求鉴权，请用「＋ 添加模型」手工配置" : "先在本机服务里下载一个模型，再点「重新探测」" }) : isConnected ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag", children: "已接入" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            disabled: busy || connectingId !== void 0,
+            "aria-label": `接入本机 ${candidate.label}`,
+            onClick: () => connect(candidate),
+            children: connectingId === candidate.id ? "接入中…" : "接入"
+          }
+        )
+      ] })
+    ] }, candidate.id);
+  };
+  const missedRow = (candidate) => {
+    const host = localEndpointHost(candidate.baseUrl);
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-dot" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: candidate.label }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: host === "" ? "未探到" : `${host} · 未探到` })
+      ] })
+    ] }, candidate.id);
+  };
+  // 有东西可接、或有已接入的本机服务时，才说明「占位凭据」这件事。
+  const showPlaceholderNote = hits.some((candidate) => localModelCount(candidate) > 0) || [...(connected ?? [])].some((url) => hitUrls.has(url));
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", "data-local-services": "true", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "本机模型服务" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", disabled: probing || busy, onClick: probeNow, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
+        probing ? "探测中…" : "重新探测"
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-hint", children: "只探测这台机器的回环地址（127.0.0.1）上的常见模型服务端口，不扫描网络、不出网。" }),
+    error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: probeNow }) : probe === void 0 ? /* 首次探测未回：骨架（结构已知的等待用骨架屏，行到达时是「同一片区域被填上」）。
+         重新探测**不清空**已有结果 —— 骨架只在这一种情况下出现。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-list", role: "status", "aria-label": "正在探测本机模型服务", children: [0, 1, 2].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 7, height: 7, radius: "var(--radius-full)" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 96, height: 13 }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 168, height: 12 }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 56, height: 29 })
+    ] }) }, i)) }) : hits.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "没有探到本机模型服务", description: "这台机器上没有正在运行的本机模型服务。装好并启动 Ollama、LM Studio 之类之后再点「重新探测」。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-list", children: hits.map(hitRow) }),
+    /* 未探到的候选折叠在一句话之后；展开是用户显式要的，此时多一个盒子是信息的载体。
+       外套一层 .settings-hint 只为借它的 margin（区块内不新增视觉值，也不新造类名）。 */
+    missed.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-hint", children: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setExpanded((v) => !v), children: expanded ? "收起" : `查看其余 ${missed.length} 个未探到的服务` }) }),
+    expanded && missed.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-list", children: missed.map(missedRow) }),
+    /* 接入动作的副作用说明：只在「有东西要接入」或「已经接入了」时出现 ——
+       零模型 / 未探到时没有东西会被写进磁盘，讲它是噪音。 */
+    showPlaceholderNote && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-hint", children: "本机服务一般不校验密钥；接入时应用会替你写一个占位值，好让它的模型能被选中（不是你的账号信息）。" })
+  ] });
+}
 function ModelsSection({ snapshot, busy, run }) {
   const [form, setForm] = reactExports.useState({ kind: "closed" });
   const [addOpen, setAddOpen] = reactExports.useState(false);
@@ -64235,6 +64471,7 @@ function ModelsSection({ snapshot, busy, run }) {
         onRefreshCatalog: () => void run(() => window.kami.refreshCatalog())
       }
     ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(LocalServicesSection, { snapshot, busy, run }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "服务商" }),
