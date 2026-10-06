@@ -88,9 +88,19 @@ const rendered = await waitUntil(
 	async () =>
 		await win.evaluate(() => {
 			const el = document.querySelector(".markdown .katex-display .katex");
-			if (el === null) return { found: false };
+			/*
+			 * 未就绪时必须返回**假值**：`waitUntil` 的判据是
+			 * `if (value) return value`（harness.mjs），返回对象字面量
+			 * ——哪怕字段全是 false——是**恒真**，这个「等待」就只轮询一次
+			 * 便返回，`timeout` 一格都用不上，随后 `hasMathml` 是 undefined、
+			 * `text.slice()` 抛 TypeError（2026-10-06 CI 上真实红过；
+			 * 同族禁令见 .trellis/spec/testing/index.md 三·1，issue #114）。
+			 *
+			 * 触发条件刻意保持「`.katex` 出现」而不是「`math` 出现」——
+			 * 后者会让「渲染出 MathML」那条断言退化成同义反复（永远为真）。
+			 */
+			if (el === null) return null;
 			return {
-				found: true,
 				hasMathml: el.querySelector("math") !== null,
 				/* 反斜杠序列若被 markdown 转义层吃掉（第一版自写切分的死因），
 				 * f(x)\,dx 的 TeX 会变成 f(x),dx（文本逗号）。KaTeX 真解析 \, 输出

@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/10-06-local-model-discovery/prd.md", "reason": "逐条核对 Acceptance Criteria（功能 / 测试 / 工程三组都要查）"}
+{"file": ".trellis/tasks/10-06-local-model-discovery/design.md", "reason": "核对实现与设计一致：只探回环、四态归类、占位凭据走 models.json、判据函数未被改动"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查断言是否可证伪、有没有静默跳过、新用例是否真的进了 CI 调用链"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "核查 IPC 登记、错误是否可诊断、有没有把预期失败做成 throw、有没有静默降级"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "核查有没有硬编码颜色/新造类名/新档位/大 chunk 重排"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "验收者职责：独立复核 diff、逐条核对被删的行、反向验证要真的执行"}

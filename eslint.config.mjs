@@ -47,6 +47,9 @@ export default [
 				process: "readonly",
 				console: "readonly",
 				URL: "readonly",
+				// Node 18+ 的全局。单测里也会真的发 HTTP 请求 —— 例如验一个 mock 服务
+				// 在网络上长什么样（注入假的 fetch 等于把被测对象换掉了）。
+				fetch: "readonly",
 				Buffer: "readonly",
 			},
 		},
