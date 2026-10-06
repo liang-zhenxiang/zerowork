@@ -203,6 +203,44 @@ Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**�
 
 **但上面这套机制有一处结构性覆盖不到的地方**，见下一节。
 
+### 依赖告警的分级处置（2026-10-06 复核）
+
+Dependabot 的**条数不是风险量级** —— 同一批告警里，有的随包发给用户、有的只在你本机
+构建时存在、有的根本不是本工程的源码。所以这里按**归属与影响面**分四类，写清每类的动作。
+
+| 类别 | 当前条数 | 处置 |
+| --- | --- | --- |
+| **随包原样分发的第三方模板**（`resources/**` 的三个 manifest + 一个 Python 引擎） | **76** | **不走升级这条路**：那是随包的第三方内容，不参与本仓库的 lint 与测试，改它们的 lockfile 只会让副本与上游不一致。登记在 `THIRD_PARTY_NOTICES.md`，告警按本节的理由逐条判定并关闭 |
+| **本仓库的开发依赖**（vitest / electron-builder / monaco / echarts / pptx-preview 等） | 25（全量 `npm audit`） | **交给 Dependabot 例行升级**。它们的修复跨主版本（vitest 4.1→5、electron-builder 26.17→26.5 等），要单独评估，不塞进某个功能 PR。2026-10-06 已跑过一轮 `npm audit fix`（非破坏性：28 → 26） |
+| **无 npm 修复版的**（`xlsx`） | 1 | **已处置**：随包那份 vendored bundle 升到 0.20.3（见下节与 #61）。npm 上的 `xlsx` 停在 0.18.5，只用于**测试夹具**（`tests/e2e/preview-renderers.mjs` 造 xlsx），不随包 |
+| **审计工具看不见的**（`src/renderer/src/vendor-*.js`） | 0（原 2 个 high） | **已处置**：升级 + 静态门禁 + 每周 OSV 巡检（见下节） |
+
+**唯一一条随包代码里的高危：`brace-expansion`（经由 Agent 内核）**
+
+`npm audit --omit=dev` 当前只有一条：`brace-expansion@5.0.9`，
+路径是 `@earendil-works/pi-coding-agent → minimatch@10 → brace-expansion`。
+修复版是 **5.0.12**，而 5.x **只发 ESM**（`"type": "module"`），本仓库另一批 CJS 使用者
+（eslint 链上的 minimatch@1/2/5）需要 1.x/2.x —— **全局 override 会把构建打断**
+（实测：要么装不上，要么 `require()` 直接失败）。
+
+因此这条**不由本仓库修**：正确的动作是上游 `pi-coding-agent` 升级它的 `minimatch`。
+已开 [Issue #140](https://github.com/liang-zhenxiang/zerowork/issues/140) 跟踪，
+并在 `package.json` 里**刻意不加**会伪装修好的 override（加了反而掩盖问题）。
+影响面：brace 展开的 ReDoS（栈耗尽 / 二次方展开），触发条件是**该库收到的模式串**，
+不是用户直接投喂的文件；出现位置在 Agent 内核的 glob 匹配上。
+
+**为什么 `resources/**` 的告警按「不适用」关闭而不是修**
+
+`resources/` 下是**随包原样分发**的第三方内容（插件模板、文档引擎）。它们：
+
+- **不参与本仓库的 lint / 测试**（`eslint` / `prettier` / `vitest` 三处整目录排除）；
+- 改它们的 lockfile 会让**副本与上游不一致**，而且没有任何测试能验证改动；
+- 正确的处置是**登记 + 让读者知道它的来源**，而不是逐个升级 —— 升级会制造
+  「我们在维护别人模板」的错觉，还把随包体积与行为都改了。
+
+这一类的清单与理由见 `THIRD_PARTY_NOTICES.md`。告警在 GitHub 上按
+「不适用（随包第三方模板，见第 N 节）」**带理由关闭**，而不是留着让人每周重新判断一次。
+
 ### 随包的 vendored 依赖：审计盲区
 
 `src/renderer/src/*.js` 是**预打包的 vendored bundle**：依赖在入库前就已被内联完毕，

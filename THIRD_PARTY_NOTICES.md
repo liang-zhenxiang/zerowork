@@ -24,6 +24,26 @@
 > （12 张 PNG），现已改为渲染层第一方生成 —— 顺带也把这批图**随包再分发**的授权问题
 > 一并消掉了（那本来要走 `THIRD_PARTY_NOTICES` 的确认流程，见 `AGENTS.md` 红线 9）。
 
+## 1.5 随包的第三方模板：**已知的依赖告警，按「不适用」处置**
+
+`resources/` 下有三个 Node manifest 与一个 Python 引擎是**随包原样分发**的第三方内容。
+Dependabot 会在它们上面报依赖告警（2026-10-06 复核：76 条），而**本仓库不修它们**：
+
+| manifest | 告警条数（2026-10-06） | 说明 |
+| --- | --- | --- |
+| `resources/plugins/teams_marketplace/modern-webapp/…/template/package-lock.json` | 33 | 原样分发的模板 |
+| `resources/plugins/teams_marketplace/ppt-implement/…/templates/frontend/yarn.lock` | 21 | 同上 |
+| `resources/docx-engine/pyproject.toml` | 18 | 随包引擎 |
+| `resources/plugins/teams_marketplace/ppt-implement/…/scripts/export/package-lock.json` | 4 | 同上 |
+
+**为什么不升级**：这些内容不参与本仓库的 lint / 测试（三处工具链整目录排除），改它们的
+lockfile 只会让副本与上游不一致，且没有任何测试能验证改动。**要移除某项资产，请连同
+它的许可声明一起移除整个目录** —— 不要只改它的依赖。
+
+判据与完整推理见 `SECURITY.md` 的「依赖告警的分级处置」。
+
+---
+
 ## 2. 随包内容里**带许可声明的**第三方资产 —— 最高优先级
 
 `resources/` 下有一批资产**自带来源方的许可文件**。这些是**法律声明**，
