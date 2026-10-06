@@ -1,0 +1,10 @@
+{"file": ".trellis/tasks/10-06-local-model-discovery/prd.md", "reason": "需求、验收标准与约束边界"}
+{"file": ".trellis/tasks/10-06-local-model-discovery/design.md", "reason": "技术设计：四态归类、占位凭据的实测依据、写路径 round-trip、可注入候选表、被否掉的方案"}
+{"file": ".trellis/tasks/10-06-local-model-discovery/research/model-access.md", "reason": "代码事实全表（逐条 file:line）：写路径 / 探测能力 / 两处界面 / 可测性 / §Z 关键结论"}
+{"file": ".trellis/tasks/10-06-local-model-discovery/research/design-spec.md", "reason": "两处界面的视觉与交互规范（设计师产出，含文案终稿）"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层规范：初始化顺序、IPC 登记、落盘先于推送、错误可诊断、宁可拒绝不静默降级"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：token 单一真源与档位纪律、三态、禁止清单、大 chunk 文件不许重排"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试分层、harness 用法、反向验证、第 10 条「不在 CI 里跑的测试等于没有测试」"}
+{"file": ".trellis/spec/shared/index.md", "reason": "跨进程契约：IPC 通道登记与形状钉死"}
+{"file": "docs/DESIGN.md", "reason": "视觉规范真源：§2 档位、§3.9 盒子预算、§4 三态、§6 禁止清单、§7.6/§7.9"}
+{"file": "EXTERNAL_REQUESTS.md", "reason": "登记口径与既有条目模板（§一.5 本地预览服务）"}
