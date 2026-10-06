@@ -26,6 +26,25 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
+### 安全
+
+- **依赖告警做了分级处置：开放告警 89 → 13**（[#17](https://github.com/liang-zhenxiang/zerowork/issues/17)）。
+  此前那 89 条混成一个「想办法全修掉」的清单，而其中**四分之三根本不该走升级这条路**。
+  现在按**归属与影响面**分四类写进 `SECURITY.md`，每类都有明确动作：
+  **随包原样分发的第三方模板**（`resources/**` 的 4 个 manifest，76 条）—— 不参与本仓库的
+  lint 与测试，改它们的 lockfile 只会让副本与上游不一致且无从验证，因此**登记在
+  `THIRD_PARTY_NOTICES.md`（新增第 1.5 节）并按「不适用」逐条带理由关闭**，而不是留着
+  让人每周重新判断一次；**本仓库的开发依赖**交给 Dependabot 例行升级
+  （本轮已跑非破坏性的 `npm audit fix`：全量 28 → 26）；**无 npm 修复版的 `xlsx`** 已随
+  vendored bundle 升级处置（#61/#138）；**审计工具看不见的 `vendor-*.js`** 已由升级 +
+  静态门禁 + 每周 OSV 巡检覆盖。
+  **仍然只有一条随包代码里的高危**：`brace-expansion@5.0.9`（经
+  `pi-coding-agent → minimatch@10`）。它**修不了**——修复版 5.x 只发 ESM，而本仓库另一批
+  CJS 使用者（eslint 链）需要 1.x/2.x，全局 override 会把构建打断；嵌套 override 实测
+  根本不生效（npm 报 overridden、装的还是旧版）。`package.json` 里**刻意不加**会伪装修好的
+  override，改为开 [Issue #140](https://github.com/liang-zhenxiang/zerowork/issues/140) 让上游
+  升级它的 minimatch —— 加一个假的 override 只会掩盖问题、让下一个人以为已修。
+
 ### 新增
 
 - **「关于」页补上第三方组件与许可的注明**（[#19](https://github.com/liang-zhenxiang/zerowork/issues/19) 里
