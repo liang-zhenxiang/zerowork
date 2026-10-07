@@ -1,0 +1,9 @@
+{"file": ".trellis/tasks/10-07-multi-model-compare/prd.md", "reason": "需求、验收标准与硬约束（默认路径一字不改）"}
+{"file": ".trellis/tasks/10-07-multi-model-compare/design.md", "reason": "技术设计：专用事件通道的三条理由、模块契约、被否掉的七个方案"}
+{"file": ".trellis/tasks/10-07-multi-model-compare/research/feasibility.md", "reason": "代码事实全表：可复用的编排骨架、三处会伤到默认路径的全局副作用、渲染层容器问题、e2e 两台 mock 的用法"}
+{"file": ".trellis/tasks/10-07-multi-model-compare/research/design-spec.md", "reason": "视图的视觉与交互规范（设计师产出，含文案终稿）"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层规范：初始化顺序、IPC 登记、落盘先于推送、错误可诊断"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：chunk 粒度、token 档位、禁止重排大文件"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试分层、harness 用法、反向验证（含 e2e 注入要先 build）、断言不要依赖本机环境"}
+{"file": "docs/DESIGN.md", "reason": "视觉规范真源：§2 档位、§3.9 盒子预算、§4 三态、§5 受控例外、§6 禁止清单"}
+{"file": ".trellis/spec/shared/index.md", "reason": "跨进程契约：IPC 通道登记与形状钉死"}
