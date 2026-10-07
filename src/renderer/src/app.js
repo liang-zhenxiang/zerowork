@@ -29887,8 +29887,7 @@ import {
 	describeModel,
 	initialCompareState,
 	laneAccentVar,
-	modelButtonText,
-	togglePickedModel
+	modelButtonText
 } from "./compare-view.js";
 const emptyOptions = {};
 function remarkGfm(options) {
@@ -68602,15 +68601,22 @@ function CompareView({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen]);
+  // 加减名单是**相对动作**：这里只送 `key`，由归约器按**最新** state 算。
+  // 读闭包里的 `state.picked` 再用绝对列表派发，会让同一任务里的两条点击
+  // 都基于同一份旧 state —— 第二条把第一条整个覆盖掉（症状：连点两个模型只选中一个，
+  // 而分开点完全正常）。完整理由与这次修复的形态见 compare-view.js 的 compareReducer 头注。
   const toggleModel = (key) => {
-    const result = togglePickedModel(state.picked, key);
-    if (result.error !== void 0) {
-      // 越界（第 5 个）**明确拒绝并说明**，不静默忽略：静默忽略读起来就是「点了没反应」。
-      onError(result.error);
-      return;
-    }
-    dispatch({ type: "pick", models: result.keys });
+    dispatch({ type: "toggle", key });
   };
+  // 越界（第 5 个）**明确拒绝并说明**，不静默忽略：静默忽略读起来就是「点了没反应」。
+  // 提示是**副作用**，所以归约器只把原因记进 `state.lastReject`（它是纯的），
+  // 弹 toast 在这里做。盯的就是这一个字段：它的对象引用每拒绝一次都是新的
+  //（带单调 `seq`），所以连着越界两次也会各弹一次；成功加减会把它清成 undefined。
+  // `onError` 是 `showToast`（`useCallback`、依赖为空，引用恒定），放进依赖不会重复触发。
+  reactExports.useEffect(() => {
+    if (state.lastReject === void 0) return;
+    onError(state.lastReject.hint);
+  }, [state.lastReject, onError]);
   const toggleMenu = () => {
     if (running) return;
     setMenuOpen((open) => {

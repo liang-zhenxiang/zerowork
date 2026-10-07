@@ -273,7 +273,63 @@ describe("列间隔离与跨轮隔离", () => {
 
 	it("运行中改名单被忽略（通道与名单必须一致）", () => {
 		const state = started();
-		expect(compareReducer(state, { type: "pick", models: [A] })).toBe(state);
+		expect(compareReducer(state, { type: "toggle", key: A })).toBe(state);
+	});
+});
+
+describe("名单动作是相对动作（连点不丢第一个）", () => {
+	/*
+	 * 这一组守的是一个**真实修过的缺陷**：动作原是 `{type:"pick", models:[…]}`
+	 * （绝对列表），而组件里的处理器读的是**这次渲染的闭包**里的 `state.picked`。
+	 * 同一个任务里派发两条时，两条都基于同一份旧 state，第二条把第一条整个覆盖 ——
+	 * 症状是「连着点两个模型，只选中了后一个」，而分开点（中间隔着一次重渲染）
+	 * 完全正常，所以它看起来像手速问题（实测：同一 evaluate 里点两下 → 只剩一个；
+	 * 分成两次、间隔 250ms → 两个都在）。
+	 *
+	 * 改成相对动作后由归约器按**最新状态**算，下面第一条就是它的回归防线：
+	 * 把 reducer 的 `toggle` 改回「用传进来的绝对列表」（例如
+	 * `return initialCompareState([action.key])`），这一条会变红。
+	 */
+	it("连着两条 toggle 两个模型都在名单里（相对动作的核心）", () => {
+		let state = initialCompareState([]);
+		state = compareReducer(state, { type: "toggle", key: A });
+		state = compareReducer(state, { type: "toggle", key: B });
+		expect(state.picked).toEqual([A, B]);
+	});
+
+	it("从已选名单里 toggle 同一个 key 是移出（顺序不变）", () => {
+		const state = compareReducer(initialCompareState([A, B, "p/m3"]), { type: "toggle", key: A });
+		expect(state.picked).toEqual([B, "p/m3"]);
+	});
+
+	it("第 5 个被拒绝：名单一个字不动，原因记进 lastReject", () => {
+		const full = ["p/m1", "p/m2", "p/m3", "p/m4"];
+		const before = initialCompareState(full);
+		let state = compareReducer(before, { type: "toggle", key: "p/m5" });
+		expect(state.picked).toBe(before.picked); // 原样返回**同一引用**（不是截断、也不是塞进去）
+		expect(state.picked).toEqual(full);
+		expect(state.lastReject).toEqual({ hint: COMPARE_FULL_HINT, seq: 1 });
+		// 连着越界两次也各是一次新的拒绝（对象引用不同 —— 界面靠它决定弹不弹提示）。
+		const again = compareReducer(state, { type: "toggle", key: "p/m5" });
+		expect(again.lastReject).toEqual({ hint: COMPARE_FULL_HINT, seq: 2 });
+		expect(again.lastReject).not.toBe(state.lastReject);
+	});
+
+	it("成功加减会把 lastReject 清掉（提示不再重复弹）", () => {
+		const full = ["p/m1", "p/m2", "p/m3", "p/m4"];
+		let state = compareReducer(initialCompareState(full), { type: "toggle", key: "p/m5" });
+		expect(state.lastReject).toBeDefined();
+		state = compareReducer(state, { type: "toggle", key: "p/m1" });
+		expect(state.lastReject).toBeUndefined();
+		expect(state.picked).toEqual(["p/m2", "p/m3", "p/m4"]);
+	});
+
+	it("还没发问时点选只改名单，列阵仍是 empty", () => {
+		const state = compareReducer(initialCompareState([]), { type: "toggle", key: A });
+		expect(state.phase).toBe("idle");
+		expect(state.columns.map((column) => [column.columnId, column.modelKey, column.status])).toEqual([
+			["col-0", A, "empty"],
+		]);
 	});
 });
 

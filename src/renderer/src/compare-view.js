@@ -127,6 +127,8 @@ export function initialCompareState(picked = []) {
     /** 整轮墙钟耗时，来自 `run_finished`（列头显示的是**各列自己**的耗时）。 */
     elapsedMs: undefined,
     picked: keys,
+    /** 最近一次「被明确拒绝」的加选（见 `compareReducer` 的 `toggle`）。 */
+    lastReject: undefined,
     columns: columnsFor(keys, "empty"),
   };
 }
@@ -260,11 +262,37 @@ export function accumulateTiming(state, event, now) {
  * 整轮与各列的状态归约（`useReducer` 的 reducer 本体）。
  *
  * 动作：
- *   `{ type: "pick", models }`        选中的名单变了（只认 idle / finished 两态）
+ *   `{ type: "toggle", key }`         名单里加减**一个**模型（只认 idle / finished 两态）
  *   `{ type: "begin", models }`       本轮已受理，列阵按发出去的名单重建
  *   `{ type: "accept", runId }`       拿到 daemon 受理回来的 runId
  *   `{ type: "failed" }`             本轮没起得来（daemon 拒绝），回到 idle
  *   `{ type: "event", event, now }`  一条 `PUSH.compareEvent`
+ *
+ * ## 为什么名单动作是**相对**的（`toggle key`），不是绝对列表（`pick models`）
+ *
+ * 这条是**修出来的**，不是洁癖。原先组件里的处理器写的是
+ * `togglePickedModel(state.picked, key)` —— `state.picked` 来自**这次渲染的闭包**，
+ * 而同一任务里派发两条 `pick` 时两条都读到**同一份**旧 state：第二条把第一条的结果
+ * 整个覆盖掉。症状是「连着点两个模型，只选中了后一个」，且**只在连点（同一帧内）时出现**
+ * —— 手点两次（中间隔着一次重渲染）完全正常，所以它看起来像手速问题。
+ * （React 会把同一任务里的多次 dispatch 排进队列，但闭包里的 state 不会因此变新。）
+ *
+ * 改成相对动作之后，**由归约器按最新状态算**：两条 `toggle` 依次作用在对方的结果上，
+ * 连点与分开点得到同一个名单。这一条在 e2e 里有一条专门的断言
+ * （同一任务里连点两个模型，两个都要在名单里）。
+ *
+ * ## 越界（第 5 个）的「原因」怎么带回给界面
+ *
+ * 归约器必须是**纯的**，弹 toast 是副作用，不能写在这里。做法是把原因记进
+ * `state.lastReject = { hint, seq }`：组件用一个 effect 盯着这个字段弹提示。
+ *
+ * - **不直接用返回的名单差集去推原因**：`{keys: 旧名单, error}` 的形状让调用方
+ *   在闭包里比较两份名单才知道发生了什么，而「点了没反应」与「明确拒绝」在界面上
+ *   必须可辨（本仓库对「静默丢东西」有明确纪律）。
+ * - **`seq` 是单调计数**：effect 的依赖是这一个字段的对象引用，连着越界两次若对象
+ *   不变、效果就不会再跑，第二次点击又成了「点了没反应」。计数让每一次拒绝都是
+ *   一份新的对象（理由与 `app.js` 里 toast id 用 `Date.now()+random` 同源）。
+ * - 成功的加减把整份状态换成 `initialCompareState(...)`，`lastReject` 随之清空。
  *
  * 为什么 `begin` 要收 `models` 而不是读 `state.picked`：发出去的就是它，
  * 列阵以它为准，渲染层与 daemon 的列序因此不可能对不上。
@@ -280,9 +308,15 @@ export function accumulateTiming(state, event, now) {
 export function compareReducer(state, action) {
   if (state === undefined) return state;
   switch (action?.type) {
-    case "pick": {
+    case "toggle": {
       if (state.phase === "running") return state;
-      return initialCompareState(action.models);
+      const result = togglePickedModel(state.picked, action.key);
+      if (result.error !== undefined) {
+        // 名单**原样不动**（越界就是没加进去），只记下一次拒绝供界面弹提示。
+        // 理由见本函数头注「越界（第 5 个）的『原因』怎么带回给界面」。
+        return { ...state, lastReject: { hint: result.error, seq: (state.lastReject?.seq ?? 0) + 1 } };
+      }
+      return initialCompareState(result.keys);
     }
     case "begin": {
       const models = Array.isArray(action.models) ? action.models : state.picked;
