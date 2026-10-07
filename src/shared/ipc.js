@@ -575,7 +575,26 @@ const INVOKE = {
   /** 启停切换（active ↔ paused；missed 重新启用走这里）。返回切换后的任务。 */
   automationToggle: "automation:toggle",
   /** 立即运行一次（进同一串行队列，不影响既有 nextRunAt 的周期语义）。 */
-  automationRunNow: "automation:run-now"
+  automationRunNow: "automation:run-now",
+  /* ── 模型对比（一问多答）───────────────────────────────────────── */
+  /**
+   * 开始一轮对比：同一个问题**并行**问 2–4 个模型（入参 `[models, prompt]`，
+   * models 是模型 key 数组）。
+   *
+   * **受理即返回**（`{ ok:true, runId }`），答案不在这条通道的返回值里 ——
+   * 各列的流式与终态全部经 PUSH.compareEvent 推。理由：一轮对比要跑几十秒，
+   * 挂在 invoke 上等于让渲染层干等；而列与列之间必须能各自到达、各自失败，
+   * 逐列事件才是它们的自然载体（同 session:prompt 的「结果走推送」口径）。
+   *
+   * 可预期的失败（模型个数越界 / 重复模型 / 问题为空）**用返回值表达**
+   * （`{ ok:false, error }`），不 throw —— 口径同 settings:test-model。
+   */
+  compareStart: "compare:start",
+  /**
+   * 取消一轮对比（入参 `[runId]`），**同时收掉所有列**（含还在排队等空位的）。
+   * runId 不认识时如实报 `{ ok:false, error }`（多半是已经跑完了）。
+   */
+  compareAbort: "compare:abort"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */
@@ -613,7 +632,45 @@ const PUSH = {
    * 安装跑在 daemon、可能持续几分钟；进度走推送而非 invoke 返回值，
    * 于是用户切走设置页再切回来仍能看到「正在安装」，终态也由推送触发回读清单。
    */
-  runtimeInstallProgress: "runtimes:install-progress"
+  runtimeInstallProgress: "runtimes:install-progress",
+  /**
+   * 模型对比的列事件流。payload 为 `{ runId, columnId?, kind, ... }`。
+   *
+   * ### 为什么不复用 PUSH.sessionEvent
+   *
+   * 把对比会话接进 `sessionEvent` 是最省事的路（事件、状态归约、渲染全都白拿），
+   * **必须拒绝**。三条后果都有 `file:line` 支撑（见 `.trellis/tasks/` 的本任务
+   * design.md §二）：
+   *
+   * ① **用量统计串台**：`ObservabilityStore.currentRun` 是**单槽**
+   *    （observability.js:162）——`run_started` 无条件覆写、`assistant_done` 归属
+   *    「最后一个 run_started 的会话」、`finishRun` 无条件清空（:409 / :418 / :482）。
+   *    N 列并行时后起的列会抢走先起列的归属，**先收尾的列会把别的列永远留在
+   *    `status: "running"`** —— 而这正好出现在「比较用量」这个功能自己的面板上。
+   * ② **全局副作用对每列各跑一次**：`pushTaskListChanged()`、**`evictIdleHosts()`**
+   *    （会真的 dispose 掉**别的桶**的宿主）、`teamRegistry.settleRunningMembers`、
+   *    `emitSessionStats`（session-files.js:1883-1902）。
+   * ③ **渲染层不会重渲染**：后台会话的事件被折进 `viewCacheRef`（**ref**，
+   *    app.js:68491 / 68572），症状是「跑完了、屏幕上一动不动」。
+   *
+   * 代价如实说明：对比列**没有** `session_stats` / 上下文用量 / 诊断面板，
+   * 耗时与用量由渲染层按列自算（数据本就在事件里）—— v1 接受。
+   *
+   * ### kind 取值清单（渲染层靠它归约，加新值要同步 renderer 的归约器）
+   *
+   *   column_queued     该列已登记，等并发空位（**不带秒数**：排队不计入耗时）
+   *   column_started    该列真的开始跑了 —— 耗时从这一刻起算，不含排队
+   *   text_delta        正文增量 `{ delta, messageId }`
+   *   thinking_delta    思考增量 `{ delta, messageId }`
+   *   assistant_done    该列出答案了 `{ message: { text, thinking?, usage?, at } }`
+   *   column_failed     该列失败 `{ error }`（含超时、模型不可用、没有产出）
+   *   column_cancelled  该列被取消（含排队中被整体取消的那一种）
+   *   run_finished      整轮收尾（**不带 columnId**）`{ outcome, elapsedMs, columns }`
+   *
+   * 每列**恰好一条**终态（`assistant_done` / `column_failed` / `column_cancelled`）
+   * 是编排层的契约：界面上不存在「一直转、收不掉」的列。
+   */
+  compareEvent: "compare:event"
 };
 const DEFAULT_GLOBAL_SHORTCUT = "Shift+Alt+W";
 export {

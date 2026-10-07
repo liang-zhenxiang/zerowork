@@ -11016,6 +11016,123 @@ textarea:focus-visible {
 	color: var(--text-faint);
 }
 
+/* ── 模型对比（一问多答，spec: 10-07-multi-model-compare）───────────────────
+ * 盒子预算（docs/DESIGN.md §3.9）：**一个内容卡级主盒子**（输入卡，既有 .composer-card）
+ * + N 个次级面（通道，--bg-raised、无边框、无阴影）。白卡承载唯一的问题，
+ * 灰面承载 N 路回答 —— 这是这一屏一眼成立的层级，也是它不加第二种盒子的理由。
+ *
+ * 新类名只有 3 个（.compare-grid / .compare-col / .compare-col-head），各自都写下
+ * 「既有类为什么不够」；其余全是既有类与既有类的作用域覆盖。
+ * 本屏**不新增 token / 档位 / 颜色 / 动画 / 布局属性过渡**（§5.1 默认禁止，不申请例外）。
+ */
+
+/* 整页壳复用 .settings（stats / diagnostics / automations / library 同款）。两条覆盖：
+   · 900px 是设置页的「阅读列宽」口径，本屏内容是 N 列通道，套 900 会让 4 列挤在中间；
+   · 容器查询锚在**可用宽度**上 —— 侧栏开合会改它（264px 的摆动），窗口宽是另一个量，
+     这正是本文件用容器查询的既有动机（同 .chat 那条）。 */
+.settings-body[data-compare] {
+	max-width: none;
+	container-type: inline-size;
+}
+
+/* ① N 列栅格：列数 = 参与模型数（2–4）。 */
+.compare-grid {
+	display: grid;
+	/* 行距 > 列距：输入行 → 通道行是「控制 → 结果」的**分组边界**，
+	   通道之间是同级并排（§3.8 的分组逻辑：间隙跟着分组走）。 */
+	gap: var(--space-5) var(--space-3);
+}
+
+.compare-grid[data-cols="2"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.compare-grid[data-cols="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.compare-grid[data-cols="4"] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* 输入区 = 第 0 行：它与 N 条通道共用同一条栅格线（对齐不是巧合）。 */
+.compare-grid > .composer-zone { grid-column: 1 / -1; }
+
+/* 窄容器折列：容不下「每列 210px」时折成 2 列（210 与 .model-grid 的 auto-fill 下限同值，
+   是既有栅格语言不是新尺寸）。折成 2 列而不是 1 列 —— 1 列就不再是「并排」。
+   n=2 不写规则，因为那条是死的：最窄可用宽 ≈ 900 − 264 − 48 = 588 > 2×210+12 = 432。 */
+@container (max-width: 880px) {
+	.compare-grid[data-cols="4"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@container (max-width: 660px) {
+	.compare-grid[data-cols="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ② 单条通道（次级面）：§3.7 —— 抬升面一律不带边框，边框是内容卡的身份。 */
+.compare-col {
+	display: flex;
+	flex-direction: column;
+	/* 长模型名 / 长 URL / 长代码行不得把列撑宽（.case-grid 记录过同类事故：
+	   它的列定义必须是 minmax(0,1fr)，否则「谁的封面宽谁列宽」）。 */
+	min-width: 0;
+	padding-bottom: var(--space-5);
+	background: var(--bg-raised);
+	border-radius: var(--radius-md);
+	/* 左缘 2px 分类色条（这一列是谁）。用 inset 阴影而不是 border-left —— 后者占布局
+	   宽度，会把栏内文字的 12px 缩进推成 14px，与输入卡边缘错开 2px。
+	   色号由每列内联给出：style={{ "--lane-accent": `var(--cat-${i + 1})` }}。
+	   它表达的是**分类**（哪一条通道），不是状态 —— 失败列不换色，
+	   否则这一列失败之后就丢了身份（§2.4：状态色只表状态）。 */
+	box-shadow: inset 2px 0 0 var(--lane-accent, var(--cat-1));
+}
+
+/* ③ 列头：身份 + 耗时 + 每列动作（第一行），用量读数（第二行）。 */
+.compare-col-head {
+	display: flex;
+	flex-wrap: wrap;            /* 让 width:100% 的用量行换到第二行，不必再套一层 div */
+	align-items: center;
+	column-gap: var(--space-3);
+	row-gap: var(--space-1);
+	padding: var(--space-3) var(--space-4) var(--space-2);
+	border-bottom: 1px solid var(--border);   /* 表头与正文的分界（阅读用，不是卡片边界） */
+	border-radius: var(--radius-md) var(--radius-md) 0 0;
+	/* 吸附：滚进长答案时身份与计时仍在。z-index 必需 —— .entry 是 position: relative
+	   （正文操作条的锚点）且是本行的**后绘兄弟**，不给列头抬升就会被正文盖住。
+	   层级取 --z-base，它的注释原文就写着「页面内抬升：刻度轨、sticky 头、激活描边」。
+	   不加浮动阴影：一有阴影它就从「表头」变成「浮层」，与通道是同一个面的事实矛盾。 */
+	position: sticky;
+	top: 0;
+	z-index: var(--z-base);
+	background: var(--bg-raised);   /* 必须不透明：正文要从它下面滑过 */
+}
+
+/* 用量独占一行 → 四列的读数落在**同一条水平线**上（横向可比是这一屏的全部意义）。
+   列头第一行在每列都恒为一行（名字 nowrap + 耗时 inline-flex），所以第二行的起点
+   四列一致；没有用量的列这里是空 div（宽度 100% 照样强制换行，行高为 0），
+   不会让谁的第二行提前冒出来。 */
+.compare-col-head .run-metrics { width: 100%; }
+
+/* 模型名可能很长（org/model-name:tag）：.turn-agent 今天一条溢出处理都没有
+   （对话页的发言者是常量 "ZeroWork"，永远不会溢出）。没有 min-width: 0 的话
+   text-overflow 不生效，名字会把那一列顶宽。 */
+.compare-col-head .turn-agent {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 失败列的耗时用状态色（§2.4：只有真状态用状态色）。
+   完成态**不用** --ok —— 四列同时变绿是纯噪声，而且文字已经写着「已完成」。 */
+.compare-col[data-status="failed"] .turn-duration { color: var(--danger); }
+
+/* 排队 chip 落在抬升面上：.stream-queue 自带的 --bg-raised 底在这里等于没有底。
+   按 token 自己的语义换成「内容 chip 的静态底色」--bg-chip
+   （--bg-hover 是 hover 专用档，只读 chip 不许借它）。 */
+.compare-col > .stream-queue {
+	margin-inline: var(--space-4);
+	background: var(--bg-chip);
+}
+
+/* 通道内的独立状态块与正文同一条 12px 缩进线
+   （正文的 12px 来自 .entry.assistant 自带的 padding: 0 var(--space-4)）。 */
+.compare-col > .stream-pending { padding: 0 var(--space-4); }
+.compare-col > .state-error { margin: 0 var(--space-4) var(--space-3); }
+
 /* ── 嵌套滚动容器的滚动链 ──────────────────────────────────────────────────
  * 这些容器嵌在可滚动的父容器里（消息流 / 侧栏 / 面板 / 弹层）。不加 contain 的话，
  * 滚到它们两端后链动会继续滚动父容器 —— 最糟的表现是「菜单滚到底，背后的消息流

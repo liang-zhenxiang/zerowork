@@ -14982,6 +14982,7 @@ function ModelMenu({
   thinkingLevel,
   availableThinkingLevels,
   onOpenSettings,
+  onOpenCompare,
   onError
 }) {
   const [open, setOpen] = reactExports.useState(false);
@@ -15150,6 +15151,22 @@ function ModelMenu({
               onOpenSettings();
             },
             children: "全部模型与服务商… →"
+          }
+        ),
+        // 「对比多个模型…」与上面那条同位置、同形态（`.model-menu-goto`）。
+        // **本菜单仍是单选、点完即关**：它是会话级单模型的权威写入点，
+        // 多选若做进这里会污染默认路径。这条只是「换一个入口」——
+        // 进对比屏，并把当前模型预选成第一个参赛者。
+        onOpenCompare !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "model-menu-goto",
+            onClick: () => {
+              setOpen(false);
+              onOpenCompare();
+            },
+            children: "对比多个模型…"
           }
         )
       ] }) })
@@ -16168,6 +16185,7 @@ function HomeView({
   onPrefillConsumed,
   onSceneChange,
   onOpenSettings,
+  onOpenCompare,
   onError,
   onSubmit,
   onWorkspaceChanged,
@@ -16325,6 +16343,7 @@ function HomeView({
                   thinkingLevel,
                   availableThinkingLevels,
                   onOpenSettings,
+                  onOpenCompare,
                   onError
                 }
               ) }),
@@ -29854,6 +29873,22 @@ import { APP_LICENSE, BUNDLED_COMPONENTS, FULL_NOTICES_LOCATION } from "./attrib
 // 会话置顶的纯逻辑（排序 + 折叠窗口）在 session-pin.js 里，单测直接 import 它 ——
 // 见该文件头注：这两条判断在界面上只表现为「顺序对不对」，是 GUI 断言最说不清的一类。
 import { isPinned, sortSessionsByPin, taskListWindow } from "./session-pin.js";
+// 模型对比（一问多答）的纯逻辑：N 列状态机、每列读数口径、名单校验。
+// 单测直接 import 这一份 —— 这一屏最容易出的三类缺陷（两列同一个数字 / 一列的事件
+// 进了另一列 / 一列永远停在流式中）在界面上**都不报错**，只有状态机测得出来。
+import {
+	canStartCompare,
+	columnBodyKind,
+	columnEntries,
+	columnMetricItems,
+	columnStatusText,
+	compareHint,
+	compareReducer,
+	describeModel,
+	initialCompareState,
+	laneAccentVar,
+	modelButtonText
+} from "./compare-view.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -32464,6 +32499,7 @@ function ChatView({
   onOpenPanelGroup,
   onOpenSources,
   onOpenSettings,
+  onOpenCompare,
   onError,
   branchAvailable,
   onRestartFrom,
@@ -33134,6 +33170,7 @@ function ChatView({
                       thinkingLevel: conversation.state.thinkingLevel,
                       availableThinkingLevels: conversation.state.availableThinkingLevels,
                       onOpenSettings,
+                      onOpenCompare,
                       onError
                     }
                   ),
@@ -68185,7 +68222,8 @@ function paletteActionEntries(ctx) {
     { id: "action:diagnostics", title: "打开诊断", keywords: ["诊断", "排错", "日志", "diagnostics"], run: ctx.openDiagnostics },
     { id: "action:stats", title: "打开统计", keywords: ["统计", "用量", "token", "stats"], run: ctx.openStats },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
-    { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations }
+    { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
+    { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare }
   ];
   // 设置分组各自成条目：标题一律以「设置 · 」开头，输入「设置」即可把 9 个分组一起唤出。
   const settings = NAV_ITEMS.map((page) => ({
@@ -68481,6 +68519,364 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
       )
     }
   );
+}
+/*
+ * 模型对比（「一问多答」）：同一屏里并行问 2–4 个模型，并排看它们怎么答。
+ *
+ * 纯逻辑（N 列状态机、每列读数口径、名单校验）在 `compare-view.js`，单测毫秒级钉死；
+ * 这里只做「把状态画出来」与「把用户动作送出去」。
+ *
+ * 五条来自 research/design-spec.md 的硬约束（都在下面逐条兑现）：
+ *   · **每列只渲染助手正文**，不渲染 `TurnHeader`（否则 4 列各顶一个 ZeroWork 头像）；
+ *   · 操作条**不传** `onRestart` / `onBranch` —— 本屏的产品承诺是「不进侧栏、不进历史、
+ *     不计入统计」，一个「分支出新会话」的按钮会把这条承诺当场作废；
+ *   · 用量与耗时**提到列头**（`.entry-toolbar` 里那套读数落在各自 y 位置上，四列就不可比）；
+ *   · 整轮没能启动（daemon 拒绝）走既有 toast，**不在通道区摆错误框** ——
+ *     那时还没有「哪一列」可言；
+ *   · 复用既有 `Composer` 的**类名、结构与键位口径**（含 `useImeGuard`，中文产品必需），
+ *     但不复用它的组件本体 —— 它绑着草稿持久化 / @ 补全 / 图片粘贴 / 字符上限，
+ *     本屏没有附件也没有技能引用。
+ */
+function CompareView({
+  onClose,
+  onOpenSettings,
+  onError,
+  initialModelId
+}) {
+  const [state, dispatch] = reactExports.useReducer(
+    compareReducer,
+    void 0,
+    () => initialCompareState(initialModelId === void 0 ? [] : [initialModelId])
+  );
+  const [prompt, setPrompt] = reactExports.useState("");
+  const [now, setNow] = reactExports.useState(() => Date.now());
+  const [snapshot, setSnapshot] = reactExports.useState(void 0);
+  const [snapshotError, setSnapshotError] = reactExports.useState(void 0);
+  const [menuOpen, setMenuOpen] = reactExports.useState(false);
+  const [stopConfirm, setStopConfirm] = reactExports.useState(stopConfirmIdle);
+  const ime = useImeGuard();
+  const running = state.phase === "running";
+  const reloadModels = reactExports.useCallback(() => {
+    setSnapshotError(void 0);
+    window.kami.settingsSnapshot().then(setSnapshot).catch((error) => setSnapshotError(error instanceof Error ? error.message : String(error)));
+  }, []);
+  reactExports.useEffect(() => {
+    reloadModels();
+  }, [reloadModels]);
+  // 列事件：每一条都带 runId 与 columnId，归约由纯逻辑那份 compare-view.js 完成
+  // （列间隔离、终态不再被迟到事件改动、不是本轮的事件丢弃）。
+  reactExports.useEffect(() => {
+    return window.kami.onCompareEvent((event) => {
+      dispatch({ type: "event", event, now: Date.now() });
+    });
+  }, []);
+  // 只在跑的时候每 500ms 刷新一次「已处理 Ns」——与对话页回合头同节奏。
+  // 计时文字每秒变化**不是动画**（不需要进 docs/DESIGN.md §10.3 的登记）。
+  reactExports.useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [running]);
+  reactExports.useEffect(() => {
+    if (stopConfirm.phase !== "pending") return;
+    const timer = window.setTimeout(
+      () => {
+        setStopConfirm((current) => stopConfirmExpired(current, Date.now()) ? stopConfirmIdle : current);
+      },
+      Math.max(0, stopConfirm.deadline - Date.now())
+    );
+    return () => window.clearTimeout(timer);
+  }, [stopConfirm]);
+  reactExports.useEffect(() => {
+    if (!running) setStopConfirm((current) => current.phase === "pending" ? stopConfirmIdle : current);
+  }, [running]);
+  // 菜单开着时 Esc 关菜单（与既有 ModelMenu 同一条键位：它有 .ws-backdrop 遮罩，
+  // 键盘用户必须有不用鼠标的退路）。运行中的 Esc 是「停止」，那条在 textarea 的
+  // keydown 里 —— 菜单与停止不可能同时在场（运行中模型钮是禁用的）。
+  reactExports.useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (event) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen]);
+  // 加减名单是**相对动作**：这里只送 `key`，由归约器按**最新** state 算。
+  // 读闭包里的 `state.picked` 再用绝对列表派发，会让同一任务里的两条点击
+  // 都基于同一份旧 state —— 第二条把第一条整个覆盖掉（症状：连点两个模型只选中一个，
+  // 而分开点完全正常）。完整理由与这次修复的形态见 compare-view.js 的 compareReducer 头注。
+  const toggleModel = (key) => {
+    dispatch({ type: "toggle", key });
+  };
+  // 越界（第 5 个）**明确拒绝并说明**，不静默忽略：静默忽略读起来就是「点了没反应」。
+  // 提示是**副作用**，所以归约器只把原因记进 `state.lastReject`（它是纯的），
+  // 弹 toast 在这里做。盯的就是这一个字段：它的对象引用每拒绝一次都是新的
+  //（带单调 `seq`），所以连着越界两次也会各弹一次；成功加减会把它清成 undefined。
+  // `onError` 是 `showToast`（`useCallback`、依赖为空，引用恒定），放进依赖不会重复触发。
+  reactExports.useEffect(() => {
+    if (state.lastReject === void 0) return;
+    onError(state.lastReject.hint);
+  }, [state.lastReject, onError]);
+  const toggleMenu = () => {
+    if (running) return;
+    setMenuOpen((open) => {
+      const next = !open;
+      if (next) reloadModels();
+      return next;
+    });
+  };
+  const submit = () => {
+    if (running || !canStartCompare(state.picked, prompt)) return;
+    const models = [...state.picked];
+    const question = prompt.trim();
+    // 先受理（begin）再登记 runId（accept）：daemon 的列事件在 compareStart 应答
+    // 之前就会推出来，理由见 compare-view.js 的 compareReducer 头注。
+    dispatch({ type: "begin", models });
+    window.kami.compareStart(models, question).then(
+      (result) => {
+        if (result?.ok === true) {
+          dispatch({ type: "accept", runId: result.runId });
+          return;
+        }
+        dispatch({ type: "failed" });
+        onError(`对比没能开始：${result?.error ?? "daemon 没有给出原因"}`);
+      },
+      (error) => {
+        dispatch({ type: "failed" });
+        onError(`对比没能开始：${error instanceof Error ? error.message : String(error)}`);
+      }
+    );
+  };
+  const abortRun = () => {
+    const runId = state.runId;
+    if (runId === void 0) return;
+    window.kami.compareAbort(runId).then(
+      (result) => {
+        if (result?.ok !== true) onError(result?.error ?? "取消对比失败");
+      },
+      (error) => onError(error instanceof Error ? error.message : String(error))
+    );
+  };
+  const requestStop = () => {
+    const result = triggerStop(stopConfirm, Date.now());
+    setStopConfirm(result.state);
+    if (result.confirmed) abortRun();
+  };
+  const handleKeyDown = (event) => {
+    if (event.key === "Escape") {
+      // 与 handleComposerKeyDown 逐条一致：Esc 是「收掉这一轮」的逃生门。
+      if (running) {
+        event.preventDefault();
+        requestStop();
+      }
+      return;
+    }
+    if (event.key !== "Enter" || event.shiftKey) return;
+    // 中文输入法组合期间不响应 Enter（`useImeGuard` 的既有口径），
+    // 否则选字那一下会把半句话发出去。
+    if (ime.shouldSwallowNow()) {
+      event.preventDefault();
+      return;
+    }
+    event.preventDefault();
+    submit();
+  };
+  const availableModels = (snapshot?.models ?? []).filter((model) => model.available);
+  const providerNames = new Map((snapshot?.providers ?? []).map((provider) => [provider.id, provider.name]));
+  const menuBody = snapshotError !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: snapshotError, onRetry: reloadModels }) : snapshot === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取模型…" }) : availableModels.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+    EmptyState,
+    {
+      title: "还没有可用模型",
+      action: /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "mini-btn",
+          onClick: () => {
+            setMenuOpen(false);
+            onOpenSettings();
+          },
+          children: "去设置里填 API Key →"
+        }
+      )
+    }
+  ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "model-menu-list", children: availableModels.map((model) => {
+    const key = `${model.providerId}/${model.id}`;
+    const picked = state.picked.includes(key);
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        role: "menuitemcheckbox",
+        "aria-checked": picked,
+        className: `model-menu-item${picked ? " active" : ""}`,
+        // 与既有 ModelMenu 唯一的**行为**差异：点一条只切换选中，**不关闭菜单**
+        //（那份的 pick 直连 window.kami.setModel，是会话级单模型的权威写入点，不能动）。
+        onClick: () => toggleModel(key),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "model-menu-name", children: model.name }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "model-menu-meta", children: [
+            providerNames.get(model.providerId) ?? model.providerId,
+            " ·",
+            " ",
+            new Intl.NumberFormat("zh-CN").format(Math.round(model.contextWindow / 1e3)),
+            "K"
+          ] }),
+          picked && /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 14, className: "model-menu-check" })
+        ]
+      },
+      key
+    );
+  }) });
+  const renderAnswerEntry = (column, entry) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `entry ${entry.role}`, "data-entry-id": entry.id, children: [
+    column.thinking !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingBlock, { text: column.thinking, streaming: column.status === "running" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Markdown, { text: entry.text }),
+    // 操作条只留「复制」（`.entry` 自带的 hover 浮现，opacity + pointer-events，键盘也够得着）。
+    // 不传 metrics：读数已搬到列头（四列要落在同一条水平线上才可比）。
+    /* @__PURE__ */ jsxRuntimeExports.jsx(AssistantActions, { text: entry.text })
+  ] }, entry.id);
+  const renderAnswer = (column) => {
+    const entries = columnEntries(column);
+    if (entries.length === 0) return null;
+    const views = buildTurnViews(entries, { streaming: column.status === "running", cancelledTurns: [] });
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: views.map((view) => /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: view.plan.items.map((item) => {
+      // 对比列不跑工具，分组项在当前装配下不可能出现；真出现了也照样把文本画出来，
+      // 绝不因为「这个分组不认识」把答案吞掉。
+      if (item.entry !== void 0) return renderAnswerEntry(column, item.entry);
+      return /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.Fragment, { children: (item.entries ?? []).map((entry) => renderAnswerEntry(column, entry)) }, item.id);
+    }) }, view.key)) });
+  };
+  const renderColumnBody = (column, kind) => {
+    if (kind === "empty") return /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "等待提问" });
+    if (kind === "queued") return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stream-queue", children: "排队中" });
+    if (kind === "waiting")
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stream-pending", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-shimmer", children: "等待模型响应…" }) });
+    if (kind === "failed") {
+      // 「重试」在本屏是**重问一遍同一个问题**（所有列一起重跑）：跨进程的通道只有
+      // 「取消整轮」，没有「只重跑某一列」的入口 —— 按钮如实走它能做到的那件事。
+      return /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, {
+        message: column.error,
+        onRetry: canStartCompare(state.picked, prompt) ? submit : void 0
+      });
+    }
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      renderAnswer(column),
+      // 取消**保留已产出的正文**，末尾这一行是「正文在这里断了」的标记
+      //（与对话页 `.user-cancelled` 的既有语义一致）。
+      kind === "cancelled" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "user-cancelled", children: "已取消" })
+    ] });
+  };
+  const hint = compareHint(state.picked);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", "data-compare": "true", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", title: "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "模型对比" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-hint", children: "只问答：不跑工具、不动文件、不进历史、不计入统计" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-compare": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-grid", "data-cols": String(state.columns.length), children: [
+      /* ── 第 0 行：输入卡（本屏唯一的内容卡级主盒子） ── */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-zone", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "composer-slot", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-card", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "textarea",
+            {
+              value: prompt,
+              rows: 2,
+              "aria-label": "对比的问题",
+              placeholder: "想问所有模型同一个问题…",
+              onChange: (event) => setPrompt(event.target.value),
+              onKeyDown: handleKeyDown,
+              onCompositionStart: ime.bind.onCompositionStart,
+              onCompositionEnd: ime.bind.onCompositionEnd
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-bar", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+            // 底栏只有右组：本屏没有附件 / 默认权限 / 技能 chip —— 它不跑工具、不带文件，
+            // 左边那三个挂件在这里每一个都是谎。
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "menu-zone", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "button",
+                {
+                  type: "button",
+                  className: "bar-btn bar-btn-text model-chip",
+                  "aria-haspopup": "menu",
+                  "aria-expanded": menuOpen,
+                  // 运行中冻结参赛名单：通道与名单必须一致，中途增删列既让人看不懂，
+                  // 也要真的去中断请求。
+                  disabled: running,
+                  title: running ? "这一轮已经开始，下一轮可以改" : "选择参与对比的模型",
+                  onClick: toggleMenu,
+                  children: [
+                    modelButtonText(state.picked),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 13 })
+                  ]
+                }
+              ),
+              menuOpen && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ws-backdrop", "aria-label": "关闭", onClick: () => setMenuOpen(false) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pop-menu model-menu", role: "menu", "aria-multiselectable": "true", children: menuBody })
+              ] })
+            ] }),
+            running ? (
+              // 整体取消沿用既有的二次确认（一次点击只 arm，窗口内再点或 Esc 才真取消）：
+              // 「一键丢掉 N 列的全部产出」是一次性代价很大的动作。
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  className: "send-btn stop",
+                  "aria-label": "停止",
+                  title: stopConfirm.phase === "pending" ? "再按一次确认停止" : "停止生成",
+                  onClick: requestStop,
+                  children: stopConfirm.phase === "pending" ? /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { className: "stop-confirm-kbd", children: "Esc" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconStop, { size: 14 })
+                }
+              )
+            ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                className: "send-btn",
+                "aria-label": "开始对比",
+                title: "开始对比",
+                disabled: !canStartCompare(state.picked, prompt),
+                onClick: submit,
+                children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconSend, { size: 16 })
+              }
+            )
+          ] })
+        ] }) }),
+        hint !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "session-stats", children: hint })
+      ] }),
+      /* ── 第 1..N 行：通道 ── */
+      state.columns.map((column, index) => {
+        const label = describeModel(column.modelKey, snapshot);
+        const durationText = columnStatusText(column, now, formatDuration$1);
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "section",
+          {
+            className: "compare-col",
+            "data-status": column.status,
+            "aria-label": `${label.name} 的对比结果`,
+            style: { "--lane-accent": laneAccentVar(index) },
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-col-head", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "turn-agent", title: `${label.providerName}/${label.modelId}`, children: label.name }),
+                durationText !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "turn-duration", children: durationText }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+                // 用量独占第二行（`.run-metrics { width: 100% }`）：四列的读数因此落在
+                // 同一条水平线上 —— 横向可比是这一屏的全部意义。
+                /* @__PURE__ */ jsxRuntimeExports.jsx(RunMetricsBar, { items: columnMetricItems(column, formatTokenCount) })
+              ] }),
+              renderColumnBody(column, columnBodyKind(column))
+            ]
+          },
+          column.columnId
+        );
+      })
+    ] }) })
+  ] });
 }
 function App() {
   const [link2, setLink] = reactExports.useState({ kind: "connecting" });
@@ -69353,6 +69749,15 @@ function App() {
     setView("library");
   }, [view]);
   /*
+   * 打开模型对比。两个入口共用它（⌘K 动作与输入卡模型菜单里的那条）：
+   * 「返回上一视图」的口径与 diagnostics / stats 一致 —— 从对话页进来的回对话页。
+   * 入口本身不带问题（问题在对比屏自己的输入卡里），所以这里只切视图。
+   */
+  const openCompare = reactExports.useCallback(() => {
+    setReturnView(view === "chat" ? "chat" : "home");
+    setView("compare");
+  }, [view]);
+  /*
    * 命令面板条目的数据源。分两套：
    * - paletteEntries：全集，搜索时用（动作 + 设置分组 + 全部会话/空间/专家/技能/连接器/自动化）
    * - paletteIdleEntries：空查询的引导集（常用动作 + 最近 N 条会话），避免摊成一堵墙
@@ -69383,7 +69788,8 @@ function App() {
       openDiagnostics,
       openStats,
       openSkills: () => openSkillsAt("skills"),
-      openAutomations
+      openAutomations,
+      openCompare
     });
     const sessions = [...taskList ?? []].filter((session) => !session.archived).sort(byModifiedDesc).map((session) => ({
       id: `session:${session.id}`,
@@ -69439,7 +69845,7 @@ function App() {
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
     // 而是**面板搜到过期数据**——结果悄悄不对，界面上没有任何失败信号。
     // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
-  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openSkillsAt, openAutomations, resumeTask, newTaskInSpace, useExpert]);
+  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
   const paletteIdleEntries = reactExports.useMemo(() => {
     const byId = new Map(paletteEntries.map((entry) => [entry.id, entry]));
     // 收藏的条目可能**不在**引导集里（一条更早的会话、一个技能、一个自动化）——
@@ -69607,6 +70013,7 @@ function App() {
         onPrefillConsumed: () => setPendingPrefill(void 0),
         onSceneChange: changeScene,
         onOpenSettings: openSettings,
+        onOpenCompare: openCompare,
         onError: showToast,
         onSubmit: submit,
         onWorkspaceChanged: resyncSnapshot,
@@ -69667,6 +70074,7 @@ function App() {
           revealPanel("sources");
         },
         onOpenSettings: () => openSettings(),
+        onOpenCompare: openCompare,
         onError: showToast,
         branchAvailable,
         onRestartFrom: restartFromUserMessage,
@@ -69720,6 +70128,18 @@ function App() {
         onClose: () => setView(returnView),
         onResumeSession: resumeRunSession,
         onToast: showToast
+      }
+    ),
+    view === "compare" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CompareView,
+      {
+        onClose: () => setView(returnView),
+        // 对比屏的模型菜单要能去设置（「还没有可用模型」那条出路与 ModelMenu 同一处理）。
+        onOpenSettings: () => openSettings(),
+        onError: showToast,
+        // 从输入卡模型菜单进来时把「当前会话的模型」预选成第一个参赛者：
+        // 那正是用户当时在看的那个模型，空着让他重选一遍没有道理。
+        initialModelId: conversation.state.modelId
       }
     ),
     view === "library" && /* @__PURE__ */ jsxRuntimeExports.jsx(

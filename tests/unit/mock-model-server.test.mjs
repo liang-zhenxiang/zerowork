@@ -185,3 +185,93 @@ describe("mock 模型服务：GET …/models", () => {
 		expect(mock.requests).toHaveLength(1);
 	});
 });
+
+/**
+ * 后加的三个选项（`delayMs` / `usage` / `failWith`）。
+ *
+ * 它们是为模型对比那条用例加的，但**必须在这里就钉死** —— 这个 mock 是二十多个
+ * 用例共用的靶子，一处疏忽会同时表现为「对比用例假红」与「所有依赖 mock 的对话用例
+ * 连带失败」，后者会淹没前者（见文件头）。
+ *
+ * 三条断言各自守的东西：
+ *   ① 默认（不开选项）时**响应里没有 `usage`、没有延迟、不失败** —— 既有用例
+ *      读到的字节与改动前相同；
+ *   ② 开了 `usage` 时它挂在**收尾那一片**上（pi 读的是 `chunk.usage`，见
+ *      `openai-completions` 的流解析）；
+ *   ③ `failWith` 回一个非 2xx + OpenAI 形状的错误体，且**不吐 SSE**。
+ */
+describe("mock 模型服务：模型对比要用的三个选项", () => {
+	/** 打一次 chat/completions，返回 `{ status, contentType, raw }`。 */
+	async function chat(mock) {
+		const res = await fetch(`${mock.baseUrl}/chat/completions`, {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ model: "mock-model", messages: [{ role: "user", content: "嗨" }], stream: true }),
+		});
+		return { status: res.status, contentType: res.headers.get("content-type") ?? "", raw: await res.text() };
+	}
+
+	/** SSE 里的所有 chunk 对象。 */
+	function chunksOf(raw) {
+		return raw
+			.split("\n")
+			.filter((line) => line.startsWith("data: ") && !line.includes("[DONE]"))
+			.map((line) => JSON.parse(line.slice(6)));
+	}
+
+	it("默认（不开任何选项）：不发 usage、不延迟、不失败 —— 响应里连 usage 这个键都没有", async () => {
+		const mock = await start();
+		const { status, contentType, raw } = await chat(mock);
+
+		expect(status).toBe(200);
+		expect(contentType).toContain("text/event-stream");
+		expect(concatStreamContent(raw)).toBe("这是 mock 模型的回复。");
+		// 「一个字节都没变」的可证伪形态：整段 SSE 里不出现 usage 这个键。
+		expect(raw).not.toContain("usage");
+		expect(chunksOf(raw).every((chunk) => chunk.usage === undefined)).toBe(true);
+	});
+
+	it("usage 选项：挂在收尾那一片上（不是单独一片），内容照给的那一份", async () => {
+		const mock = await start({ reply: "短回复", usage: { prompt_tokens: 1200, completion_tokens: 340 } });
+		const { raw } = await chat(mock);
+
+		const chunks = chunksOf(raw);
+		const withUsage = chunks.filter((chunk) => chunk.usage !== undefined);
+		expect(withUsage).toHaveLength(1);
+		expect(withUsage[0].usage).toEqual({ prompt_tokens: 1200, completion_tokens: 340 });
+		// 收尾那一片：带 finish_reason，且正文内容一个字都不多
+		expect(withUsage[0].choices[0].finish_reason).toBe("stop");
+		expect(concatStreamContent(raw)).toBe("短回复");
+		// 顺序上它是最后一片正文 chunk（后面只剩 [DONE]）
+		expect(chunks[chunks.length - 1]).toBe(withUsage[0]);
+	});
+
+	it("delayMs 选项：第一片立刻到、后面每一片之间等这么久（总耗时可观察地变长）", async () => {
+		const reply = "一二三四五六七八九十"; // 8 字一片 ⇒ 2 片 ⇒ 片间只等 1 次
+		const fast = await start({ reply });
+		const slow = await start({ reply, delayMs: 300 });
+
+		const t0 = Date.now();
+		await chat(fast);
+		const fastMs = Date.now() - t0;
+		const t1 = Date.now();
+		await chat(slow);
+		const slowMs = Date.now() - t1;
+
+		expect(slowMs - fastMs).toBeGreaterThanOrEqual(250);
+		// 第一片不等待：读完第一片正文的时刻与快的那台同量级（不是「开头就卡 300ms」）
+		expect(fastMs).toBeLessThan(250);
+	});
+
+	it("failWith 选项：回那个状态码 + OpenAI 形状错误体，且不吐 SSE", async () => {
+		const mock = await start({ failWith: 500 });
+		const { status, contentType, raw } = await chat(mock);
+
+		expect(status).toBe(500);
+		expect(contentType).toContain("application/json");
+		expect(JSON.parse(raw).error.message).toContain("500");
+		expect(raw).not.toContain("data:");
+		// 失败也照样记账（对比用例要按它确认「这一列真的打出去了」）
+		expect(mock.requests).toHaveLength(1);
+	});
+});

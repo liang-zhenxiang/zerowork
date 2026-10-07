@@ -482,6 +482,20 @@ class SessionHost {
     this.session.sessionManager.appendCustomEntry("team_member", { member: memberName });
   }
   /**
+   * 模型对比列的溯源标记（compare_run custom 条目，model key 定位这一列是谁答的）。
+   * 与 subagent_run / team_member 同理：对比会话与主会话**同落 sessions 目录**，
+   * 没有这条条目就会在会话列表里混入一条看不出来历的「普通会话」——
+   * 而对比的产品承诺正是「不进侧栏、不进历史、不计入统计」
+   * （过滤判据见 daemon/session-files.js 的 CHILD_SESSION_CUSTOM_TYPES）。
+   *
+   * 调用时机有硬约束（与另两个标记相同）：**建好宿主后、prompt 前** ——
+   * 会话列表的头部扫描只看文件开头，遇到第一条 message 就停
+   * （session-files.js 的 readSessionHeadMarkers）。
+   */
+  markCompareRun(modelKey) {
+    this.session.sessionManager.appendCustomEntry("compare_run", { model: modelKey });
+  }
+  /**
    * 当前会话文件名。daemon 用它标会话列表的 current、判定 rename/delete
    * 的目标是不是这个活会话。in-memory 会话为 undefined —— 本应用的会话
    * 都是持久化的，但 pi 的类型如此，调用方必须处理。

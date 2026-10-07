@@ -530,7 +530,16 @@ const INVOKE = {
   /** 启停切换（active ↔ paused；missed 重新启用走这里）。返回切换后的任务。 */
   automationToggle: "automation:toggle",
   /** 立即运行一次（进同一串行队列，不影响既有 nextRunAt 的周期语义）。 */
-  automationRunNow: "automation:run-now"
+  automationRunNow: "automation:run-now",
+  /**
+   * 模型对比（一问多答）：开始一轮（入参 `[models, prompt]`，**受理即返回**
+   * `{ ok:true, runId }`，各列结果经 PUSH.compareEvent 推）。
+   * 本表是 `src/shared/ipc.js` 的**手工副本**，改通道名两处都要改
+   * （tests/unit/ipc.test.mjs 有一条断言盯着两份表逐条一致）。
+   */
+  compareStart: "compare:start",
+  /** 取消一轮对比（入参 `[runId]`），同时收掉所有列。 */
+  compareAbort: "compare:abort"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */
@@ -570,7 +579,14 @@ const PUSH = {
    * 安装跑在 daemon、可能持续几分钟；进度走推送而非 invoke 返回值，
    * 于是用户切走设置页再切回来仍能看到「正在安装」，终态也由推送触发回读清单。
    */
-  runtimeInstallProgress: "runtimes:install-progress"
+  runtimeInstallProgress: "runtimes:install-progress",
+  /**
+   * 模型对比的列事件流（payload `{ runId, columnId?, kind, ... }`）。
+   * **为什么不复用 sessionEvent**：三条硬后果（用量统计单槽串台 / 每次列收尾
+   * 都会触发 evictIdleHosts 一类全局副作用 / 渲染层把后台会话折进 ref 不重渲染），
+   * 完整理由与 file:line 写在 `src/shared/ipc.js` 的同名常量上方。
+   */
+  compareEvent: "compare:event"
 };
 function subscribe(channel, listener) {
   const wrapped = (_event, payload) => listener(payload);
@@ -710,7 +726,15 @@ const bridge = {
   deleteAutomation: (id) => ipcRenderer.invoke(INVOKE.automationDelete, id),
   toggleAutomation: (id) => ipcRenderer.invoke(INVOKE.automationToggle, id),
   runAutomationNow: (id) => ipcRenderer.invoke(INVOKE.automationRunNow, id),
+  /**
+   * 开始一轮模型对比。**受理即返回** runId —— 各列的流式与终态经
+   * `onCompareEvent` 逐条送达（理由见 src/shared/ipc.js 的 compareStart）。
+   */
+  compareStart: (models, prompt) => ipcRenderer.invoke(INVOKE.compareStart, models, prompt),
+  /** 取消一轮对比（同时收掉所有列，含还在排队的）。 */
+  compareAbort: (runId) => ipcRenderer.invoke(INVOKE.compareAbort, runId),
   onSessionEvent: (listener) => subscribe(PUSH.sessionEvent, listener),
+  onCompareEvent: (listener) => subscribe(PUSH.compareEvent, listener),
   onUpdateEvent: (listener) => subscribe(PUSH.updatesEvent, listener),
   onTaskListChanged: (listener) => subscribe(PUSH.taskListChanged, listener),
   onUiRequest: (listener) => subscribe(PUSH.uiRequest, listener),
