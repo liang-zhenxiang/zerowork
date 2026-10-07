@@ -8,10 +8,19 @@
  * —— 而这些判断在界面上只表现为「数字不对」「两列串台」，恰是 GUI 断言最难说清、
  * 单测最容易钉死的一类。抽法与理由同 `library.js`（见该文件头部）。
  *
- * **② 编排**（`createCompareRunner`，见 `implement.md` 阶段 2）：起 N 个
- * `SessionHost` 并行发问、事件按列打 `columnId`、超时与 abort、`finally` 里 dispose。
- * 骨架照 `command-exec.js` 的 `createSubagentRunner`（并发闸 + 队列 + 每列一个宿主
- * + 从 `assistant_done` 收文本）。届时纯逻辑原样复用，只是多一个真起宿主的调用方。
+ * **② 编排**（`createCompareRunner`，见下文）：起 N 个 `SessionHost` 并行发问、
+ * 事件按列打 `columnId`、超时与 abort、`finally` 里 dispose。骨架照
+ * `command-exec.js` 的 `createSubagentRunner`（并发闸 + 队列 + 每列一个宿主
+ * + 从 `assistant_done` 收文本）。它**复用**上面的纯逻辑：每发出一条列事件，
+ * 编排层自己也用 `reduceColumn` / `accumulateTiming` 推进一份状态 ——
+ * 于是 `run()` 的返回值与渲染层算出来的东西**同源同口径**。
+ *
+ * ## 一条绝不能破的边界：事件不走 `emitSessionEvent`
+ *
+ * 每列自带 `emit` 闭包，事件打上列 id 后由调用方经 `PUSH.compareEvent` 送走。
+ * 一旦接进 `PUSH.sessionEvent`，三条硬后果立刻成立（`design.md` §二 有逐条
+ * `file:line`）：用量单槽串台、`evictIdleHosts` 会 dispose 掉**别的桶**的宿主、
+ * 渲染层不重渲染（那一句在界面上表现为「跑完了、屏幕上一动不动」）。
  *
  * ## 两条硬约定（编排层与渲染层的共同契约）
  *
@@ -32,7 +41,9 @@
  * 作用字段不重叠，因此两者以任意顺序应用结果相同。
  */
 
+import { mkdirSync } from "node:fs";
 import { parseModelKey } from "./auth.js";
+import { SessionHost } from "./session-host.js";
 
 /** 下限 2：只有一个模型就不叫「对比」了（那是普通对话）。 */
 const COMPARE_MIN_COLUMNS = 2;
@@ -280,11 +291,478 @@ function accumulateTiming(state, event, now) {
   return { ...state, endedAt: now, elapsedMs: elapsed >= 0 ? elapsed : 0 };
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * ② 编排：起 N 个宿主并行发问（createCompareRunner）
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 单列的运行上限。取值与 `command-exec.js` 的 `SUBAGENT_TIMEOUT_MS`（10 分钟）同档：
+ * 那边是「一个子任务」，这边是「一个答案」，后者只会更快 —— 超了这个数基本等于
+ * 连接卡死，让它响比让它挂着有用。
+ */
+const COMPARE_TIMEOUT_MS = 10 * 6e4;
+
+/**
+ * 宿主事件 → 列事件（**唯一**的翻译点）。
+ *
+ * 只认下面两种**流式增量**，其余**一律不转发** —— 包括 `session_state` /
+ * `context_usage` / `session_stats` / `queue_changed` / `run_retry` / 工具卡片
+ * （对比列不跑工具、没有会话面板，转发它们等于把一份渲染层不认识的协议塞进新通道），
+ * 以及 `assistant_done`（它的转发时机是**刻意的**另一条路：暂存到 run 收尾才发，
+ * 理由见 `createCompareRunner` 的注释 —— 失败与取消必须能压过它）。
+ *
+ * 字段名按 `session-host.js` 的 `translate()` 现核（不是猜的）：
+ * - `assistant_text_delta` → `{ type, messageId, delta }`（`session-host.js:722`，
+ *   由 `flushDeltas` 发出，`delta` 是已合批的拼接结果）
+ * - `assistant_thinking_delta` → 同形（同上，`session-host.js:722` 的三元另一支）
+ *
+ * 不带 `at`：列事件里的时间一律由**收到它的那一侧**取（`accumulateTiming` 的
+ * `now` 是显式入参），daemon 再补一个时间戳只会多出一个没人读、还可能对不上的字段。
+ */
+function toColumnEvent(columnId, hostEvent) {
+  if (hostEvent.type === "assistant_text_delta") {
+    return { columnId, kind: "text_delta", delta: hostEvent.delta, messageId: hostEvent.messageId };
+  }
+  if (hostEvent.type === "assistant_thinking_delta") {
+    return { columnId, kind: "thinking_delta", delta: hostEvent.delta, messageId: hostEvent.messageId };
+  }
+  return undefined;
+}
+
+/** `run_finished` 里每列的读数摘要（不带正文 —— 正文渲染层已经有）。 */
+function summarizeColumn(state) {
+  return {
+    columnId: state.columnId,
+    modelKey: state.modelKey,
+    status: state.status,
+    ...state.elapsedMs === undefined ? {} : { elapsedMs: state.elapsedMs },
+    ...state.usage === undefined ? {} : { usage: state.usage },
+    ...state.error === undefined ? {} : { error: state.error },
+  };
+}
+
+/**
+ * 对比编排。
+ *
+ * ```js
+ * const runner = createCompareRunner(deps);
+ * const started = runner.start({ models, prompt, onEvent });   // 同步受理，回 runId
+ * runner.abort(started.runId);                                  // 收掉所有列
+ * const done = await runner.run({ models, prompt, onEvent });   // 或者等着跑完
+ * ```
+ *
+ * ## 六条硬要求（都在下面兑现，逐条可指认）
+ *
+ * 1. **事件不走 `emitSessionEvent`**：每列的 `emit` 闭包打列 id 后交给 `onEvent`。
+ * 2. **不跑工具**：`toolsOverride: []`（`session-host.js:257` —— 传空数组即
+ *    「一个工具都不给」，这是装配层的关法，不是「没给工具提示词」）+ `extensions: []`
+ *    （无权限门、无 web、无 spill、无 shell —— 那些都是工具的实现）。
+ *    顺带消掉一个坑：无工具 ⇒ 不会产生权限审批 ⇒ 不存在「审批归属于哪一列」
+ *    这个问题（`requestApproval(request, sessionId)` 的归属争议在这里不成立）。
+ * 3. **额度另立**：只认本模块的 `COMPARE_MAX_COLUMNS`，**不碰**
+ *    `SPAWN_BUDGET_PER_SESSION`（`session-state.js:703`）。
+ * 4. **每列独立收尾**：一列失败 / 超时 / 取消都不影响别的列；每列**恰好一条**
+ *    终态事件（`assistant_done` / `column_failed` / `column_cancelled`）——
+ *    「一列永远停在 running」在界面上是流式尾巴一直转、用户没有入口收掉它。
+ * 5. **整体 abort** 同时收掉所有列（含还在排队的：取消会把等待中的列直接放出闸）。
+ * 6. **`finally` 里 dispose 每一个宿主**：对比宿主**不在 `bucketsById` 里**，
+ *    `pickEvictions`（`session-state.js:739`）不会回收它 —— 不显式释放就是泄漏。
+ *
+ * ## 一处刻意的时序：`assistant_done` 攒到 run 收尾才转发
+ *
+ * `message_end` 一发生宿主就发 `assistant_done`（`session-host.js:979`），
+ * 而**同一轮可能是失败的**：错误助手消息（stopReason "error"）照样走 message_end，
+ * 失败在它的**下一拍**（`agent_end` → `run_error`，`session-host.js:832-836`）才揭晓。
+ * 若即刻转发，失败列会先落进 `done`，而 `reduceColumn` 的纪律是「终态是终态」
+ * ——随后的 `column_failed` 会被忽略，界面上那一列显示「已完成」却带着一句错误、
+ * 正文还是空的。所以这里把 `assistant_done` 暂存，**成功收尾时才发**：
+ * 失败 ⇒ 只发 `column_failed`；取消 ⇒ 只发 `column_cancelled`（已流出的正文留在
+ * 状态里，与「取消保留已产出的正文」的既有语义一致）。
+ *
+ * @param {object} deps
+ * @param {() => Promise<{ isUsable: (key: string) => boolean }>} deps.getCatalog 现读模型目录
+ * @param {object} deps.resources 场景 / 交互模式描述（`SessionHost.create` 要它）
+ * @param {() => (string | undefined)} deps.getThinkingLevel 全局默认推理档
+ * @param {() => string} deps.getCwd 对比列的隔离工作目录（**由调用方给**，本模块不猜）
+ * @param {(cwd: string) => boolean} deps.isTempCwd 任务区判定（进宿主状态，仅供展示）
+ * @param {() => (number | undefined)} [deps.getTimeoutMs] 单列超时（缺省 `COMPARE_TIMEOUT_MS`）
+ * @param {(message: string) => void} [deps.reportError] 观测上报（推送失败 / 意外中止）
+ * @param {Function} [deps.createHost] 宿主工厂；缺省 `SessionHost.create`
+ *        （**只为测试而留**：单测要覆盖「abort 收掉所有列」「一列失败不拖垮别列」
+ *        「异常路径也 dispose」这些纯编排行为，起真宿主跑不了毫秒级单测）
+ */
+function createCompareRunner(deps) {
+  const createHost = deps.createHost ?? SessionHost.create;
+
+  /**
+   * 并发额度 = **同一时刻活着的对比列宿主数**。
+   *
+   * 上限取 `COMPARE_MAX_COLUMNS`（= 单轮列数上限）：一轮的列**全部**能同时跑，
+   * 这是「一屏 N 列同时开始流式」的实现基础。超出的（例如同时开了两轮）排队等位。
+   * 额度是进程级的、只服务对比 —— 子代理与团队成员的 20 格预算（按桶计）不受影响。
+   */
+  let running = 0;
+  /** 等空位的列：`{ record, resolve }`，FIFO。 */
+  const waiters = [];
+  /** runId → 本轮记录。允许多轮同时在跑（额度在「列」这一级）。 */
+  const runs = new Map();
+  let sequence = 0;
+
+  function pump() {
+    while (running < COMPARE_MAX_COLUMNS && waiters.length > 0) {
+      const waiter = waiters.shift();
+      // 已取消的等待者不占额度：直接放它出闸，它拿到的答案是「没排上」。
+      if (waiter.record.cancelled) {
+        waiter.resolve(false);
+        continue;
+      }
+      running += 1;
+      waiter.resolve(true);
+    }
+  }
+
+  function release() {
+    if (running > 0) running -= 1;
+    pump();
+  }
+
+  /** 取一个空位。`false` = 没排上（整轮已取消）——此时**不要**调 release。 */
+  async function acquire(record) {
+    if (record.cancelled) return false;
+    if (running < COMPARE_MAX_COLUMNS) {
+      running += 1;
+      return true;
+    }
+    const granted = await new Promise((resolve) => waiters.push({ record, resolve }));
+    if (granted !== true || record.cancelled) {
+      // 空位到手却又立刻作废：还回去。额度只在「一次成功的 acquire」与
+      // 「一次 release」之间守恒，漏还一格会让后续所有列都比额度少一格。
+      if (granted === true) release();
+      return false;
+    }
+    return true;
+  }
+
+  /** 取消一轮：排队中的列立刻出闸，已在跑的列逐列 abort。 */
+  function cancelRun(record) {
+    if (record.cancelled) return false;
+    record.cancelled = true;
+    for (const waiter of [...waiters]) {
+      if (waiter.record !== record) continue;
+      waiters.splice(waiters.indexOf(waiter), 1);
+      waiter.resolve(false);
+    }
+    for (const abort of [...record.abortHandlers]) abort();
+    return true;
+  }
+
+  /**
+   * 发一条事件。**先推进编排层自己的那份状态**，再交给调用方 ——
+   * 用的是与渲染层同一对纯函数（`reduceColumn` / `accumulateTiming`），
+   * 于是 `run()` 的返回值就是渲染层会看到的东西（单测不必起界面就能断言文本与用量）。
+   */
+  function pushEvent(record, event) {
+    if (event.columnId !== undefined) {
+      record.states = record.states.map((state) => {
+        const reduced = reduceColumn(state, event);
+        return accumulateTiming(reduced, event, Date.now());
+      });
+    }
+    try {
+      record.onEvent?.(event);
+    } catch (error) {
+      // 事件是观测：推不出去不该毁掉一轮对比（答案本身还是算出来了）。
+      // 但也不静默吞掉 —— 交给调用方的上报口（daemon 侧进 event-log）。
+      deps.reportError?.(
+        `对比事件推送失败（${event.kind}）：${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+
+  /** 发一列的终态。**每列恰好一条**：重复调用是 no-op（契约见文件头硬要求 4）。 */
+  function settle(record, columnId, event) {
+    if (record.settled.has(columnId)) return;
+    record.settled.add(columnId);
+    pushEvent(record, { runId: record.runId, columnId, ...event });
+  }
+
+  async function runColumn(record, column, prompt) {
+    const columnId = column.columnId;
+    const emit = (event) => pushEvent(record, { runId: record.runId, columnId, ...event });
+    let admitted = false;
+    let host;
+    let hostError;
+    let aborted = false;
+    /** 最近一条 `assistant_done` 的 message（成功收尾时才转发，理由见函数头）。 */
+    let lastDone;
+    /**
+     * 本列的取消接线。定义在最外层是为了**在 finally 里一定摘得掉** ——
+     * 泄漏一根接线到整轮结束，就等于「取消一个已经跑完的列」；
+     * 而宿主此刻已经 dispose，`abort()` 会抛（`void` 出去的 rejection 会走
+     * daemon 的 unhandledRejection，那个把整个进程带走）。
+     */
+    const abortColumn = () => {
+      const target = host;
+      if (target === undefined) return;
+      void target.abort().catch((error) => {
+        deps.reportError?.(
+          `对比列取消失败（${columnId}）：${error instanceof Error ? error.message : String(error)}`
+        );
+      });
+    };
+    try {
+      admitted = await acquire(record);
+      if (!admitted) {
+        settle(record, columnId, { kind: "column_cancelled" });
+        return;
+      }
+
+      const catalog = await deps.getCatalog();
+      if (!catalog.isUsable(column.modelKey)) {
+        settle(record, columnId, {
+          kind: "column_failed",
+          error: `模型「${column.modelKey}」当前不可用（不存在，或服务商还没配 API Key）。请到设置里检查后重选这一列。`,
+        });
+        return;
+      }
+
+      const cwd = deps.getCwd();
+      // 宿主自己也会 mkdir；这里显式建一次是为了「目录建不出来」时给出可诊断的
+      // 一句话，而不是 pi 内部的一句 ENOENT（错误要可诊断）。
+      mkdirSync(cwd, { recursive: true });
+
+      const emitHost = (event) => {
+        // 三条记账各自只关心一种宿主事件；其余（工具卡片那一类）本装配根本不会产生，
+        // 真产生了也在这里被丢掉 —— 对比列不转发任何非流式增量的东西。
+        if (event.type === "run_error" && hostError === undefined) hostError = event.message;
+        if (event.type === "run_finished" && event.outcome === "cancelled") aborted = true;
+        if (event.type === "assistant_done") {
+          // **暂存**而不是转发：这一轮可能是失败的（同一条 message_end 之后紧跟
+          // 一个 run_error），转发出去就没有「失败」可汇报了（终态是终态）。
+          lastDone = event.message;
+          return;
+        }
+        const columnEvent = toColumnEvent(columnId, event);
+        if (columnEvent !== undefined) emit(columnEvent);
+      };
+
+      host = await createHost({
+        catalog,
+        modelKey: column.modelKey,
+        cwd,
+        isTempTask: deps.isTempCwd(cwd),
+        // 两轴只是占位（同子代理）：提示词不由这两轴组装 —— 本装配**不装扩展**，
+        // 模型拿到的是 pi 的缺省系统提示词，没有任何本项目的工具说明。
+        sceneId: "work",
+        interactionId: "craft",
+        emit: emitHost,
+        resources: deps.resources,
+        thinkingLevel: deps.getThinkingLevel(),
+        // 不跑工具：装配层一个工具都不给（见函数头硬要求 2）。
+        toolsOverride: [],
+        extensions: [],
+      });
+      host.markCompareRun(column.modelKey);
+
+      record.abortHandlers.add(abortColumn);
+      // 建宿主窗口里就被取消了：连 prompt 都不要再发（abort 对未开始的会话无效，
+      // 硬发出去只会让用户等一个已经不要了的答案）。
+      if (record.cancelled) {
+        settle(record, columnId, { kind: "column_cancelled" });
+        return;
+      }
+      // 起点 = 「宿主就绪、请求即将发出」这一刻：排队等待与建宿主的开销都不算
+      // 这一列的耗时（对比耗时的卖点是「这个模型自己有多慢」）。
+      emit({ kind: "column_started", modelKey: column.modelKey });
+
+      let timedOut = false;
+      const timeoutMs = deps.getTimeoutMs?.() ?? COMPARE_TIMEOUT_MS;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        abortColumn();
+      }, timeoutMs);
+      timeout.unref?.();
+      try {
+        await host.prompt(prompt);
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      /*
+       * 三个终态的判断顺序是有讲究的，别按「读起来顺」排：
+       *   ① 整轮被取消 —— 用户的意思最清楚，压过一切（含同刻的超时）；
+       *   ② **超时要在 aborted 之前判**：超时是「我们主动 abort 了它」，
+       *      宿主那侧看到的是 outcome "cancelled"，与用户取消**长得一模一样**。
+       *      先判 aborted 的话，一列真的卡死了却会显示「已取消」——
+       *      用户去按取消却发现它本来就是自己超时的，这条错误归因够误导很久。
+       *   ③ 其余取消（用户单独取消这一列时也走 record.cancelled，到不了这里）。
+       */
+      if (record.cancelled) {
+        settle(record, columnId, { kind: "column_cancelled" });
+        return;
+      }
+      if (timedOut) {
+        settle(record, columnId, {
+          kind: "column_failed",
+          error: `这一列运行超时（${Math.round(timeoutMs / 6e4)} 分钟上限），已中断。可以单独重试这一列。`,
+        });
+        return;
+      }
+      if (aborted) {
+        settle(record, columnId, { kind: "column_cancelled" });
+        return;
+      }
+      if (hostError !== undefined) {
+        settle(record, columnId, { kind: "column_failed", error: hostError });
+        return;
+      }
+      if (lastDone === undefined) {
+        // 跑完却没有助手消息：如实说「没有产出」，而不是把它记成 done（done 意味着
+        // 界面上「已完成」，却没有一个字可看）。
+        settle(record, columnId, {
+          kind: "column_failed",
+          error: "这一列没有产出任何回答（模型没有返回助手消息）",
+        });
+        return;
+      }
+      settle(record, columnId, { kind: "assistant_done", message: lastDone });
+    } catch (error) {
+      // 一列的**任何**意外都在这里收口：并行最容易被做错的就是「一列失败拖垮全部」。
+      settle(record, columnId, {
+        kind: "column_failed",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      record.abortHandlers.delete(abortColumn);
+      if (host !== undefined) host.dispose();
+      if (admitted) release();
+    }
+  }
+
+  async function execute(record, prompt) {
+    const columns = [...record.states];
+    const startedAt = Date.now();
+    // 先登记全部列：渲染层收到第一条列事件就知道这一屏有几列，
+    // 不必等逐个列启动才把列阵画出来。
+    for (const column of columns) {
+      pushEvent(record, {
+        runId: record.runId,
+        columnId: column.columnId,
+        kind: "column_queued",
+        modelKey: column.modelKey,
+      });
+    }
+    await Promise.allSettled(columns.map((column) => runColumn(record, column, prompt)));
+    // 兜底：万一某列连终态都没发出（runColumn 内部已经尽力收口），这里补一条 ——
+    // 「一列永远停在 running」是不可接受的形态（流式尾巴一直转，用户收不掉）。
+    for (const column of columns) {
+      if (record.settled.has(column.columnId)) continue;
+      settle(record, column.columnId, {
+        kind: "column_failed",
+        error: "该列意外中止，没有给出结果",
+      });
+    }
+    const outcome = record.cancelled ? "cancelled" : "completed";
+    pushEvent(record, {
+      runId: record.runId,
+      kind: "run_finished",
+      outcome,
+      elapsedMs: Date.now() - startedAt,
+      columns: record.states.map(summarizeColumn),
+    });
+    return { runId: record.runId, outcome, columns: record.states };
+  }
+
+  /**
+   * 受理一轮对比（**同步**返回受理结果，列在后台跑）。
+   *
+   * 为什么受理与执行分开：`INVOKE.compareStart` 必须**马上**回 `runId` ——
+   * 一轮对比要跑几十秒，把它挂在 invoke 的返回值上等于让渲染层干等；
+   * 各列的流式与终态本来就是经 `PUSH.compareEvent` 逐条来的。
+   *
+   * 可预期的失败（模型个数越界 / 重复模型 / 问题为空）**用返回值表达**，不 throw
+   * —— 口径同 `settings:test-model`（跨 IPC 的预期失败用返回值，异常留给 bug）。
+   *
+   * @returns {{ ok: true, runId: string, done: Promise<object> } | { ok: false, error: string }}
+   */
+  function start(input) {
+    const normalized = normalizeColumns(input?.models);
+    if (!normalized.ok) return normalized;
+    const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+    if (prompt === "") {
+      return { ok: false, error: "请先输入一个问题（对比的就是「同一个问题」的多个答案）" };
+    }
+    const runId = `compare-${++sequence}`;
+    const record = {
+      runId,
+      states: createColumnStates(normalized.models),
+      cancelled: false,
+      settled: new Set(),
+      abortHandlers: new Set(),
+      onEvent: input.onEvent,
+    };
+    runs.set(runId, record);
+    const signal = input.signal;
+    const onSignalAbort = () => {
+      cancelRun(record);
+    };
+    if (signal !== undefined) {
+      if (signal.aborted) cancelRun(record);
+      else signal.addEventListener("abort", onSignalAbort, { once: true });
+    }
+    const done = execute(record, prompt)
+      .catch((error) => {
+        // 不该发生（每列的意外都在列内收口了）。真发生了也要让调用方拿到一句话，
+        // 而不是一个无人处理的 rejection —— daemon 的 unhandledRejection 会杀掉整个进程。
+        const message = error instanceof Error ? error.message : String(error);
+        deps.reportError?.(`对比 run 意外中止：${message}`);
+        return { runId, outcome: "failed", error: message, columns: record.states };
+      })
+      .finally(() => {
+        signal?.removeEventListener("abort", onSignalAbort);
+        runs.delete(runId);
+      });
+    return { ok: true, runId, done };
+  }
+
+  return {
+    start,
+    /**
+     * 受理并等着跑完（`done` 的便利包装）。事件流与 `start` 完全一样，
+     * 多出来的是返回值：**每列的终态摘要**（文本、用量、耗时、错误）。
+     * 单测与端到端脚本用它断言「两列各收各的」最省事。
+     */
+    async run(input) {
+      const started = start(input);
+      if (!started.ok) return started;
+      return { ok: true, ...(await started.done) };
+    },
+    /** 取消一轮：同时收掉所有列（含还在排队的）。runId 不认识时**如实报错**。 */
+    abort(runId) {
+      if (typeof runId !== "string" || runId === "") {
+        return { ok: false, error: "取消对比需要一个 runId" };
+      }
+      const record = runs.get(runId);
+      if (record === undefined) {
+        return { ok: false, error: `没有正在进行的对比：${runId}（可能已经跑完了）` };
+      }
+      cancelRun(record);
+      return { ok: true };
+    },
+    /** 收掉全部在跑的对比（进程收尾用）。 */
+    abortAll() {
+      for (const record of [...runs.values()]) cancelRun(record);
+    },
+  };
+}
+
 export {
   COMPARE_MAX_COLUMNS,
   COMPARE_MIN_COLUMNS,
+  COMPARE_TIMEOUT_MS,
   accumulateTiming,
   createColumnStates,
+  createCompareRunner,
   extractUsage,
   normalizeColumns,
   reduceColumn,

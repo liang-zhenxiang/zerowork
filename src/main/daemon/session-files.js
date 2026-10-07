@@ -87,6 +87,11 @@ import {
 	writeAuditRecord,
 } from "./audit.js";
 import { EventLog } from "./event-log.js";
+/*
+ * 模型对比的编排（一问多答）。顶层只做声明、跨模块的**使用**放进函数体 ——
+ * 本文件是 daemon 的枢纽，顶层求值顺序敏感（spec/daemon：「初始化顺序」）。
+ */
+import { createCompareRunner } from "./compare.js";
 import {
 	loadAgents,
 	loadExperts,
@@ -603,6 +608,16 @@ const UNKNOWN_MODEL = "unknown";
 
 const SUBAGENT_CUSTOM_TYPE = "subagent_run";
 
+/**
+ * 对比列的溯源标记（由 `SessionHost.markCompareRun` 写在会话文件头部）。
+ *
+ * 在这里**单独认它一次**的理由与 `subagent_run` 不同：那个标记只需从会话列表里
+ * 藏起来，而对比的产品承诺里还有一条「**不计入统计**」—— 统计页读的是
+ * `readUsageStats` 对 sessions 目录的**全量**扫描（不经过 `isInternalSessionFile`），
+ * 于是隐藏标记在这里不生效：不当心的话，用户跑几轮对比，统计页的 token 就自己涨了。
+ */
+const COMPARE_CUSTOM_TYPE = "compare_run";
+
 const READ_CONCURRENCY = 8;
 
 function asNumber(value) {
@@ -657,6 +672,7 @@ function parseSessionFile(content) {
   let sessionId;
   let sawHeader = false;
   let isSubagent = false;
+  let isCompare = false;
   const messages = [];
   const toolCalls = [];
   const toolErrorIds = /* @__PURE__ */ new Set();
@@ -676,6 +692,7 @@ function parseSessionFile(content) {
     }
     if (entry["type"] === "custom") {
       if (entry["customType"] === SUBAGENT_CUSTOM_TYPE) isSubagent = true;
+      else if (entry["customType"] === COMPARE_CUSTOM_TYPE) isCompare = true;
       continue;
     }
     if (entry["type"] !== "message") continue;
@@ -702,7 +719,7 @@ function parseSessionFile(content) {
     if (role === "assistant") collectToolCalls(body["content"], toolCalls);
   }
   if (!sawHeader || sessionId === void 0) return null;
-  return { sessionId, isSubagent, messages, toolCalls, toolErrorIds };
+  return { sessionId, isSubagent, isCompare, messages, toolCalls, toolErrorIds };
 }
 
 function isIdentifiedModel(model) {
@@ -736,6 +753,19 @@ function aggregateUsageStats(sessions, options = {}) {
   let firstAt;
   let lastAt;
   for (const session of sessions) {
+    /*
+     * 对比会话**整条跳过**（含 token / 花费 / 模型排行）。
+     *
+     * 判据必须在这里而不是靠 `isInternalSessionFile`：统计页读的是本函数上头的
+     * 全量扫描，隐藏标记到了这一步已经不生效了。跳过是**如实**的 ——
+     * 对比列确实产生过一次请求，但产品承诺明确写着它不进统计，
+     * 而统计页的意义是「我的工作花了多少」，把对比算进去会让每个数字都掺假。
+     *
+     * 已知的邻居：子代理会话只跳过「会话数 / 消息数 / 热力图」，token 照样累计
+     * （见下面 `if (!session.isSubagent)`）。对比不做这种半程排除 ——
+     * 一条口径要么整条算、要么整条不算，掺半条最难解释。
+     */
+    if (session.isCompare) continue;
     if (session.messages.length === 0) continue;
     if (isLegacySession(session.messages)) continue;
     if (!session.isSubagent) {
@@ -1318,7 +1348,7 @@ class AutomationScheduler {
   }
 }
 
-const CHILD_SESSION_CUSTOM_TYPES = /* @__PURE__ */ new Set(["subagent_run", "team_member"]);
+const CHILD_SESSION_CUSTOM_TYPES = /* @__PURE__ */ new Set(["subagent_run", "team_member", "compare_run"]);
 
 const AUTOMATION_RUN_CUSTOM_TYPE = "automation_run";
 
@@ -1641,6 +1671,21 @@ let pendingWorktreeBranch;
 
 function tempTasksDir() {
   return getTempTasksDir(getEffectiveWorkspaceRoot());
+}
+
+/**
+ * 对比列的 cwd：任务区下一个**专用**目录。
+ *
+ * 三条理由，缺一条都不成立：
+ *   · 对比列**不跑工具、不写文件** —— 但它仍需要一个 cwd 才能建会话，而绝不能
+ *     落在用户的真实工作空间上（那会让「不动文件」这句承诺从形状上就不成立）；
+ *   · 放在任务区（<工作空间>/临时任务/）下与「会话是按 cwd 分组的」这条既有口径一致，
+ *     不会在用户的文件树里凭空多出一个顶层目录；
+ *   · 用**同一个**目录而不是每轮一个：对比列自己不产出任何文件，逐轮建目录只会
+ *     在磁盘上留下一串空目录（会话文件本来就落在 sessions 目录，与 cwd 无关）。
+ */
+function compareCwd() {
+  return join(tempTasksDir(), "compare");
 }
 
 function pythonRuntimeOptions() {
@@ -2175,6 +2220,36 @@ const memberRunnerDeps = {
   // 成员审批带自己的会话 id（批次 ⑦）：requestApproval 据此反查团队归属。
   requestApproval: (request, memberSessionId) => requestApproval(request, memberSessionId)
 };
+
+/**
+ * 模型对比的编排单例（一问多答）。
+ *
+ * 与 subagentRunner / memberRunnerDeps 同一形态：进程级单例、无桶上下文。
+ * 缺的三样都是**故意**的：
+ *   · 不接 `getPermissions` / `requestApproval` —— 对比列不跑工具，
+ *     权限门那一层根本不装（见 compare.js 的「不跑工具」）；
+ *   · 不接 `createLedger`（在 compare.js 侧）—— 对比不进诊断页的台账；
+ *   · 额度另立在 compare.js 内（不占 SPAWN_BUDGET_PER_SESSION）。
+ */
+const compareRunner = createCompareRunner({
+  getCatalog,
+  resources: RESOURCES,
+  // 全局默认推理强度（现读偏好，理由同 subagentRunner 装配处）：对比列每次新建，
+  // 逐会话还原不适用，全局默认即口径。
+  getThinkingLevel: () => readPreferences().thinkingLevel,
+  getCwd: compareCwd,
+  isTempCwd,
+  /*
+   * 事件出口：专用 PUSH 通道，**不走 emitSessionEvent**（那是本功能最重要的一条
+   * 边界，三条理由与 file:line 写在 src/shared/ipc.js 的 PUSH.compareEvent 上方）。
+   */
+  reportError: (message) => eventLog.append({ kind: "compare_error", message })
+});
+
+/** 把一条列事件推给渲染层（通道形状见 PUSH.compareEvent 的契约注释）。 */
+function pushCompareEvent(event) {
+  post({ kind: "push", channel: PUSH.compareEvent, payload: event });
+}
 
 async function wakeMember(leaderSessionId, memberName, memberSessionId, text) {
   const handle = memberHandlesBySession.get(memberSessionId);
@@ -3968,6 +4043,32 @@ const handlers = {
   },
   [INVOKE.automationToggle]: async ([id]) => toggleAutomation(id),
   [INVOKE.automationRunNow]: async ([id]) => automationScheduler.runNow(id),
+  /* ── 模型对比（一问多答）──────────────────────────────────────── */
+  /**
+   * 开始一轮对比。**受理即返回**（各列的流式与终态走 PUSH.compareEvent）。
+   *
+   * 可预期的失败（模型个数越界 / 重复模型 / 问题为空）由编排层用返回值给出，
+   * 这里原样透传 —— 不 throw，因为那不是 bug 而是用户输入的问题。
+   */
+  [INVOKE.compareStart]: async ([models, prompt]) => {
+    const started = compareRunner.start({
+      models,
+      prompt,
+      onEvent: pushCompareEvent
+    });
+    if (!started.ok) return started;
+    // 后台自己跑：`done` 不 await（受理与执行分开的理由见 compare.js 的 start）。
+    // 它的 rejection 已经在编排层兜住了（回一个带 error 的摘要），
+    // 这里再挂一次只为「意外」留个痕，不让任何 rejection 变成 unhandledRejection。
+    void started.done.catch((error) => {
+      eventLog.append({
+        kind: "compare_error",
+        message: error instanceof Error ? error.message : String(error)
+      });
+    });
+    return { ok: true, runId: started.runId };
+  },
+  [INVOKE.compareAbort]: async ([runId]) => compareRunner.abort(runId),
   /* ── 会话 ─────────────────────────────────────────────────────── */
   [INVOKE.prompt]: async ([request]) => {
     const { text, whileStreaming, images } = request;
@@ -5172,6 +5273,8 @@ export {
 	calculateStreaks,
 	catalogPromise,
 	collectToolCalls,
+	compareCwd,
+	compareRunner,
 	composeSystemPrompt,
 	createAutomationRunExecutor,
 	createBranchedSessionFile,

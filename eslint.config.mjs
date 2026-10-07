@@ -51,6 +51,10 @@ export default [
 				// 在网络上长什么样（注入假的 fetch 等于把被测对象换掉了）。
 				fetch: "readonly",
 				Buffer: "readonly",
+				// 取消除按 runId 之外的另一条入口（AbortSignal）由单测直接验
+				// （tests/unit/compare-runner.test.mjs）。计时一律用
+				// node:timers/promises 的 delay，不放进全局。
+				AbortController: "readonly",
 			},
 		},
 		rules: {
