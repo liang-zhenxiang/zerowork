@@ -539,7 +539,13 @@ const INVOKE = {
    */
   compareStart: "compare:start",
   /** 取消一轮对比（入参 `[runId]`），同时收掉所有列。 */
-  compareAbort: "compare:abort"
+  compareAbort: "compare:abort",
+  /**
+   * 把对比里满意的一列留为一条普通会话（入参 `[runId, columnId]`，只对已答完
+   * 的列受理）。返回 `{ ok:true, path, title } | { ok:false, error }`。
+   * 也在上面的手工副本表里 —— 改通道名两处都要改。
+   */
+  compareKeep: "compare:keep"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */
@@ -733,6 +739,11 @@ const bridge = {
   compareStart: (models, prompt) => ipcRenderer.invoke(INVOKE.compareStart, models, prompt),
   /** 取消一轮对比（同时收掉所有列，含还在排队的）。 */
   compareAbort: (runId) => ipcRenderer.invoke(INVOKE.compareAbort, runId),
+  /**
+   * 把对比里满意的一列留为一条普通会话（只对已答完的列受理）。
+   * 成功返回 `{ ok:true, path, title }` —— path 供「去这条会话 →」resumeSession 用。
+   */
+  compareKeep: (runId, columnId) => ipcRenderer.invoke(INVOKE.compareKeep, runId, columnId),
   onSessionEvent: (listener) => subscribe(PUSH.sessionEvent, listener),
   onCompareEvent: (listener) => subscribe(PUSH.compareEvent, listener),
   onUpdateEvent: (listener) => subscribe(PUSH.updatesEvent, listener),

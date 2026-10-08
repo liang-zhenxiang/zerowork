@@ -3,7 +3,8 @@
  *
  * ## 本文件为什么分两半
  *
- * **① 纯逻辑**（本文件现在的内容）：列参数校验、列状态归约、用量提取、耗时口径。
+ * **① 纯逻辑**（本文件现在的内容）：列参数校验、列状态归约、用量提取、耗时口径，
+ * 以及「留为会话」的文件手术 / 标题 / 登记表（①b 节）。
  * 它不 import 任何宿主 / Electron / 文件系统相关模块，因此能被 vitest 直接 import
  * —— 而这些判断在界面上只表现为「数字不对」「两列串台」，恰是 GUI 断言最难说清、
  * 单测最容易钉死的一类。抽法与理由同 `library.js`（见该文件头部）。
@@ -44,6 +45,7 @@
 import { mkdirSync } from "node:fs";
 import { parseModelKey } from "./auth.js";
 import { SessionHost } from "./session-host.js";
+import { SESSION_TITLE_MAX } from "./session-state.js";
 
 /** 下限 2：只有一个模型就不叫「对比」了（那是普通对话）。 */
 const COMPARE_MIN_COLUMNS = 2;
@@ -292,6 +294,232 @@ function accumulateTiming(state, event, now) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+ * ①b 「留为会话」（INVOKE.compareKeep）的纯逻辑与登记表
+ *
+ * 对比屏的产品承诺是「不进侧栏、不进历史、不计入统计」，但用户会想把这轮
+ * 问答收下来继续聊 —— 「留为会话」就是那个显式出口：把某一列分叉成一条**普通
+ * 会话**。分叉与 IPC 的编排在 session-files.js（keepCompareColumn），本节放它
+ * 依赖的三块**可单测**的东西：文件手术（纯函数）、标题（纯函数）、登记表。
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 对比列的溯源标记（`SessionHost.markCompareRun` 写进会话文件的那个 custom 类型）。
+ * 手术要剔除的正是它；字面量与 session-host.js / session-files.js 的
+ * `COMPARE_CUSTOM_TYPE` 是同一个，三处一起改。
+ */
+const COMPARE_RUN_CUSTOM_TYPE = "compare_run";
+
+/**
+ * 「留为会话」的文件手术（**纯函数**：jsonl 文本行进、文本行出，不碰 fs）。
+ *
+ * 对一个从对比列分叉出来的会话文件做三件事，缺一不可：
+ *
+ * 1. **剔除 `compare_run` 条目**。pi 的分叉会连 custom 条目整链复制，而列表的
+ *    头部扫描（`readSessionHeadMarkers`）遇第一条 message 就停 —— 在文件末尾补
+ *    任何「已保留」标记都无效，必须从头部删掉条目本身，否则新会话被列表与统计
+ *    **双重过滤**，用户点完「留为会话」什么也看不到；
+ * 2. **重接 parentId**。标记是第一条 user 消息的父节点（`appendCustomEntry` 挂在
+ *    当时的 leaf 下并推进 leaf），只删行不重接会把 user 变孤儿 —— `getBranch`
+ *    走不到根，resume 时整条对话**静默丢失**。重接目标是沿 parentId 向上、跳过
+ *    所有被剔除的标记之后的**第一个存活祖先**（没有则为 null）；
+ * 3. **改写 header.cwd**。compare 目录不是合法工作空间：留在 header 里会让侧栏
+ *    凭空多出名为 `compare` 的空间组、resume 后接管默认工作空间（任务 prereq
+ *    事实 2）。header 缺 cwd 字段时补上。
+ *
+ * 幂等：没有标记且 header.cwd 已等于目标值时返回**同一个数组引用**（调用方可
+ * 据此跳过一次写盘）；坏行 / 空行原样保留在原位（pi 逐行解析，跳过它们）。
+ * 其他 custom 条目（session_info / artifacts_presented 等）一律不动。
+ *
+ * @param {string[]} lines 会话文件的 jsonl 文本行（不含末尾空行）
+ * @param {string} cwd 新会话的 cwd（用户当前工作空间）
+ * @returns {string[]} 手术后的行；无需改动时返回同一引用
+ */
+function rewriteKeptSessionLines(lines, cwd) {
+  if (!Array.isArray(lines)) return lines;
+  const parsed = new Array(lines.length);
+  /** compare_run 条目 id → 它自己的 parentId（null = 原本就是根）。 */
+  const markerParents = new Map();
+  let headerIndex = -1;
+  let headerCwdMatches = false;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      entry = undefined;
+    }
+    if (entry === null || typeof entry !== "object") {
+      parsed[index] = undefined;
+      continue;
+    }
+    parsed[index] = entry;
+    if (entry.type === "session" && headerIndex === -1) {
+      headerIndex = index;
+      headerCwdMatches = entry.cwd === cwd;
+      continue;
+    }
+    if (entry.type === "custom" && entry.customType === COMPARE_RUN_CUSTOM_TYPE && typeof entry.id === "string") {
+      markerParents.set(entry.id, typeof entry.parentId === "string" ? entry.parentId : null);
+    }
+  }
+  if (markerParents.size === 0 && (headerIndex === -1 || headerCwdMatches)) return lines;
+  /** 沿 parentId 向上找第一个**没被剔除**的祖先（一路都是标记则到 null）。 */
+  const survivingAncestor = (parentId) => {
+    let current = parentId;
+    while (current !== null && markerParents.has(current)) {
+      current = markerParents.get(current) ?? null;
+    }
+    return current;
+  };
+  const out = [];
+  for (let index = 0; index < lines.length; index++) {
+    const entry = parsed[index];
+    if (entry === undefined) {
+      out.push(lines[index]);
+      continue;
+    }
+    if (
+      entry.type === "custom" &&
+      entry.customType === COMPARE_RUN_CUSTOM_TYPE &&
+      typeof entry.id === "string" &&
+      markerParents.has(entry.id)
+    ) {
+      // 剔除标记行本身。
+      continue;
+    }
+    if (index === headerIndex && !headerCwdMatches) {
+      out.push(JSON.stringify({ ...entry, cwd }));
+      continue;
+    }
+    if (typeof entry.parentId === "string" && markerParents.has(entry.parentId)) {
+      out.push(JSON.stringify({ ...entry, parentId: survivingAncestor(entry.parentId) }));
+      continue;
+    }
+    out.push(lines[index]);
+  }
+  return out;
+}
+
+/** 模型展示名缺失时的兜底（与渲染层 describeModel 的回落同源：key 的 id 段）。 */
+function keptModelLabel(modelKey, modelName) {
+  if (typeof modelName === "string" && modelName.trim() !== "") return modelName.trim();
+  if (typeof modelKey !== "string" || modelKey === "") return "未知模型";
+  const slash = modelKey.indexOf("/");
+  return slash === -1 ? modelKey : modelKey.slice(slash + 1);
+}
+
+/**
+ * 留下会话的标题：`{模型展示名} · {问题前 N 字}`（N ≤ `SESSION_TITLE_MAX`）。
+ *
+ * 为什么不用 `branchTitleFor`：母会话（对比列）不在 `listSessions` 里，
+ * `buildBranchTitle` 会产出《（空会话） · 分支》。模型名是这一功能里**唯一的
+ * 区分维度** —— 多列都留下时，纯问题文本分不出谁是谁。
+ *
+ * @param {string} modelKey 该列的模型 key（`服务商/模型`）
+ * @param {string | undefined} modelName 目录解析出的展示名（解析失败给 undefined）
+ * @param {string} prompt 本轮对比的问题（start 时已 trim）
+ * @returns {string} 标题（问题为空时只有模型名）
+ */
+function keptSessionTitle(modelKey, modelName, prompt) {
+  const name = keptModelLabel(modelKey, modelName);
+  const question = typeof prompt === "string" ? prompt.replace(/\s+/g, " ").trim() : "";
+  if (question === "") return name;
+  const summary =
+    question.length > SESSION_TITLE_MAX ? `${question.slice(0, SESSION_TITLE_MAX)}…` : question;
+  return `${name} · ${summary}`;
+}
+
+/**
+ * 登记表上限：64 条 ≈ 最近 16 轮对比（每轮 ≤ 4 列）。条目只有三个短字符串，
+ * 上限防的是「进程活很久、对比开很多」时的无界增长；被淘汰的那几轮只是**不能
+ * 再留**（compareKeep 如实报「记录不在了」），不丢任何已留下的会话。
+ */
+const KEPT_COLUMN_REGISTRY_LIMIT = 64;
+
+/**
+ * 「留为会话」的登记表：`runId + columnId → { path, modelKey, prompt, keptPath }`。
+ *
+ * 为什么必须另立一份：runner 在 run 结束的 `finally` 里就 `runs.delete(runId)`
+ * （编排层不留历史），而「跑完几十秒后再点留为会话」是正常节奏 —— 没有这份账，
+ * compareKeep 拿不到那一列的会话文件路径，表现是「点了没反应」的静默失败。
+ *
+ * 生命周期与淘汰策略：
+ *   · **进程级**，不落盘 —— 重启即丢（重启前的对比轮次不能再留，如实报错）；
+ *   · 只登记**到达终态 done** 的列（failed / cancelled 列的文件可能还没落盘）；
+ *   · 超过 `limit` 按**插入序**淘汰最老的（FIFO）；
+ *   · `claim` 是**同步的检查并占位**：手术是 async，两次并发调用若都走「查了
+ *     再写」会各自分叉出一条孪生会话；先占位、失败 `release`、成功 `complete`。
+ *
+ * 导出工厂（而不是只有单例）是为了单测能注入隔离实例；`createCompareRunner`
+ * 的 `deps.keptRegistry` 同理。
+ *
+ * @param {number} [limit] 条目上限（缺省 `KEPT_COLUMN_REGISTRY_LIMIT`）
+ */
+function createKeptColumnRegistry(limit = KEPT_COLUMN_REGISTRY_LIMIT) {
+  const cap = typeof limit === "number" && Number.isFinite(limit) && limit >= 1 ? limit : KEPT_COLUMN_REGISTRY_LIMIT;
+  /** 键用 \0 分隔（runId / columnId 都不含它；同款写法见 sessionHeadMemo 的 memoKey）。 */
+  const keyOf = (runId, columnId) => `${runId}\0${columnId}`;
+  const entries = new Map();
+  return {
+    /** 登记（或覆写）一条可留的列。非字符串入参直接忽略（防御，不炸）。 */
+    register(runId, columnId, info) {
+      if (typeof runId !== "string" || runId === "" || typeof columnId !== "string" || columnId === "") return;
+      const key = keyOf(runId, columnId);
+      entries.set(key, {
+        runId,
+        columnId,
+        path: info?.path,
+        modelKey: info?.modelKey,
+        prompt: info?.prompt,
+        keptPath: undefined,
+        claimed: false,
+      });
+      while (entries.size > cap) {
+        const oldest = entries.keys().next().value;
+        // 刚插入的那条不许被自己挤掉（cap ≥ 1 由构造保证，这里只是双保险）
+        if (oldest === undefined || oldest === key) break;
+        entries.delete(oldest);
+      }
+    },
+    /** 按 runId+columnId 查（未命中 undefined）。 */
+    lookup(runId, columnId) {
+      if (typeof runId !== "string" || typeof columnId !== "string") return undefined;
+      return entries.get(keyOf(runId, columnId));
+    },
+    /**
+     * 检查并占位（同步、原子）。
+     * @returns {{ status: "ok", entry: object } | { status: "missing" } |
+     *           { status: "kept", keptPath: string } | { status: "busy" }}
+     */
+    claim(runId, columnId) {
+      const entry = this.lookup(runId, columnId);
+      if (entry === undefined) return { status: "missing" };
+      if (entry.keptPath !== undefined) return { status: "kept", keptPath: entry.keptPath };
+      if (entry.claimed) return { status: "busy" };
+      entry.claimed = true;
+      return { status: "ok", entry };
+    },
+    /** 手术成功：记下留下的会话路径（此后同一列再 claim 报 kept）。 */
+    complete(runId, columnId, keptPath) {
+      const entry = this.lookup(runId, columnId);
+      if (entry === undefined || typeof keptPath !== "string" || keptPath === "") return;
+      entry.keptPath = keptPath;
+      entry.claimed = false;
+    },
+    /** 手术失败：释放占位（按钮回弹重试必须还能走通；已 kept 的不受影响）。 */
+    release(runId, columnId) {
+      const entry = this.lookup(runId, columnId);
+      if (entry === undefined || entry.keptPath !== undefined) return;
+      entry.claimed = false;
+    },
+  };
+}
+
+/** 进程级单例：session-files.js 的 compareKeep handler 与编排层共用这一份账。 */
+const keptColumnRegistry = createKeptColumnRegistry();
+
+/* ══════════════════════════════════════════════════════════════════════════
  * ② 编排：起 N 个宿主并行发问（createCompareRunner）
  * ══════════════════════════════════════════════════════════════════════════ */
 
@@ -390,9 +618,12 @@ function summarizeColumn(state) {
  * @param {Function} [deps.createHost] 宿主工厂；缺省 `SessionHost.create`
  *        （**只为测试而留**：单测要覆盖「abort 收掉所有列」「一列失败不拖垮别列」
  *        「异常路径也 dispose」这些纯编排行为，起真宿主跑不了毫秒级单测）
+ * @param {object} [deps.keptRegistry] 「留为会话」登记表；缺省用模块级单例
+ *        （与 createHost 同一理由留给测试注入：隔离各用例的登记内容）
  */
 function createCompareRunner(deps) {
   const createHost = deps.createHost ?? SessionHost.create;
+  const keptRegistry = deps.keptRegistry ?? keptColumnRegistry;
 
   /**
    * 并发额度 = **同一时刻活着的对比列宿主数**。
@@ -493,6 +724,12 @@ function createCompareRunner(deps) {
     let host;
     let hostError;
     let aborted = false;
+    /**
+     * 本列是否以 done 收尾（「留为会话」的登记判据）。用局部旗标而不是回头读
+     * record.states：登记点在 finally 里，旗标在唯一一条成功路径上置位，
+     * 不依赖归约层的内部形态。
+     */
+    let settledDone = false;
     /** 最近一条 `assistant_done` 的 message（成功收尾时才转发，理由见函数头）。 */
     let lastDone;
     /**
@@ -625,6 +862,7 @@ function createCompareRunner(deps) {
         });
         return;
       }
+      settledDone = true;
       settle(record, columnId, { kind: "assistant_done", message: lastDone });
     } catch (error) {
       // 一列的**任何**意外都在这里收口：并行最容易被做错的就是「一列失败拖垮全部」。
@@ -634,7 +872,26 @@ function createCompareRunner(deps) {
       });
     } finally {
       record.abortHandlers.delete(abortColumn);
-      if (host !== undefined) host.dispose();
+      if (host !== undefined) {
+        /*
+         * 「留为会话」登记：只有以 done 收尾的列登记（failed / cancelled 列的
+         * 文件可能还没落盘 —— pi 的持久化守卫是「第一条 assistant 消息出现才写
+         * 全部条目」，登记它们的路径等于给 compareKeep 一个不存在的文件）。
+         * 必须在 dispose **之前**取 sessionFilePath（getter 走活会话对象）；
+         * run 结束 runs.delete(runId) 是既有语义，不改 —— 登记表就是为它另立的账。
+         */
+        if (settledDone) {
+          const path = host.sessionFilePath;
+          if (typeof path === "string" && path !== "") {
+            keptRegistry.register(record.runId, columnId, {
+              path,
+              modelKey: column.modelKey,
+              prompt,
+            });
+          }
+        }
+        host.dispose();
+      }
       if (admitted) release();
     }
   }
@@ -763,7 +1020,11 @@ export {
   accumulateTiming,
   createColumnStates,
   createCompareRunner,
+  createKeptColumnRegistry,
   extractUsage,
+  keptColumnRegistry,
+  keptSessionTitle,
   normalizeColumns,
   reduceColumn,
+  rewriteKeptSessionLines,
 };

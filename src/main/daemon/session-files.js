@@ -88,10 +88,16 @@ import {
 } from "./audit.js";
 import { EventLog } from "./event-log.js";
 /*
- * 模型对比的编排（一问多答）。顶层只做声明、跨模块的**使用**放进函数体 ——
- * 本文件是 daemon 的枢纽，顶层求值顺序敏感（spec/daemon：「初始化顺序」）。
+ * 模型对比的编排（一问多答）与「留为会话」的登记表 / 手术纯函数。顶层只做声明、
+ * 跨模块的**使用**放进函数体 —— 本文件是 daemon 的枢纽，顶层求值顺序敏感
+ * （spec/daemon：「初始化顺序」）。
  */
-import { createCompareRunner } from "./compare.js";
+import {
+	createCompareRunner,
+	keptColumnRegistry,
+	keptSessionTitle,
+	rewriteKeptSessionLines,
+} from "./compare.js";
 import {
 	loadAgents,
 	loadExperts,
@@ -3793,6 +3799,110 @@ async function forkSession(path, userIndex, options) {
   });
 }
 
+/**
+ * 「留为会话」的标题材料：从模型目录解析展示名，失败回落到 key 的 id 段。
+ *
+ * 展示名与渲染层 `describeModel` 同源（都用 `model.name` —— 用户在模型菜单里
+ * 选人时看到的那一个字段），于是侧栏标题与对比列头逐字一致。目录读不出来时
+ * 不抛：标题降一档（回落 id 段），不为一次「留为会话」把整条 IPC 打红。
+ */
+async function keptSessionTitleFor(modelKey, prompt) {
+  let modelName;
+  try {
+    const snapshot = await (await getCatalog()).snapshot(activeModelKey);
+    modelName = snapshot.models.find((item) => `${item.providerId}/${item.id}` === modelKey)?.name;
+  } catch {
+    // getCatalog 失败/目录异常：留 undefined，keptSessionTitle 自己回落。
+  }
+  return keptSessionTitle(modelKey, modelName, prompt);
+}
+
+/**
+ * 「留为会话」：把对比里满意的一列分叉成一条**普通会话**（spec: compare-keep-column）。
+ *
+ * 为什么不复用 `forkSession` / `materializeBranch`（三者各缺一块）：
+ *   · forkSession 以「按文件找桶」为前提，而对比宿主**不入桶**（compare.js 文件头
+ *     硬要求 6 —— 不入 `bucketsById` 是事件边界与防泄漏的根）；
+ *   · pi 的分叉会**连 `compare_run` 标记整链复制**，而标记是第一条 user 消息的
+ *     父节点 —— 不剔除则新会话被 `readSessionHeadMarkers` 与统计聚合**双重过滤**
+ *     （用户点完什么也看不到），只删行不重接 parentId 则链断、resume 静默丢对话
+ *     （手术在 `rewriteKeptSessionLines`，纯函数，单测钉死）；
+ *   · 标题不走 `branchTitleFor`：母会话不在 `listSessions` 里，会产出
+ *     《（空会话） · 分支》，模型名才是多列都留下时唯一的区分维度。
+ *
+ * cwd 改写成用户当前工作空间：compare 目录不是合法工作空间 —— 留在 header 里
+ * 会让侧栏凭空多出名为 `compare` 的空间组，resume 后还会接管 `defaultWorkspaceDir`
+ * （`defaultCwdAfterResume` 只对任务区归零，compare 目录不归零）。
+ *
+ * 预期内失败（记录不在了 / 已留过 / 正在留）一律用返回值表达，不 throw ——
+ * 口径同 compareStart / compareAbort。
+ *
+ * @param {string} runId 对比轮 id（渲染层从 compare state 里有）
+ * @param {string} columnId 列 id（`col-N`）
+ * @returns {Promise<{ ok: true, path: string, title: string } | { ok: false, error: string }>}
+ */
+async function keepCompareColumn(runId, columnId) {
+  if (typeof runId !== "string" || runId === "" || typeof columnId !== "string" || columnId === "") {
+    return { ok: false, error: "留为会话需要 runId 与 columnId" };
+  }
+  /*
+   * claim 是同步的检查并占位：后面的手术是 async，两次并发调用若都走「查了再写」
+   * 会各自分叉出一条（孪生会话）；先占位、失败 release、成功 complete。
+   */
+  const claim = keptColumnRegistry.claim(runId, columnId);
+  if (claim.status === "missing") {
+    return {
+      ok: false,
+      error: `这轮对比的记录已经不在了（${runId} 的 ${columnId}；登记表只留最近若干轮，重启也会清空）。请重新发起一轮对比再留。`,
+    };
+  }
+  if (claim.status === "kept") {
+    return { ok: false, error: `这一列已经留为会话了（${claim.keptPath}），同一列只留一次。` };
+  }
+  if (claim.status === "busy") {
+    return { ok: false, error: "这一列正在留为会话，请稍候。" };
+  }
+  const entry = claim.entry;
+  if (!existsSync(entry.path)) {
+    keptColumnRegistry.release(runId, columnId);
+    return { ok: false, error: `这一列的会话文件不在磁盘上（${entry.path}），无法留为会话。` };
+  }
+  try {
+    const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+    // 对比列是线性树：leaf 即最后一条 assistant 消息。宿主已 dispose，对文件
+    // 现开现读（pi 的 getLeafId；不用「文件最后一行」猜 —— 行序与链序是两回事）。
+    const leafId = SessionManager.open(entry.path, getSessionsDir()).getLeafId();
+    if (leafId === null || leafId === undefined) {
+      keptColumnRegistry.release(runId, columnId);
+      return { ok: false, error: "这一列没有可留的内容（会话文件里没有条目）。" };
+    }
+    const branchPath = await extractBranchFile(entry.path, leafId);
+    /*
+     * 手术：剔除 compare_run 并重接 parentId + 改写 header.cwd。整文件重写的
+     * 手法同 setSessionParentSession（tmp + rename）；纯函数在无事可做时返回
+     * 同一引用，这里的写盘也就自然跳过。
+     */
+    const cwd = currentBucket.cwd !== "" ? currentBucket.cwd : tempTasksDir();
+    const lines = readFileSync(branchPath, "utf8").split("\n");
+    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    const rewritten = rewriteKeptSessionLines(lines, cwd);
+    if (rewritten !== lines) writeSessionFileLines(branchPath, rewritten);
+    const title = await keptSessionTitleFor(entry.modelKey, entry.prompt);
+    await setSessionName(branchPath, title);
+    // 来源标注：留下的会话能追回它出自哪一列（对比列本身依旧即弃）。
+    ensureParentSession(branchPath, entry.path);
+    keptColumnRegistry.complete(runId, columnId, branchPath);
+    // 落盘在先、推送在后（「界面上看到 ⇒ 记录已写下」的顺序契约）。
+    pushTaskListChanged();
+    return { ok: true, path: branchPath, title };
+  } catch (error) {
+    keptColumnRegistry.release(runId, columnId);
+    const detail = error instanceof Error ? error.message : String(error);
+    eventLog.append({ kind: "ipc_error", channel: INVOKE.compareKeep, message: detail });
+    return { ok: false, error: `留为会话失败：${detail}。对比列本身未受影响，可以重试。` };
+  }
+}
+
 const runtimeInstalls = /* @__PURE__ */ new Map();
 
 const handlers = {
@@ -4069,6 +4179,13 @@ const handlers = {
     return { ok: true, runId: started.runId };
   },
   [INVOKE.compareAbort]: async ([runId]) => compareRunner.abort(runId),
+  /**
+   * 把对比里满意的一列留为一条普通会话（入参 `[runId, columnId]`）。只对**已答完**
+   * （done）的列受理 —— 登记表只记到达终态的列，failed / cancelled 列的文件可能
+   * 还没落盘。返回 `{ ok:true, path, title } | { ok:false, error }`，不 throw
+   * （口径同 compareStart）；成功后新会话经 PUSH.taskListChanged 进侧栏。
+   */
+  [INVOKE.compareKeep]: async ([runId, columnId]) => keepCompareColumn(runId, columnId),
   /* ── 会话 ─────────────────────────────────────────────────────── */
   [INVOKE.prompt]: async ([request]) => {
     const { text, whileStreaming, images } = request;
@@ -5319,6 +5436,8 @@ export {
 	isInternalSessionFile,
 	isLegacySession,
 	isTempCwd,
+	keepCompareColumn,
+	keptSessionTitleFor,
 	latestSandboxDiagnostics,
 	listLedgerSessionIds,
 	listSessions,
