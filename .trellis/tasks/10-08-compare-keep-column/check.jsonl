@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/10-08-compare-keep-column/prd.md", "reason": "逐条核对验收标准（功能/工程两组）"}
+{"file": ".trellis/tasks/10-08-compare-keep-column/research/prereq.md", "reason": "核对四条事实是否都被处理：剔除标记+重接 parentId、cwd 改写、自起标题、登记表"}
+{"file": ".trellis/spec/testing/index.md", "reason": "核查反向验证是否真执行、断言是否可证伪"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "验收者职责：独立复核 diff、不轻信报告"}
