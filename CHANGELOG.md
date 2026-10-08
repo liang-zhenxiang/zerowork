@@ -26,24 +26,19 @@
 每个用户可感知的改动都要记进来；修复类条目写清「此前错在哪、有什么后果」。
 -->
 
-### 安全
+## [0.5.0] - 2026-10-08
 
-- **依赖告警做了分级处置：开放告警 89 → 13**（[#17](https://github.com/liang-zhenxiang/zerowork/issues/17)）。
-  此前那 89 条混成一个「想办法全修掉」的清单，而其中**四分之三根本不该走升级这条路**。
-  现在按**归属与影响面**分四类写进 `SECURITY.md`，每类都有明确动作：
-  **随包原样分发的第三方模板**（`resources/**` 的 4 个 manifest，76 条）—— 不参与本仓库的
-  lint 与测试，改它们的 lockfile 只会让副本与上游不一致且无从验证，因此**登记在
-  `THIRD_PARTY_NOTICES.md`（新增第 1.5 节）并按「不适用」逐条带理由关闭**，而不是留着
-  让人每周重新判断一次；**本仓库的开发依赖**交给 Dependabot 例行升级
-  （本轮已跑非破坏性的 `npm audit fix`：全量 28 → 26）；**无 npm 修复版的 `xlsx`** 已随
-  vendored bundle 升级处置（#61/#138）；**审计工具看不见的 `vendor-*.js`** 已由升级 +
-  静态门禁 + 每周 OSV 巡检覆盖。
-  **仍然只有一条随包代码里的高危**：`brace-expansion@5.0.9`（经
-  `pi-coding-agent → minimatch@10`）。它**修不了**——修复版 5.x 只发 ESM，而本仓库另一批
-  CJS 使用者（eslint 链）需要 1.x/2.x，全局 override 会把构建打断；嵌套 override 实测
-  根本不生效（npm 报 overridden、装的还是旧版）。`package.json` 里**刻意不加**会伪装修好的
-  override，改为开 [Issue #140](https://github.com/liang-zhenxiang/zerowork/issues/140) 让上游
-  升级它的 minimatch —— 加一个假的 override 只会掩盖问题、让下一个人以为已修。
+本轮主题：**装完就能用 —— 把模型接入从一次配置题变成一次点击**。
+
+新用户装完之后卡在哪？卡在「我还没有模型」。这一版把这一步从「去设置里找到正确的那一页、
+手填 baseUrl 与 Key」变成**一键接入**：应用会探测本机上跑着的模型服务，探到就替你建好服务商、
+选好模型（#149）。顺手补上另一件事：同一个问题可以**并行问 2–4 个模型**，一屏并排看它们怎么答
+（#152/#153）—— 选型与比稿这类活儿不再需要来回切换。
+
+另一半是**把安全线收口**：随包分发的 vendored SheetJS 从 0.18.5 升到 0.20.3（修掉两个 high，
+并给它配上静态门禁 + 每周公告巡检）；Dependabot 的 89 条告警按归属分成四类逐条判定，
+开放告警降到 13 条（#17/#61/#138/#141）。「关于」页补上第三方组件与许可的注明，
+把「随包分发就要保留归属声明」这条义务真正落在应用内（#19/#139）。
 
 ### 新增
 
@@ -116,29 +111,6 @@
   一列失败另一列照常、第 5 个被明确拒绝、跑完对比后 `usageStats` 与会话列表一条没多、
   跑完对比后单模型对话仍可用）。
 
-### 安全
-
-- **随包的 SheetJS 从 0.18.5 升到 0.20.3 —— 修掉两个 high，并给这类代码配上了「有人盯」**
-  （[#61](https://github.com/liang-zhenxiang/zerowork/issues/61)）。此前错在哪：
-  `src/renderer/src/vendor-xlsx.js` 是**随安装包分发**的预打包产物，带着原型污染
-  （CVE-2023-30533）与 ReDoS（CVE-2024-22363）两个 high 公告，触发条件正是
-  **解析用户提供的表格文件**（预览 `.csv` / `.xls`）—— 而 **Dependabot 与 `npm audit`
-  都看不见它**：它不是 npm 依赖、原包已被移出生产依赖、Dependabot 里还显式 ignore 了
-  `xlsx`，升级 `package.json` 也不改变随包的字节。两个公告的修复版本只发在
-  SheetJS 自有渠道（npm 上 0.18.5 就是最后一版），所以这次取官方
-  `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`（压缩包 sha256 与入库文件
-  sha256 都记在 `SECURITY.md` 里可复核），**原样复制 `package/xlsx.mjs`** ——
-  顺带修掉它此前连上游版权头一并被删掉的问题（Apache-2.0 第 4 条要求保留归属声明）。
-  同时补上两半机制：静态门禁 `check-vendored-deps.mjs` 继续守**清单准不准**，
-  新增 `check-vendored-advisories.mjs` + 每周一次的 `vendored-advisories.yml` 守
-  **清单还新不新**（拿「库 + 版本」查 OSV.dev，有未豁免的公告就开/更新 Issue）——
-  Dependabot 看不到这类文件，这件事必须有自己的机制。豁免带理由**且会被反过来校验**：
-  SheetJS 那两条在 OSV 里没有 `fixed` 事件（npm 上从来没有修复版，所以修好了也会被报
-  「受影响」），豁免条目写明上游修复版本，而脚本会检查「手上的版本 ≥ 上游修复版本」——
-  低于它照样失败。回归测试 5 条（版本不低于修复版本、导出面、csv/xls → xlsx 完整往返）
-  与 1 条 GUI 用例（真开一个 `.csv`，断言转换后的工作簿被渲染出来）。
-  反向验证：把 bundle 换回 0.18.5 → 三处守卫同时变红（清单版本 / 公告巡检 / 单测）。
-
 ### 修复
 
 - **「本地服务不用填 Key、留空即可」是一句会把人卡住的错误指引 —— 照做会得到一个选不中的模型**。
@@ -162,6 +134,48 @@
   没给就**原样继承**旧条目（键不在输入里 = 「不改」）；渲染层不接触该字段，
   继承全在 daemon 侧完成。回归用例把这条锁成 round-trip：
   `save(带 apiKey) → read → save → apiKey 仍在`。
+
+### 安全
+
+- **依赖告警做了分级处置：开放告警 89 → 13**（[#17](https://github.com/liang-zhenxiang/zerowork/issues/17)）。
+  此前那 89 条混成一个「想办法全修掉」的清单，而其中**四分之三根本不该走升级这条路**。
+  现在按**归属与影响面**分四类写进 `SECURITY.md`，每类都有明确动作：
+  **随包原样分发的第三方模板**（`resources/**` 的 4 个 manifest，76 条）—— 不参与本仓库的
+  lint 与测试，改它们的 lockfile 只会让副本与上游不一致且无从验证，因此**登记在
+  `THIRD_PARTY_NOTICES.md`（新增第 1.5 节）并按「不适用」逐条带理由关闭**，而不是留着
+  让人每周重新判断一次；**本仓库的开发依赖**交给 Dependabot 例行升级
+  （本轮已跑非破坏性的 `npm audit fix`：全量 28 → 26）；**无 npm 修复版的 `xlsx`** 已随
+  vendored bundle 升级处置（#61/#138）；**审计工具看不见的 `vendor-*.js`** 已由升级 +
+  静态门禁 + 每周 OSV 巡检覆盖。
+  **仍然只有一条随包代码里的高危**：`brace-expansion@5.0.9`（经
+  `pi-coding-agent → minimatch@10`）。它**修不了**——修复版 5.x 只发 ESM，而本仓库另一批
+  CJS 使用者（eslint 链）需要 1.x/2.x，全局 override 会把构建打断；嵌套 override 实测
+  根本不生效（npm 报 overridden、装的还是旧版）。`package.json` 里**刻意不加**会伪装修好的
+  override，改为开 [Issue #140](https://github.com/liang-zhenxiang/zerowork/issues/140) 让上游
+  升级它的 minimatch —— 加一个假的 override 只会掩盖问题、让下一个人以为已修。
+
+- **随包的 SheetJS 从 0.18.5 升到 0.20.3 —— 修掉两个 high，并给这类代码配上了「有人盯」**
+  （[#61](https://github.com/liang-zhenxiang/zerowork/issues/61)）。此前错在哪：
+  `src/renderer/src/vendor-xlsx.js` 是**随安装包分发**的预打包产物，带着原型污染
+  （CVE-2023-30533）与 ReDoS（CVE-2024-22363）两个 high 公告，触发条件正是
+  **解析用户提供的表格文件**（预览 `.csv` / `.xls`）—— 而 **Dependabot 与 `npm audit`
+  都看不见它**：它不是 npm 依赖、原包已被移出生产依赖、Dependabot 里还显式 ignore 了
+  `xlsx`，升级 `package.json` 也不改变随包的字节。两个公告的修复版本只发在
+  SheetJS 自有渠道（npm 上 0.18.5 就是最后一版），所以这次取官方
+  `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`（压缩包 sha256 与入库文件
+  sha256 都记在 `SECURITY.md` 里可复核），**原样复制 `package/xlsx.mjs`** ——
+  顺带修掉它此前连上游版权头一并被删掉的问题（Apache-2.0 第 4 条要求保留归属声明）。
+  同时补上两半机制：静态门禁 `check-vendored-deps.mjs` 继续守**清单准不准**，
+  新增 `check-vendored-advisories.mjs` + 每周一次的 `vendored-advisories.yml` 守
+  **清单还新不新**（拿「库 + 版本」查 OSV.dev，有未豁免的公告就开/更新 Issue）——
+  Dependabot 看不到这类文件，这件事必须有自己的机制。豁免带理由**且会被反过来校验**：
+  SheetJS 那两条在 OSV 里没有 `fixed` 事件（npm 上从来没有修复版，所以修好了也会被报
+  「受影响」），豁免条目写明上游修复版本，而脚本会检查「手上的版本 ≥ 上游修复版本」——
+  低于它照样失败。回归测试 5 条（版本不低于修复版本、导出面、csv/xls → xlsx 完整往返）
+  与 1 条 GUI 用例（真开一个 `.csv`，断言转换后的工作簿被渲染出来）。
+  反向验证：把 bundle 换回 0.18.5 → 三处守卫同时变红（清单版本 / 公告巡检 / 单测）。
+
+---
 
 ## [0.4.0] - 2026-10-04
 
