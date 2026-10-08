@@ -132,7 +132,7 @@
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
-    "eslint": "^9.0.0",
+    "eslint": "^10.11.0",
     "espree": "10.4.0",
     "katex": "^0.19.0",
     "monaco-editor": "^0.57.0",
