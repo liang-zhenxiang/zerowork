@@ -594,7 +594,27 @@ const INVOKE = {
    * 取消一轮对比（入参 `[runId]`），**同时收掉所有列**（含还在排队等空位的）。
    * runId 不认识时如实报 `{ ok:false, error }`（多半是已经跑完了）。
    */
-  compareAbort: "compare:abort"
+  compareAbort: "compare:abort",
+  /**
+   * 把对比里满意的一列「留为会话」（入参 `[runId, columnId]`，只对**已答完**
+   * （done）的列受理）。返回 `{ ok:true, path, title } | { ok:false, error }` ——
+   * 与本组其它通道同口径，可预期的失败（记录不在了 / 已留过 / 正在留）用返回值
+   * 表达，不 throw。
+   *
+   * daemon 做四件事（顺序与理由见任务 prereq 的「推荐实现路径」）：从该列的
+   * 会话文件分叉到 leaf → **剔除 `compare_run` 标记并重接 parentId**（标记会随
+   * pi 的分叉整链复制，不剔除则新会话被列表与统计双重过滤；它还是第一条 user
+   * 消息的父节点，只删不重接会令链断、resume 时静默丢对话）→ 改写 header.cwd
+   * 为用户当前工作空间（compare 目录不是合法工作空间）→ 起标题
+   * `{模型名} · {问题摘要}` 并记 parentSession。成功后新会话经既有的
+   * PUSH.taskListChanged 进侧栏（对比列本身依旧即弃，「不进历史」的承诺不变）。
+   *
+   * **为什么不借道 PUSH.compareEvent**：那是 daemon→renderer 的**列事件流**，
+   * 方向反了 —— 「留为会话」是 renderer 发起的请求-响应动作，需要同步拿到
+   * path / title（「去这条会话 →」要拿 path 去 resumeSession）；往列事件通道里
+   * 加 keep 结果还会触发 kind 清单契约测试的两端同步要求，无谓扩大面。
+   */
+  compareKeep: "compare:keep"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */

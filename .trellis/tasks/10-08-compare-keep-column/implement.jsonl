@@ -1,0 +1,7 @@
+{"file": ".trellis/tasks/10-08-compare-keep-column/prd.md", "reason": "需求、四条已核实事实与验收标准"}
+{"file": ".trellis/tasks/10-08-compare-keep-column/research/prereq.md", "reason": "代码事实全表：sessionFilePath getter、compare_run 会随分叉复制且是 user 的父节点、branchTitleFor 会给空标题、runner run 完即丢、cwd 污染两处"}
+{"file": ".trellis/tasks/10-08-compare-keep-column/research/design-spec.md", "reason": "留为会话的视觉与交互规范（槽位/状态表/文案终稿）"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层规范：初始化顺序、IPC 登记、落盘先于推送"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：token 档位、禁止重排大文件"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试规范：反向验证（含注入要打在生效判据上）、e2e 注入先 build、断言数据要真的有差别"}
+{"file": "docs/DESIGN.md", "reason": "§3.9 盒子预算、§4 三态、§6 禁止清单"}
