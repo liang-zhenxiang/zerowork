@@ -31944,6 +31944,9 @@ function AssistantActions({
   modelId,
   showExecutePlan,
   onExecutePlan,
+  // 「留为会话」一类**列级**动作挂进这一行的领衔槽位（对比屏专用；文字动作在前、
+  // 图标动作在后的次序与「执行计划」同型）。由调用方传节点，聊天页不传，行为不变。
+  keepSlot,
   showBranch,
   onBranch,
   showRetry,
@@ -31953,11 +31956,12 @@ function AssistantActions({
   const { copied, copy } = useCopyWithTick();
   const copyable = text2.trim() !== "";
   const items = metrics === void 0 ? [] : metricItems(metrics.entries, metrics.turn);
-  if (!showExecutePlan && !copyable && !showBranch && !showRetry && items.length === 0 && modelId === void 0) {
+  if (!showExecutePlan && keepSlot == null && !copyable && !showBranch && !showRetry && items.length === 0 && modelId === void 0) {
     return null;
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "entry-toolbar entry-toolbar-left", children: [
     showExecutePlan && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn bar-btn-text", onClick: onExecutePlan, children: "执行计划" }),
+    keepSlot,
     copyable && /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
@@ -68528,8 +68532,11 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
  *
  * 五条来自 research/design-spec.md 的硬约束（都在下面逐条兑现）：
  *   · **每列只渲染助手正文**，不渲染 `TurnHeader`（否则 4 列各顶一个 ZeroWork 头像）；
- *   · 操作条**不传** `onRestart` / `onBranch` —— 本屏的产品承诺是「不进侧栏、不进历史、
- *     不计入统计」，一个「分支出新会话」的按钮会把这条承诺当场作废；
+ *   · 操作条**不传** `onRestart` / `onBranch` ——「重试 / 分支出新会话」是母会话语境的
+ *     动作，对比列没有那个语境。收获出口是**「留为会话」**（AssistantActions 的
+ *     keepSlot 槽位，只在完成态渲染）：它把这一列分叉成一条**新的普通会话**
+ *     （用户显式选择产生的，进侧栏、计入统计、可继续对话），「不进侧栏、不进历史、
+ *     不计入统计」的承诺对对比列**本身**依旧成立；
  *   · 用量与耗时**提到列头**（`.entry-toolbar` 里那套读数落在各自 y 位置上，四列就不可比）；
  *   · 整轮没能启动（daemon 拒绝）走既有 toast，**不在通道区摆错误框** ——
  *     那时还没有「哪一列」可言；
@@ -68541,6 +68548,10 @@ function CompareView({
   onClose,
   onOpenSettings,
   onError,
+  // 「去这条会话 →」的跳转键走它（App 传的就是 resumeTask，与资料库「定位到来源
+  // 会话」同一条既有路径：内部 setView("chat")，返回 promise）。跳转即离开本屏，
+  // 状态重置是既有口径 —— path 在跳转前已落在列状态里，不依赖会失效的闭包。
+  onResumeSession,
   initialModelId
 }) {
   const [state, dispatch] = reactExports.useReducer(
@@ -68662,6 +68673,32 @@ function CompareView({
     setStopConfirm(result.state);
     if (result.confirmed) abortRun();
   };
+  /*
+   * 「留为会话」：把这一列的问答分叉成一条**普通会话**（spec: compare-keep-column）。
+   * 成功**不弹 toast**：就地持续态（「已留为会话」+「去这条会话 →」）强于瞬态提示 ——
+   * 四列可各自留，toast 会叠；用户滚动比较回来还要认得出哪列留过（design-spec D4/§2.3）。
+   * 失败弹 error toast 并把按钮放回可点（天然的重试入口）；第一拍就 dispatch
+   * `keep_begin` 进 saving，防双击不靠等 IPC 回来。
+   */
+  const keepColumn = (columnId) => {
+    const runId = state.runId;
+    if (runId === void 0) return;
+    dispatch({ type: "keep_begin", runId, columnId });
+    window.kami.compareKeep(runId, columnId).then(
+      (result) => {
+        if (result?.ok === true) {
+          dispatch({ type: "keep_done", runId, columnId, path: result.path, title: result.title });
+          return;
+        }
+        dispatch({ type: "keep_fail", runId, columnId });
+        onError(`没能留为会话：${result?.error ?? "daemon 没有给出原因"}`);
+      },
+      (error) => {
+        dispatch({ type: "keep_fail", runId, columnId });
+        onError(`没能留为会话：${error instanceof Error ? error.message : String(error)}`);
+      }
+    );
+  };
   const handleKeyDown = (event) => {
     if (event.key === "Escape") {
       // 与 handleComposerKeyDown 逐条一致：Esc 是「收掉这一轮」的逃生门。
@@ -68728,12 +68765,51 @@ function CompareView({
       key
     );
   }) });
+  /*
+   * 「留为会话」的按钮列（spec: compare-keep-column 的 design-spec §2.1——槽位在列内
+   * 常驻操作行的**领衔位**，只在 `status === "done"` 渲染；失败 / 取消列没有可留的
+   * 产出，排队 / 流式中的答案还没读完，都不给入口）。`data-keep` 是给 e2e 的状态钩子
+   * （design-spec §2.9：测试钩子用 data-* 属性，不新造类）。已留是**持续态**而不是
+   * 闪现：用户要在四列间来回滚动比较，回来时必须还认得出哪列留过 —— 确认与列同寿命。
+   */
+  const renderKeepSlot = (column) => {
+    if (column.status !== "done") return void 0;
+    if (column.keepPhase === "kept") {
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn saved", "data-keep": "kept", disabled: true, children: "已留为会话" }),
+        // 跳转键是次要动作，走安静的文字档；「去……」类入口的箭头后缀是既有写法。
+        typeof column.keptPath === "string" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "bar-btn bar-btn-text",
+            title: "打开留下的这条会话",
+            onClick: () => onResumeSession(column.keptPath),
+            children: "去这条会话 →"
+          }
+        )
+      ] });
+    }
+    const saving = column.keepPhase === "saving";
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: "mini-btn",
+        "data-keep": saving ? "saving" : "idle",
+        disabled: saving,
+        title: saving ? "正在留为会话…" : "把这一轮问答留成一条独立会话，出现在侧栏、可继续对话",
+        onClick: () => keepColumn(column.columnId),
+        children: saving ? "正在留为会话…" : "留为会话"
+      }
+    );
+  };
   const renderAnswerEntry = (column, entry) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `entry ${entry.role}`, "data-entry-id": entry.id, children: [
     column.thinking !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingBlock, { text: column.thinking, streaming: column.status === "running" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Markdown, { text: entry.text }),
-    // 操作条只留「复制」（`.entry` 自带的 hover 浮现，opacity + pointer-events，键盘也够得着）。
+    // 操作条：完成态多一枚「留为会话」（keepSlot，领衔槽位），其余只留「复制」。
     // 不传 metrics：读数已搬到列头（四列要落在同一条水平线上才可比）。
-    /* @__PURE__ */ jsxRuntimeExports.jsx(AssistantActions, { text: entry.text })
+    /* @__PURE__ */ jsxRuntimeExports.jsx(AssistantActions, { text: entry.text, keepSlot: renderKeepSlot(column) })
   ] }, entry.id);
   const renderAnswer = (column) => {
     const entries = columnEntries(column);
@@ -68771,7 +68847,7 @@ function CompareView({
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", title: "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "模型对比" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-hint", children: "只问答：不跑工具、不动文件、不进历史、不计入统计" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-hint", children: "只问答：不跑工具、不动文件、不进历史、不计入统计；满意的一列可「留为会话」" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-compare": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-grid", "data-cols": String(state.columns.length), children: [
@@ -70137,6 +70213,8 @@ function App() {
         // 对比屏的模型菜单要能去设置（「还没有可用模型」那条出路与 ModelMenu 同一处理）。
         onOpenSettings: () => openSettings(),
         onError: showToast,
+        // 「去这条会话 →」的跳转（资料库「定位到来源会话」同一条 resumeTask 路径）。
+        onResumeSession: resumeTask,
         // 从输入卡模型菜单进来时把「当前会话的模型」预选成第一个参赛者：
         // 那正是用户当时在看的那个模型，空着让他重选一遍没有道理。
         initialModelId: conversation.state.modelId

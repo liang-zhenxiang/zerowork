@@ -106,7 +106,8 @@
     "test:gui:palette-memory": "node tests/e2e/palette-memory.mjs",
     "test:gui:offline-covers": "node tests/e2e/offline-covers.mjs",
     "test:gui:local-model-discovery": "node tests/e2e/local-model-discovery.mjs",
-    "test:gui:compare": "node tests/e2e/multi-model-compare.mjs"
+    "test:gui:compare": "node tests/e2e/multi-model-compare.mjs && npm run test:gui:compare-keep",
+    "test:gui:compare-keep": "node tests/e2e/compare-keep.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "0.87.1",

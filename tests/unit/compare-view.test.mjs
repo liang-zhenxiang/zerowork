@@ -277,6 +277,98 @@ describe("列间隔离与跨轮隔离", () => {
 	});
 });
 
+describe("「留为会话」的保存子状态（本地 action）", () => {
+	/*
+	 * 这三个 action 是**本地 UI 态**，不是 PUSH.compareEvent 的 kind —— 所以
+	 * COMPARE_HANDLED_KINDS（上面的契约测试）不涉及它们。要钉的语义有四条：
+	 *   1. 三拍转移 idle → saving → kept（失败回 idle）；
+	 *   2. kept 是终态：迟到的重复点击不许把它退回去；
+	 *   3. runId 守卫：新一轮开始后，旧一轮迟到的 keep 回包落不到同名列上；
+	 *   4. 新一轮（begin）把保存子状态连同列阵一起归零 —— 与「离屏即重置」同口径。
+	 */
+
+	/** 跑到「第一列 done、整轮收尾」的现场（「留为会话」按钮只在完成态渲染）。 */
+	function finishedRun() {
+		let state = started();
+		state = feed(state, { runId: "compare-1", columnId: "col-0", kind: "column_started" }, 10);
+		state = feed(state, { runId: "compare-1", columnId: "col-1", kind: "column_started" }, 10);
+		state = feed(state, { runId: "compare-1", columnId: "col-0", kind: "assistant_done", message: { text: "第一列的答案" } }, 30);
+		return feed(state, { runId: "compare-1", kind: "run_finished", outcome: "completed", elapsedMs: 5000 }, 5000);
+	}
+
+	it("三拍：idle → saving（第一拍就禁用）→ kept（path 与 title 落进列状态）", () => {
+		let state = finishedRun();
+		expect(columnOf(state, "col-0").keepPhase).toBe("idle");
+		state = compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-0" });
+		expect(columnOf(state, "col-0").keepPhase).toBe("saving");
+		state = compareReducer(state, {
+			type: "keep_done",
+			runId: "compare-1",
+			columnId: "col-0",
+			path: "/sessions/kept.jsonl",
+			title: "Mock Alpha · 问题摘要",
+		});
+		const kept = columnOf(state, "col-0");
+		expect(kept.keepPhase).toBe("kept");
+		expect(kept.keptPath).toBe("/sessions/kept.jsonl");
+		expect(kept.keptTitle).toBe("Mock Alpha · 问题摘要");
+		// 另一列不受影响（列间隔离对本地 action 同样成立）。
+		expect(columnOf(state, "col-1").keepPhase).toBe("idle");
+	});
+
+	it("失败回 idle：按钮可点即天然的重试入口；对非 saving 列的 fail 不动它", () => {
+		let state = finishedRun();
+		const before = compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-0" });
+		const released = compareReducer(before, { type: "keep_fail", runId: "compare-1", columnId: "col-0" });
+		expect(columnOf(released, "col-0").keepPhase).toBe("idle");
+		// idle 上再来一条 fail：无事可做，返回同一引用。
+		expect(compareReducer(released, { type: "keep_fail", runId: "compare-1", columnId: "col-0" })).toBe(released);
+	});
+
+	it("kept 是终态：迟到的重复 begin 不许把它退回去", () => {
+		let state = finishedRun();
+		state = compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-0" });
+		state = compareReducer(state, { type: "keep_done", runId: "compare-1", columnId: "col-0", path: "/sessions/kept.jsonl" });
+		const after = compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-0" });
+		expect(after).toBe(state);
+		expect(columnOf(after, "col-0").keepPhase).toBe("kept");
+	});
+
+	it("runId 守卫：新一轮开始后，旧一轮迟到的 keep 回包落不到同名列上", () => {
+		let state = finishedRun();
+		state = compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-0" });
+		// 用户在保存中又发起了新一轮（begin 重建列阵、runId 先置空）。
+		const nextRun = compareReducer(state, { type: "begin", models: [A, B] });
+		const accepted = compareReducer(nextRun, { type: "accept", runId: "compare-2" });
+		// 旧一轮的回包到了 —— 不许把新一轮的 col-0 标成已留。
+		const late = compareReducer(accepted, {
+			type: "keep_done",
+			runId: "compare-1",
+			columnId: "col-0",
+			path: "/sessions/kept.jsonl",
+		});
+		expect(late).toBe(accepted);
+		expect(columnOf(late, "col-0").keepPhase).toBe("idle");
+		expect(columnOf(late, "col-0").keptPath).toBeUndefined();
+	});
+
+	it("keep_done 的 path 畸形时 keptPath 缺席（phase 仍到 kept，界面就不渲染跳转键）", () => {
+		let state = finishedRun();
+		state = compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-0" });
+		state = compareReducer(state, { type: "keep_done", runId: "compare-1", columnId: "col-0", path: 42 });
+		const kept = columnOf(state, "col-0");
+		expect(kept.keepPhase).toBe("kept");
+		expect(kept.keptPath).toBeUndefined();
+	});
+
+	it("columnId 不存在 / 畸形：原样返回同一引用", () => {
+		const state = finishedRun();
+		expect(compareReducer(state, { type: "keep_begin", runId: "compare-1", columnId: "col-9" })).toBe(state);
+		expect(compareReducer(state, { type: "keep_done", runId: "compare-1", columnId: "" })).toBe(state);
+		expect(compareReducer(state, { type: "keep_fail", runId: "compare-1" })).toBe(state);
+	});
+});
+
 describe("名单动作是相对动作（连点不丢第一个）", () => {
 	/*
 	 * 这一组守的是一个**真实修过的缺陷**：动作原是 `{type:"pick", models:[…]}`

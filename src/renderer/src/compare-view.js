@@ -97,6 +97,13 @@ function emptyColumn(modelKey, index) {
     startedAt: undefined,
     endedAt: undefined,
     elapsedMs: undefined,
+    // 「留为会话」的保存子状态（**本地 UI 态**，不来自任何推送事件）：
+    // idle（没在留）| saving（已点击、IPC 未回，第一拍就禁用防双击）| kept（已留成，
+    // keptPath/keptTitle 是 daemon 回的新会话路径与标题）。失败回 idle —— 按钮可点
+    // 即天然的重试入口。`begin`（新一轮）重建列阵时随之归零，与「离屏即重置」同口径。
+    keepPhase: "idle",
+    keptPath: undefined,
+    keptTitle: undefined,
   };
 }
 
@@ -259,6 +266,33 @@ export function accumulateTiming(state, event, now) {
 }
 
 /**
+ * 「留为会话」三拍（begin → done / fail）对一列的子状态转移。
+ *
+ * 这三个是**本地 action**：`COMPARE_HANDLED_KINDS` 是 `PUSH.compareEvent` 的推送 kind
+ * 契约清单（单测拿它与 `src/shared/ipc.js` 的注释比对），本地 action 不属于它，
+ * 加在这里不会（也不该）触发那份契约测试。
+ *
+ * runId 的守卫在 `compareReducer` 里（见下），本函数只管一列内的转移；
+ * 不认识的形态（对非 idle 列 begin、对非 saving 列 fail）原样返回同一引用。
+ */
+function reduceKeep(column, action) {
+  if (action.type === "keep_begin") {
+    // 只认 idle：已留（kept）是终态，迟到/重复的点击不许把它退回去。
+    return column.keepPhase === "idle" ? { ...column, keepPhase: "saving" } : column;
+  }
+  if (action.type === "keep_done") {
+    return {
+      ...column,
+      keepPhase: "kept",
+      keptPath: typeof action.path === "string" && action.path !== "" ? action.path : undefined,
+      keptTitle: typeof action.title === "string" ? action.title : undefined,
+    };
+  }
+  // keep_fail：saving → idle（按钮回弹）。kept 不受影响（那条会话已经落在盘上了）。
+  return column.keepPhase === "saving" ? { ...column, keepPhase: "idle" } : column;
+}
+
+/**
  * 整轮与各列的状态归约（`useReducer` 的 reducer 本体）。
  *
  * 动作：
@@ -267,6 +301,9 @@ export function accumulateTiming(state, event, now) {
  *   `{ type: "accept", runId }`       拿到 daemon 受理回来的 runId
  *   `{ type: "failed" }`             本轮没起得来（daemon 拒绝），回到 idle
  *   `{ type: "event", event, now }`  一条 `PUSH.compareEvent`
+ *   `{ type: "keep_begin", runId, columnId }`                「留为会话」已点击（列转 saving）
+ *   `{ type: "keep_done", runId, columnId, path, title }`    留成了一条新会话（列转 kept）
+ *   `{ type: "keep_fail", runId, columnId }`                 没留成（列回 idle，toast 由组件弹）
  *
  * ## 为什么名单动作是**相对**的（`toggle key`），不是绝对列表（`pick models`）
  *
@@ -337,6 +374,27 @@ export function compareReducer(state, action) {
     case "failed":
       // 整轮没起得来：回到「已选好名单、还没发问」，界面立刻可再次发问。
       return initialCompareState(state.picked);
+    case "keep_begin":
+    case "keep_done":
+    case "keep_fail": {
+      /*
+       * runId 必须**逐字匹配本轮**：保存中用户又发起了新一轮时，`begin` 已把 runId
+       * 换掉（未 accept 时是 undefined）、列阵也重建过 —— 迟到的 keep 回包若不带
+       * 这道守卫，会落在新一轮**同名列**上（col-0 又是 col-0），把一条没留过的列
+       * 标成已留。这是「终态不被迟到事件改动」那条口径在本地 action 上的同款。
+       */
+      if (typeof action.runId !== "string" || action.runId !== state.runId) return state;
+      if (typeof action.columnId !== "string" || action.columnId === "") return state;
+      let touched = false;
+      const columns = state.columns.map((column) => {
+        if (column.columnId !== action.columnId) return column;
+        const next = reduceKeep(column, action);
+        if (next === column) return column;
+        touched = true;
+        return next;
+      });
+      return touched ? { ...state, columns } : state;
+    }
     case "event": {
       const event = action.event;
       if (event === undefined || event === null) return state;
