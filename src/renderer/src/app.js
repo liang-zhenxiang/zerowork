@@ -29948,6 +29948,10 @@ import {
 	projectSessionRows,
 	sortProjectCards
 } from "./projects-core.js";
+// 工作轨迹（回合内动作轨道）的聚合是纯逻辑：分类表 / 相邻合并 / 状态收敛 /
+// tooltip 生成都在 trace-core.js，单测直接 import 它 —— 轨迹错不错在界面上
+// 只表现为「段数对不对」，那是 GUI 断言最说不清的一类。
+import { buildTurnTrace, TRACE_KIND_ICON_TOOL } from "./trace-core.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -30786,6 +30790,9 @@ function buildTurnViews(entries, options) {
       // 挂点 = 本轮末条 assistant，且本轮已结束（流式轮见字段注释）。
       actionsAnchorId: state === "streaming" ? void 0 : content2.findLast((e) => e.role === "assistant")?.id,
       plan: buildFoldPlan(content2, state),
+      // 工作轨迹与折叠计划看同一份 content2：聚合在 trace-core.js（纯函数），
+      // 这里只在建视图时算一次（turnViews 本身就在 useMemo 里，流式重算免费搭车）。
+      trace: buildTurnTrace(content2),
       cancelled: user !== void 0 && cancelledTurns.includes(user.id),
       preview: {
         prompt: clipPreview(user?.text ?? "", PREVIEW_PROMPT_CHARS),
@@ -32160,6 +32167,46 @@ function blockedCommandOf(card) {
   const command = card.summaryTitle ?? card.summary;
   return command === "" ? void 0 : command;
 }
+/**
+ * 工作轨迹条：把一个回合的动作流画成一条水平轨道（聚合逻辑在 trace-core.js）。
+ *
+ * 三个刻意决定：
+ *  · **位置**在 TurnHeader 之后、正文之前，且**不受回合折叠影响**——把「过程」
+ *    折叠起来后它就是这轮工作唯一的全貌，这正是它存在的理由；
+ *  · 段是按钮（键盘可达），点击走 onFocusEntry 定位并展开对应工具行；
+ *  · 状态色只给 bad/running（DESIGN.md §2.4：分类不是状态，不许借状态色），
+ *    bad 段同时有 IconAlert 形态 + aria 文案——不看颜色也读得出（§7.6）。
+ */
+function TurnTraceBar({ trace, onFocusEntry }) {
+  if (trace === void 0 || trace.empty) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "turn-trace", "aria-label": "本轮工作轨迹", children: trace.segments.map((seg, index2) => {
+    const bad = seg.status === "bad";
+    const running = seg.status === "running";
+    const Icon = toolIconOf(TRACE_KIND_ICON_TOOL[seg.kind] ?? "");
+    const ariaLabel = `${seg.label}${seg.count > 1 ? `，${seg.count} 次调用` : ""}${bad ? "，有失败或被拦截" : running ? "，进行中" : ""}`;
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(reactExports.Fragment, { children: [
+      index2 > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "trace-conn", "aria-hidden": "true" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          className: bad ? "trace-seg bad" : running ? "trace-seg running" : "trace-seg",
+          title: seg.title,
+          "aria-label": ariaLabel,
+          onClick: () => onFocusEntry(seg.entryIds[0]),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 13, className: "trace-seg-icon" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "trace-seg-label", children: seg.label }),
+            seg.count > 1 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "trace-seg-count", children: `×${seg.count}` }),
+            bad && /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 12, className: "trace-seg-alert" }),
+            running && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "trace-seg-live", "aria-hidden": "true" })
+          ]
+        },
+        `${seg.kind}-${index2}`
+      )
+    ] }, `seg-wrap-${index2}`);
+  }) });
+}
 function ToolEntry({ card, showChangeDetails }) {
   const [open, setOpen] = reactExports.useState(false);
   const webSources = card.toolName === "web_search" && card.sources !== void 0 && card.sources.length > 0 ? card.sources : void 0;
@@ -32171,7 +32218,9 @@ function ToolEntry({ card, showChangeDetails }) {
   const failed = card.outcome !== void 0 && card.outcome !== "ok";
   const ToolIcon = failed ? FAILED_ICON : toolIconOf(card.toolName);
   const blockedCommand = blockedCommandOf(card);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "entry tool", children: [
+  // data-entry-id 是轨迹条「点击定位」的锚点（trace-core 的 entryIds 指到这里），
+  // 无样式含义；给 querySelector 用，避免给每个工具行造全局唯一 id。
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "entry tool", "data-entry-id": card.id, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
@@ -32838,6 +32887,28 @@ function ChatView({
     if (!turnFoldExpanded(turnFolds, turnId)) releaseFollowForExpand();
     writeTurnFolds(toggleTurnFold(turnFolds, turnId));
   };
+  // 轨迹条「点击定位」：目标行可能藏在折叠组里（收起态跳过渲染，见
+  // .metafold-body:not(.open) 的注释），先展开再定位，否则滚到的位置是空的。
+  // 两帧 rAF 等折叠展开挂载；flash 是一次性动画，animationend 即摘除。
+  const focusEntryInTurn = (view, entryId) => {
+    for (const item of view.plan.items) {
+      if (item.entries === void 0) continue;
+      if (!item.entries.some((e) => e.id === entryId)) continue;
+      if ((item.kind === "tool-group" || item.kind === "process-fold") && !(foldOpen.get(item.id) ?? false)) toggleFold(item.id);
+    }
+    if (view.turnId !== void 0 && !turnFoldExpanded(turnFolds, view.turnId)) toggleTurn(view.turnId);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const el = scrollRef.current?.querySelector(`[data-entry-id="${CSS.escape(entryId)}"]`);
+        if (el === null || el === void 0) return;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        el.classList.remove("entry-flash");
+        void el.offsetWidth;
+        el.classList.add("entry-flash");
+        el.addEventListener("animationend", () => el.classList.remove("entry-flash"), { once: true });
+      });
+    });
+  };
   const renderEntry = (entry) => {
     if (entry.role === "tool") {
       if (entry.toolName === "show_widget") {
@@ -33099,6 +33170,15 @@ function ChatView({
                         collapsible: view.plan.hasTurnFold,
                         expanded: turnFoldExpanded(turnFolds, turnId),
                         onToggle: () => toggleTurn(turnId)
+                      }
+                    ),
+                    // 轨迹条在 plan.items 之外：回合「过程」折叠时正文隐藏，它仍完整显示
+                    // ——折叠态下的工作全貌正是这条轨迹存在的理由。
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      TurnTraceBar,
+                      {
+                        trace: view.trace,
+                        onFocusEntry: (entryId) => focusEntryInTurn(view, entryId)
                       }
                     ),
                     view.plan.items.map((item) => renderPlanItem(view, item)),
