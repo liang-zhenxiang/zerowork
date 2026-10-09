@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范：app.js 是 chunk 粒度大文件的既定现状、token 纪律、新模块以 core.js 拆分并从 app.js import"}
+{"file": ".trellis/spec/testing/index.md", "reason": "三层测试分工与 e2e harness 骨架契约（createHarness/shoot/finish），e2e 必须复用 harness"}
+{"file": "docs/DESIGN.md", "reason": "设计 token 档位纪律、状态色只表状态（§2.4）、四态过渡（§3）、动画登记（§10.3）——新 UI 全部受它约束"}

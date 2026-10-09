@@ -4752,11 +4752,130 @@ textarea:focus-visible {
 	cursor: default;
 }
 
-.tool-dot {
+/* ── 工作轨迹条（TurnTraceBar）──────────────────────────────────────
+   回合内动作流的水平轨道（聚合逻辑在 trace-core.js）。视觉是「地铁线」：
+   段与段之间有短连接符，段内是图标 + 类别名 + 计数。两条纪律：
+   · 分类不借状态色（§2.4）——读/写/命令/检索的中性感一致，只有 bad/running
+     表状态，且 bad 段同时有 ⚠ 形态与 aria 文案（§7.6 不看颜色也读得出）；
+   · 全部取值走 token，暗色块零新增（同值同 token 自动适配）。
+   轨迹条不受回合折叠影响——折叠态下它就是这轮工作唯一的全貌。 */
+.turn-trace {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-1);
+	/* 贴在 turn-header 之下（header 自带 margin-bottom 一档），左缘与头像列对齐；
+	   下边距比上边距大一档 —— 轨迹是回合头的「收尾行」，与下方正文行之间要有分隔感。 */
+	margin: 0 0 var(--space-3);
+}
+
+.trace-seg {
+	/* 段是 chip：静态底 --bg-chip（与技能胶囊同源），hover 才亮。 */
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 1px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		border-color var(--dur-fast) var(--ease-standard);
+}
+
+.trace-seg:hover {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+/* chip 档的按压缩放（§3.1）。 */
+.trace-seg:active {
+	transform: scale(0.98);
+}
+
+.trace-seg:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+
+.trace-seg-icon {
+	flex: 0 0 auto;
+}
+
+.trace-seg-count {
+	/* 计数用等宽小字与类别名区分，同色（--text-secondary 降一档已由字号承担）。 */
+	font-family: var(--font-mono);
+}
+
+/* bad 段：危险色只表「这步出过错」的状态；边框 35% 掺透明避免整段过重。 */
+.trace-seg.bad {
+	color: var(--danger);
+	border-color: color-mix(in srgb, var(--danger) 35%, transparent);
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+
+.trace-seg.bad:hover {
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	color: var(--danger);
+	/* 用户最想点的恰是失败段，hover 只动底色（8%→14% 掺混）肉眼难辨，
+	   描边同步加深补足反馈（UI/UX 评审意见，2026-10-10）。 */
+	border-color: color-mix(in srgb, var(--danger) 60%, transparent);
+}
+
+.trace-seg-alert {
+	flex: 0 0 auto;
+	color: var(--danger);
+}
+
+/* running 段的呼吸点：复用 .tool-dot.running 的 tool-pulse —— 「还在跑」
+   在工具行与轨迹条上是同一套语言。关停后停在静态实心点，仍是「进行中」。 */
+.trace-seg-live {
 	width: 6px;
 	height: 6px;
 	border-radius: var(--radius-full);
+	background: var(--text-secondary);
 	flex: 0 0 auto;
+	animation: tool-pulse 1.1s ease-in-out infinite;
+}
+
+/* 段间连接符：短横线给出「轨道」的顺序感；换行时它跟随后段一起走，
+   行首的短横线读作「轨道延续」，不是断头（aria-hidden，纯装饰）。
+   底色用 --text-secondary 而不是 --border：--border（#e6e6e6）对白底
+   对比度约 1.2:1，实测截图里基本不可见，顺序感立不起来；10×2px 的小尺寸
+   压得住 --text-secondary 的强度（UI/UX 评审意见，2026-10-10）。 */
+.trace-conn {
+	width: 10px;
+	height: 2px;
+	border-radius: var(--radius-full);
+	background: var(--text-secondary);
+	flex: 0 0 auto;
+}
+
+/* 轨迹条点击定位后的一次性高亮：底色 + 外圈从强调色淡出到无。
+   一次性入场动画的基础态即终态（无高亮），reduced-motion 关掉即静止正确。
+   登记见 docs/DESIGN.md §10.3。 */
+@keyframes entry-flash-fade {
+	from {
+		background: color-mix(in srgb, var(--accent) 16%, transparent);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
+	}
+
+	to {
+		background: transparent;
+		box-shadow: none;
+	}
+}
+
+.entry-flash {
+	border-radius: var(--radius-sm);
+	animation: entry-flash-fade 900ms var(--ease-out) both;
+}
+
+.tool-dot {
 }
 
 .tool-dot.running {
@@ -11857,7 +11976,9 @@ button.agent-row {
 
 	/* ② 无限循环的动效：转圈、呼吸点、扫光 */
 	.spinner,
-	.tool-dot.running {
+	.tool-dot.running,
+	/* 工作轨迹 running 段的呼吸点：关掉后停在静态实心点，仍是「进行中」。 */
+	.trace-seg-live {
 		animation: none;
 	}
 
@@ -11907,7 +12028,9 @@ button.agent-row {
 	.model-menu-levels,
 	.team-bar,
 	.team-bar-members,
-	.team-tasks {
+	.team-tasks,
+	/* 工作轨迹的定位闪光：一次性入场族，基础态即终态（无高亮），关掉即静止正确。 */
+	.entry-flash {
 		animation: none;
 	}
 
