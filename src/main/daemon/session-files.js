@@ -192,6 +192,7 @@ import {
 	validateSessionFilePath,
 } from "./session-view.js";
 import { SessionHost } from "./session-host.js";
+import { resolveResumeModelKey, resumeModelError } from "./session-model-fallback.js";
 import {
 	SessionMailbox,
 	readMemberTranscript,
@@ -2524,12 +2525,24 @@ function adoptHost(bucket, host) {
 
 async function createHost(bucket, sessionManager) {
   const catalog = await getCatalog();
-  if (activeModelKey === void 0) {
-    throw new Error(
-      "还没有选择模型。请点左下角设置，为任一服务商填写 API Key 并选择模型。"
-    );
-  }
-  if (!catalog.isUsable(activeModelKey)) {
+  /*
+   * 模型来源（#162 方案 A）：全局已选 → 用全局（现状语义，一步不变）；
+   * 没选过且这是 resume（挂着 SessionManager）→ **回落到会话文件记录的模型**。
+   * 「回到这条会话」本来就该用它当时用的模型。对比屏「留为会话 → 去这条会话」
+   * 与资料库「定位到来源会话」都受益于这层回落——它们的主语恰恰是最可能
+   * 还没选过全局模型的新用户。语义边界见 session-model-fallback.js 头注释
+   * （不写回全局、不写会话文件、接不上时宁可拒绝并点名那个模型）。
+   * buildSessionContext 只在「没选过 + resume」时才调，不给正常路径加投影开销。
+   */
+  const contextModel =
+    activeModelKey === void 0 && sessionManager !== void 0
+      ? sessionManager.buildSessionContext().model
+      : void 0;
+  const modelDecision = resolveResumeModelKey({ activeModelKey, contextModel, catalog });
+  const modelError = resumeModelError(modelDecision);
+  if (modelError !== void 0) throw modelError;
+  const modelKey = modelDecision.key;
+  if (!catalog.isUsable(modelKey)) {
     throw new Error(
       "选中的模型当前不可用，请到设置里检查 API Key 或重新选择模型。"
     );
@@ -2682,7 +2695,7 @@ async function createHost(bucket, sessionManager) {
   };
   const host = await SessionHost.create({
     catalog,
-    modelKey: activeModelKey,
+    modelKey,
     cwd,
     isTempTask: isTempCwd(cwd),
     sceneId: bucket.conversation.state.sceneId,

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层规范：初始化顺序/TDZ 坑、IPC 登记、落盘在先推送在后"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试分层与 GUI harness 用法，新 e2e 用例照抄现有模式"}
