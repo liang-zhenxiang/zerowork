@@ -269,7 +269,9 @@ async function waitForRounds(n, why) {
 			desc: `mock 收到第 ${n} 轮请求`,
 		});
 	} catch (error) {
-		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`, {
+			cause: error,
+		});
 	}
 }
 

@@ -51,7 +51,7 @@ const nonsyncNotes = [];
 
 /** 从 ci.yml 里抽出工具版本，保证本地与 CI 用同一套编号。 */
 function ciVersions() {
-	let text = '';
+	let text;
 	try {
 		text = readFileSync(CI_YML, 'utf8');
 	} catch {

@@ -105,7 +105,7 @@ async function waitForFound(desc, probe, { arg, timeout = 30_000, interval = 1_0
 			{ timeout, interval, desc },
 		);
 	} catch (error) {
-		throw new Error(`${error.message}；回复尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`);
+		throw new Error(`${error.message}；回复尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`, { cause: error });
 	}
 }
 
@@ -284,7 +284,7 @@ if (endpoint) {
 				{ timeout: 30_000, interval: 1_000, desc: "MCP server 进入 connected 终态" },
 			);
 		} catch (error) {
-			throw new Error(`MCP server 未进入终态。状态轨迹: ${seen.join(" → ")}；现状: ${lastRaw}（${error.message}）`);
+			throw new Error(`MCP server 未进入终态。状态轨迹: ${seen.join(" → ")}；现状: ${lastRaw}（${error.message}）`, { cause: error });
 		}
 		console.log(`      server 状态: ${JSON.stringify(server)?.slice(0, 160)}`);
 	});
@@ -368,7 +368,7 @@ if (endpoint) {
 			const snap = await win
 				.evaluate(async () => JSON.stringify((await globalThis.kami.mcpConfigGet())?.servers ?? []))
 				.catch(() => "(取不到)");
-			throw new Error(`${error.message}；server: ${String(snap).slice(0, 200)}`);
+			throw new Error(`${error.message}；server: ${String(snap).slice(0, 200)}`, { cause: error });
 		}
 		console.log(`      工具回执：${r.text}`);
 	});

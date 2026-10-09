@@ -111,7 +111,7 @@ async function waitForRounds(n, why) {
 			desc: `mock 收到第 ${n} 轮请求`,
 		});
 	} catch (error) {
-		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`, { cause: error });
 	}
 }
 
@@ -133,7 +133,7 @@ async function waitForFound(desc, probe, { arg, timeout = 30_000 } = {}) {
 			{ timeout, interval: 500, desc },
 		);
 	} catch (error) {
-		throw new Error(`${error.message}；界面尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`);
+		throw new Error(`${error.message}；界面尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`, { cause: error });
 	}
 }
 

@@ -70,6 +70,7 @@ async function waitForChatRequest(why) {
 	} catch (error) {
 		throw new Error(
 			`${why}。已收到 ${mock.requests.length} 条：${mock.requests.map((q) => q.url).join(", ")}（${error.message}）`,
+			{ cause: error },
 		);
 	}
 }
@@ -91,7 +92,7 @@ async function waitForFound(desc, probe, { arg, timeout = 30_000 } = {}) {
 			{ timeout, interval: 500, desc },
 		);
 	} catch (error) {
-		throw new Error(`${error.message}；样例：${String(last?.sample ?? "(未取到)").slice(0, 400)}`);
+		throw new Error(`${error.message}；样例：${String(last?.sample ?? "(未取到)").slice(0, 400)}`, { cause: error });
 	}
 }
 

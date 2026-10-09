@@ -220,7 +220,7 @@ async function waitForRounds(n, why) {
 			desc: `mock 收到第 ${n} 轮请求`,
 		});
 	} catch (error) {
-		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`, { cause: error });
 	}
 }
 
@@ -242,7 +242,7 @@ async function waitForFound(desc, probe, { arg, timeout = 30_000 } = {}) {
 			{ timeout, interval: 500, desc },
 		);
 	} catch (error) {
-		throw new Error(`${error.message}；界面尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`);
+		throw new Error(`${error.message}；界面尾部：${String(last?.sample ?? "(未取到)").slice(-300)}`, { cause: error });
 	}
 }
 
@@ -348,6 +348,7 @@ await h.check("成员的产出落到它自己的会话文件里（真的跑完�
 					.map((s) => `  ${s.file}: 记录 ${s.records.length} 条，assistant 文本 ${JSON.stringify(assistantText(s.records).slice(0, 80))}`)
 					.join("\n") +
 				`（${error.message}）`,
+			{ cause: error },
 		);
 	}
 	memberFile = member.file;
@@ -425,6 +426,7 @@ await h.check("领导下一轮会**自动**收到未见过的成员产出（<tea
 		throw new Error(
 			`领导的请求里没看到含成员产出的 <team_output> 快照 —— 自动投递没发生。` +
 				`共 ${mock.requests.length} 轮请求（${error.message}）`,
+			{ cause: error },
 		);
 	}
 	// 断言用**解析后的消息文本**（模型真正读到的内容），不用原始 JSON 文本 ——
@@ -456,6 +458,7 @@ await h.check("team_read 也能显式取回同一份产出正文", async () => {
 		throw new Error(
 			`领导会话的工具结果里找不到成员产出 ${MEMBER_MARK} —— team_read 没取回正文。` +
 				`领导会话工具结果尾部：${JSON.stringify(leaderToolText.slice(-200))}（${error.message}）`,
+			{ cause: error },
 		);
 	}
 	// 取回的是**成员正文**，不是一句「已读取」的空回执

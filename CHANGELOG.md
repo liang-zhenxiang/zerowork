@@ -78,6 +78,21 @@
   继续对话收到回复（等 mock 真收到第 2 轮，不是「没报错」）→ 同列再点被明确
   拒绝、一条不多 → 失败 / 取消列没有按钮 → 深浅两套截图。
 
+### 变更
+
+- **构建工具链升到 eslint 10**（#134）。eslint 10 移除了对 `@eslint/js` 的传递提供，
+  而本仓库的扁平配置正是从它取 `js.configs.recommended` —— 此前这个包一直是条
+  **幽灵依赖**（本地与 CI 都靠 eslint 9 的依赖树把它带进来），eslint 一升大版本就
+  `ERR_MODULE_NOT_FOUND`。现在把它显式写进 `devDependencies`。顺带整改 10.x 新增的
+  两条规则：`preserve-caught-error` 命中 26 处「重抛却丢掉原因」的 `catch`，补上
+  `{ cause: error }` —— 失败信息里出错地点与根因不再断链；`no-useless-assignment`
+  命中 5 处「先赋空值又必被覆盖」的局部变量，去掉多余初始化。
+- **Dependabot 不再提 `vite` 的大版本**（[#168](https://github.com/liang-zhenxiang/zerowork/issues/168)）。
+  #135 想把 vite 7 → 8，装不上：构建工具 `electron-vite` 的 peer 把 vite 钉在 `^7`，
+  稳定版 5.0.0 也还没支持 8（只有 6.0.0-beta 支持）。放着不管它每到一个大版本就回来
+  一次，所以在 `dependabot.yml` 里排除 vite 的 major；**先做 electron-vite 4 → 5**，
+  完成后再放开。minor / patch 不受影响。
+
 ## [0.5.0] - 2026-10-08
 
 本轮主题：**装完就能用 —— 把模型接入从一次配置题变成一次点击**。

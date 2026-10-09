@@ -92,7 +92,7 @@ class GlobalToggleShortcutController {
    * 也降级成 failed 上报而不是让启动炸掉；热键是便利功能，不配炸启动）。
    */
   register(accelerator = DEFAULT_GLOBAL_SHORTCUT) {
-    let ok = false;
+    let ok;
     try {
       ok = this.shortcuts.register(accelerator, () => this.toggle());
     } catch {
