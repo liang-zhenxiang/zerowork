@@ -44,6 +44,10 @@ function getPinsFile() {
   return join(getConfigDir(), "pins.json");
 }
 
+function getProjectsFile() {
+  return join(getConfigDir(), "projects.json");
+}
+
 function getMcpConfigPath() {
   return join(getConfigDir(), "mcp.json");
 }
@@ -91,6 +95,7 @@ export {
 	getModelsPath,
 	getModelsStorePath,
 	getPinsFile,
+	getProjectsFile,
 	getResourcesDir,
 	getRuntimesDir,
 	getSessionsDir,

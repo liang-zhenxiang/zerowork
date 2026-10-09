@@ -56,6 +56,7 @@ import { AutomationStore } from "./automation.js";
 import { SessionArchive } from "./archive.js";
 import { readLibraryArtifacts } from "./library.js";
 import { SessionPinStore } from "./pin.js";
+import { ProjectsStore } from "./projects.js";
 import { hasExportableContent, renderSessionMarkdown } from "./session-markdown.js";
 import {
 	loadMemorySystemPrompt,
@@ -1808,6 +1809,8 @@ const sessionArchive = new SessionArchive();
  * 为什么不是写进会话文件、为什么不清理失效条目 —— 见 ./pin.js 的文件头。
  */
 const sessionPins = new SessionPinStore();
+/** 项目索引（projects.json）：与 pin/archive 同键口径（resolve 后绝对路径）。 */
+const projectsStore = new ProjectsStore();
 
 const automationScheduler = new AutomationScheduler({
   store: automationStore,
@@ -2890,7 +2893,19 @@ async function createHost(bucket, sessionManager) {
           expertId: bucket.conversation.state.expertId
         }),
         compose: async (sceneId, interactionId, expertId, piContext) => {
-          const composed = await composeSystemPrompt({ sceneId, interactionId, expertId, piContext });
+          /*
+           * 项目常驻指令每轮现读（改指令下一轮即生效，与技能清单同口径）。
+           * key 是会话文件路径：未落盘的全新会话（sessionFilePath 为 undefined）
+           * 与未归入项目的会话都返回 undefined → 不进注入路径，零开销。
+           */
+          const projectInstructionsBody = projectsStore.instructionsFor(bucket.sessionFilePath);
+          const composed = await composeSystemPrompt({
+            sceneId,
+            interactionId,
+            expertId,
+            piContext,
+            ...projectInstructionsBody === void 0 ? {} : { projectInstructionsBody }
+          });
           bucket.systemPromptTokens = composed.systemTokens;
           bucket.skillsTokens = composed.skillsTokens;
           bucket.systemPromptSegments = composed.segments;
@@ -3465,7 +3480,10 @@ async function listSessions() {
        * 会话文件在同步目录 / 外置盘里暂时不可达时，用户钉住的记录仍然生效。
        * 这正是 pin.js 文件头写明「不清理悬空记录」的理由，别把它简化成恒 false。
        */
-      pinned: sessionPins.isPinned(resolve(file))
+      pinned: sessionPins.isPinned(resolve(file)),
+      // 项目归属（projects.json 反查）：未归入时**缺省字段**而非 false——
+      // 「不在任何项目」与「在项目里」是二值，不是三态，缺省让 JSON 更瘦。
+      projectId: projectsStore.projectIdFor(file)
     });
   }
   return [...visible.map((info) => {
@@ -3490,7 +3508,8 @@ async function listSessions() {
       archived: sessionArchive.isArchived(resolve(info.path)),
       // 键与归档同一套写法（resolve 后的绝对路径）。两个索引指向同一批会话文件，
       // 键的规范化不能各写一套，否则「同一个会话」在两个索引里会是两条不同的键。
-      pinned: sessionPins.isPinned(resolve(info.path))
+      pinned: sessionPins.isPinned(resolve(info.path)),
+      projectId: projectsStore.projectIdFor(info.path)
     };
   }), ...pending].sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
@@ -4369,6 +4388,41 @@ const handlers = {
   [INVOKE.sessionPin]: async ([path, pinned]) => {
     if (typeof path !== "string" || path === "") throw new Error("置顶需要会话路径");
     sessionPins.setPinned(resolve(path), pinned === true, Date.now());
+    pushTaskListChanged();
+  },
+  /*
+   * 项目（projects.json）：六个写通道 + 一个读通道。校验在 store 里做最后防线
+   * （空名 / 越界色号 / 不存在的 id 都 throw 带原因），这里只做**参数形态**的
+   * 硬校验（非字符串直接拒）——与 sessionPin 的分工口径一致：形态是调用方的
+   * bug，语义是用户的输入。归属变化推 taskListChanged（侧栏色点跟着列表走）。
+   */
+  [INVOKE.projectsList]: async () => projectsStore.list(),
+  [INVOKE.projectsCreate]: async ([name]) => projectsStore.create(name, Date.now()),
+  [INVOKE.projectsRename]: async ([id, name]) => {
+    if (typeof id !== "string" || id === "") throw new Error("改名需要项目 id");
+    return projectsStore.rename(id, name);
+  },
+  [INVOKE.projectsDelete]: async ([id]) => {
+    if (typeof id !== "string" || id === "") throw new Error("解散需要项目 id");
+    const released = projectsStore.delete(id);
+    if (released.length > 0) pushTaskListChanged();
+    return released;
+  },
+  [INVOKE.projectsSetColor]: async ([id, colorIndex]) => {
+    if (typeof id !== "string" || id === "") throw new Error("换色需要项目 id");
+    return projectsStore.setColor(id, colorIndex);
+  },
+  [INVOKE.projectsSetInstructions]: async ([id, text]) => {
+    if (typeof id !== "string" || id === "") throw new Error("保存指令需要项目 id");
+    if (text !== void 0 && text !== null && typeof text !== "string") throw new Error("指令必须是文本");
+    return projectsStore.setInstructions(id, text ?? "");
+  },
+  [INVOKE.projectsAssignSession]: async ([sessionPath, projectId]) => {
+    if (typeof sessionPath !== "string" || sessionPath === "") throw new Error("归入需要会话路径");
+    if (projectId !== null && (typeof projectId !== "string" || projectId === "")) {
+      throw new Error("项目 id 非法（要字符串或 null）");
+    }
+    projectsStore.assignSession(sessionPath, projectId);
     pushTaskListChanged();
   },
   [INVOKE.sessionResume]: async ([path]) => resumeSession(path),

@@ -283,6 +283,9 @@ async function assembleSystemPrompt(input) {
     ...input.style === void 0 ? {} : { style: input.style },
     ...input.memorySystemBody === void 0 ? {} : { memorySystemBody: input.memorySystemBody },
     ...input.languageBody === void 0 ? {} : { languageBody: input.languageBody },
+    // 项目常驻指令：跟**会话**绑定（该会话所属项目），所以走 input 由调用方现读
+    // （memory 是全局偏好才走 deps 的 loader）。未传 = 无段，组装结果字节级不变。
+    ...input.projectInstructionsBody === void 0 ? {} : { projectInstructionsBody: input.projectInstructionsBody },
     ...input.expert === void 0 ? {} : { expert: input.expert },
     piContext: input.piContext
   });
@@ -312,6 +315,7 @@ function createSystemPromptComposer(deps) {
       ...expert === void 0 ? {} : { expert: toExpertPersona(expert) },
       ...memorySystemBody === void 0 ? {} : { memorySystemBody },
       ...languageBody === void 0 ? {} : { languageBody },
+      ...input.projectInstructionsBody === void 0 ? {} : { projectInstructionsBody: input.projectInstructionsBody },
       piContext: input.piContext
     });
     return {
