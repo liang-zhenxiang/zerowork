@@ -178,7 +178,9 @@ describe("会话归属：一个会话只属一个项目", () => {
 		);
 		const store = newStore();
 		expect(store.projectIdFor("/tmp/s.jsonl")).toBe("pa");
-		expect(store.list()[1].sessionPaths).toEqual(["/tmp/s.jsonl"]); // B 里的脏引用原样保留，反查不指向它
+		// 期望值过 resolve（与 store 同一规范化）：Windows 上 "/tmp/s.jsonl" 会被
+		// resolve 成 "D:\tmp\s.jsonl"，裸写 POSIX 路径在 Windows 上必假红（CI 实测）。
+		expect(store.list()[1].sessionPaths).toEqual([resolve("/tmp/s.jsonl")]); // B 里的脏引用原样保留，反查不指向它
 	});
 });
 
