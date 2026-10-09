@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层规范：检查清单与初始化顺序坑"}
+{"file": ".trellis/spec/testing/index.md", "reason": "三层测试选择顺序与 harness 骨架"}
