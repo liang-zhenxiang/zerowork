@@ -131,7 +131,7 @@
     "@fortune-sheet/react": "^1.0.4",
     "@playwright/test": "^1.63.0",
     "@types/node": "26.6.3",
-    "@vitejs/plugin-react": "^5.0.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "docx-preview": "^0.4.0",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
