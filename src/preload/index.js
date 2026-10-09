@@ -124,6 +124,25 @@ const INVOKE = {
    * **拉式**：只在用户打开资料库页面时调用。
    */
   libraryList: "library:list",
+  /**
+   * 项目（projects.json 索引）：会话 + 产物 + 常驻指令的活页夹，与工作空间
+   * （磁盘目录）正交。**拉式**（打开项目视图时读）；归属变化复用
+   * taskListChanged 推送。与 shared/ipc.js 的注释同源（两份手工副本，ipc 单测
+   * 守一致性）。
+   */
+  projectsList: "projects:list",
+  /** 建项目（name 非空）。色按现存数轮转。返回完整项目对象。 */
+  projectsCreate: "projects:create",
+  /** 改名（name 非空）。id 定位。 */
+  projectsRename: "projects:rename",
+  /** 解散项目：只解除组织引用，会话与文件都不动。返回被解除的会话路径。 */
+  projectsDelete: "projects:delete",
+  /** 换项目色（0..5 对应 --cat-1..6，越界拒绝）。 */
+  projectsSetColor: "projects:set-color",
+  /** 常驻指令（≤2000 字）：该项目每个用户会话每轮 systemPrompt 的追加段。 */
+  projectsSetInstructions: "projects:set-instructions",
+  /** 会话归入 / 移出项目（projectId 为 null = 移出；跨项目自动迁移）。 */
+  projectsAssignSession: "projects:assign-session",
   /** 拉取当前工作空间与可选列表（默认根 + 已有子目录）。 */
   workspaceSnapshot: "workspace:snapshot",
   /** 在默认根下新建工作空间并切换过去。返回生效的目录路径。 */
@@ -629,6 +648,13 @@ const bridge = {
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
   exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
+  listProjects: () => ipcRenderer.invoke(INVOKE.projectsList),
+  createProject: (name) => ipcRenderer.invoke(INVOKE.projectsCreate, name),
+  renameProject: (id, name) => ipcRenderer.invoke(INVOKE.projectsRename, id, name),
+  deleteProject: (id) => ipcRenderer.invoke(INVOKE.projectsDelete, id),
+  setProjectColor: (id, colorIndex) => ipcRenderer.invoke(INVOKE.projectsSetColor, id, colorIndex),
+  setProjectInstructions: (id, text) => ipcRenderer.invoke(INVOKE.projectsSetInstructions, id, text),
+  assignProjectSession: (sessionPath, projectId) => ipcRenderer.invoke(INVOKE.projectsAssignSession, sessionPath, projectId),
   workspaceSnapshot: () => ipcRenderer.invoke(INVOKE.workspaceSnapshot),
   createWorkspace: (name) => ipcRenderer.invoke(INVOKE.createWorkspace, name),
   setWorkspace: (path) => ipcRenderer.invoke(INVOKE.setWorkspace, path),

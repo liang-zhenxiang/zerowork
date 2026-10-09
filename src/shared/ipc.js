@@ -148,6 +148,35 @@ const INVOKE = {
    * `{ artifacts: [{ path, name, kind, html, size, deliveredAt, exists, sessions }], truncated }`。
    */
   libraryList: "library:list",
+  /**
+   * 项目（projects.json 索引）：把「同一件正在推进的事」的会话装订成活页夹。
+   * 与工作空间（磁盘目录）正交——项目不建目录、不动文件、不改会话 cwd，
+   * 只是一层组织引用。**拉式**（打开项目视图时读，与 library 同口径）；
+   * 归属变化复用 taskListChanged 推送（侧栏色点标记跟着列表走）。
+   */
+  projectsList: "projects:list",
+  /** 建项目（name 非空，trim 后）。色按现存数轮转分配。返回完整项目对象。 */
+  projectsCreate: "projects:create",
+  /** 改名（name 非空）。id 定位。 */
+  projectsRename: "projects:rename",
+  /**
+   * 解散项目：**只解除组织引用**，会话与文件都不动（确认文案要说清这一点）。
+   * 返回被解除的会话路径数组（调用方据此刷新列表）。
+   */
+  projectsDelete: "projects:delete",
+  /** 换项目色（0..5 对应 --cat-1..6，越界拒绝）。 */
+  projectsSetColor: "projects:set-color",
+  /**
+   * 常驻指令（≤2000 字，超限截断）：该项目每个用户会话每轮 systemPrompt
+   * 的追加段。空串 = 无段（与未归入项目完全一致）。改完下一轮即生效。
+   */
+  projectsSetInstructions: "projects:set-instructions",
+  /**
+   * 会话归入 / 移出项目。sessionPath 为 resolve 后绝对路径（与 pin/archive
+   * 同键口径）；projectId 为 null 表示移出。一个会话同时只属一个项目：
+   * 归入新项目自动从旧项目移除（「换项目」语义）。
+   */
+  projectsAssignSession: "projects:assign-session",
   /** 拉取当前工作空间与可选列表（默认根 + 已有子目录）。 */
   workspaceSnapshot: "workspace:snapshot",
   /** 在默认根下新建工作空间并切换过去。返回生效的目录路径。 */

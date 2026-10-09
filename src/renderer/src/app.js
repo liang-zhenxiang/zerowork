@@ -13259,7 +13259,7 @@ function ErrorState({
 }
 const NAV_ITEMS$1 = [
   { icon: IconAssistant, label: "助理", ready: false },
-  { icon: IconProject, label: "项目", ready: false },
+  { icon: IconProject, label: "项目", ready: true },
   { icon: IconSkill, label: "专家·技能·连接器", ready: true },
   { icon: IconAutomation, label: "自动化", ready: true },
   { icon: IconLibrary, label: "资料库", ready: true },
@@ -13303,6 +13303,9 @@ function Sidebar({
   onOpenSkills,
   onOpenAutomations,
   onOpenLibrary,
+  onOpenProjects,
+  onAssignProject,
+  projects,
   onOpenPalette
 }) {
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
@@ -13467,6 +13470,14 @@ function Sidebar({
               unreadIds.has(task.id) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-unread-dot" }),
               task.running && /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
               origin !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-branch-mark", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBranch, { size: 12 }) }),
+              /*
+               * 项目色点：与置顶/分支标记同一组「标题前缀」。文字冗余走 title
+               * （hover 可读项目名）——色点只承担扫视锚点，不承担全部信息（§7.6）。
+               */
+              (() => {
+                const project = projects?.find((item) => item.id === task.projectId);
+                return project === undefined ? null : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-dot-inline", style: { background: projectColorVar(project.colorIndex) }, title: `项目：${project.name}` });
+              })(),
               task.title
             ] }),
             pendingConfirmIds.has(task.id) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-confirm-badge", children: "待确认" }),
@@ -13585,6 +13596,44 @@ function Sidebar({
                 onPinTask(task.path, !isPinned(task));
               },
               children: isPinned(task) ? "取消置顶" : "置顶"
+            }
+          ),
+          /*
+           * 归入项目分区：项目列表（色点 + 名）+「移出项目」（已归入时）。
+           * 没有项目且会话未归入时不渲染整段——空分区比没有分区更迷惑。
+           * 当前项目前不加对勾：色点 + 名字已足够自明，勾是第三个冗余。
+           */
+          (projects ?? []).length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-menu-label", children: "归入项目" }),
+          (projects ?? []).map((project) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                onAssignProject(task.path, project.id);
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-dot-inline", style: { background: projectColorVar(project.colorIndex) }, "aria-hidden": "true" }),
+                project.name
+              ]
+            },
+            project.id
+          )),
+          task.projectId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                onAssignProject(task.path, null);
+              },
+              children: "移出项目"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -13822,6 +13871,7 @@ function Sidebar({
         if (label === "专家·技能·连接器") onOpenSkills();
         else if (label === "自动化") onOpenAutomations();
         else if (label === "资料库") onOpenLibrary();
+        else if (label === "项目") onOpenProjects();
       },
       children: [
         // 未就绪项图标 13：与降档字号(--text-meta)同步收小，视觉重量才真的轻
@@ -29889,6 +29939,15 @@ import {
 	laneAccentVar,
 	modelButtonText
 } from "./compare-view.js";
+import {
+	INSTRUCTIONS_LIMIT,
+	instructionsStatus,
+	projectArtifactRows,
+	projectCardModel,
+	projectColorVar,
+	projectSessionRows,
+	sortProjectCards
+} from "./projects-core.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -67669,6 +67728,190 @@ function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArt
     ] }) })
   ] });
 }
+/*
+ * 项目视图（L1 卡片墙 / L2 详情）：骨架照 LibraryView（.settings 壳 + 三态一行表达式）。
+ * 纯逻辑（卡片排序 / 会话行 / 产物过滤 / 字数）在 projects-core.js，单测直测。
+ * 数据两类：项目列表拉式（打开时读，归属变化靠 taskListChanged 跟随 sessions prop），
+ * 产物区复用资料库的拉式数据（按来源会话过滤，不建自己的索引）。
+ * 指令编辑失焦自动保存（设计师方案：比「保存按钮 + 未保存标记」少一步心智；
+ * 超限时不保存、就地提示）。
+ */
+function ProjectView({ onClose, sessions, projects, projectsError, onReloadProjects, onResumeSession, onToast }) {
+  const [selectedId, setSelectedId] = reactExports.useState(void 0);
+  const [library, setLibrary] = reactExports.useState(void 0);
+  const [creating, setCreating] = reactExports.useState(false);
+  const [draftName, setDraftName] = reactExports.useState("");
+  const [renaming, setRenaming] = reactExports.useState(false);
+  const [confirmingDisband, setConfirmingDisband] = reactExports.useState(false);
+  const [instructionDraft, setInstructionDraft] = reactExports.useState(void 0);
+  /* 数据源是 App 层的单一 state（侧栏「归入项目」菜单共用同一份），打开时刷新一次。 */
+  const error = projectsError;
+  const load = onReloadProjects;
+  reactExports.useEffect(() => {
+    void onReloadProjects();
+  }, [onReloadProjects]);
+  const sessionsByPath = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.path, s])), [sessions]);
+  const selected = projects?.find((p) => p.id === selectedId);
+  reactExports.useEffect(() => {
+    setInstructionDraft(void 0);
+    setRenaming(false);
+    setConfirmingDisband(false);
+    /* 产物区数据与资料库同源同口径：只在进详情时拉一次（不订阅推送）。 */
+    if (selectedId !== void 0) {
+      setLibrary(void 0);
+      void window.kami.listLibrary().then(setLibrary).catch(() => setLibrary({ artifacts: [] }));
+    }
+  }, [selectedId]);
+  /*
+   * 指令失焦保存：超限（instructionsStatus.over）不保存、就地提示 ——
+   * 数据层也会截断，这里是「不默默替用户做决定」的那道闸。
+   */
+  const saveInstruction = reactExports.useCallback(() => {
+    if (selected === void 0 || instructionDraft === void 0) return;
+    const status = instructionsStatus(instructionDraft);
+    if (status.over) return;
+    if (instructionDraft === selected.instructions) return;
+    void window.kami.setProjectInstructions(selected.id, instructionDraft).then(load).then(() => onToast("项目指令已保存，下一轮对话生效", "ok")).catch((e) => onToast(errorText(e), "error"));
+  }, [selected, instructionDraft, load, onToast]);
+  const run = (action) => void action().then(load).catch((e) => onToast(errorText(e), "error"));
+  const createProject = () => {
+    const name = draftName.trim();
+    if (name === "") return;
+    run(async () => {
+      await window.kami.createProject(name);
+      setDraftName("");
+      setCreating(false);
+    });
+  };
+  /* ── L2 详情 ── */
+  if (selected !== void 0) {
+    const card = projectCardModel(selected, sessionsByPath);
+    const { rows, unresolvedPaths } = projectSessionRows(selected, sessionsByPath);
+    const artifacts = library === void 0 ? void 0 : projectArtifactRows(library.artifacts ?? [], selected);
+    const status = instructionsStatus(instructionDraft ?? selected.instructions);
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", "data-projects": "", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回项目列表", onClick: () => setSelectedId(void 0), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-detail-dot", style: { background: projectColorVar(selected.colorIndex) }, "aria-hidden": "true" }),
+        renaming ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "task-rename-input", value: draftName, autoFocus: true, onChange: (e) => setDraftName(e.target.value), onKeyDown: (e) => {
+            if (e.key === "Enter") {
+              const name = draftName.trim();
+              if (name !== "" && name !== selected.name) run(() => window.kami.renameProject(selected.id, name));
+              setRenaming(false);
+            }
+            if (e.key === "Escape") setRenaming(false);
+          }, "aria-label": "项目名称" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => {
+            const name = draftName.trim();
+            if (name !== "" && name !== selected.name) run(() => window.kami.renameProject(selected.id, name));
+            setRenaming(false);
+          }, children: "保存" })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "proj-title-clickable", title: "点击重命名", onClick: () => {
+          setDraftName(selected.name);
+          setRenaming(true);
+        }, children: selected.name }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+        confirmingDisband ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-hint", children: "解散不删除任何会话与文件，只解除归组" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setConfirmingDisband(false), children: "取消" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", onClick: () => run(async () => {
+            await window.kami.deleteProject(selected.id);
+            setSelectedId(void 0);
+          }), children: "确认解散" })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setConfirmingDisband(true), children: "解散项目" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", "data-projects": "true", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "proj-section", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "proj-section-title", children: ["会话", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-hint", children: `${rows.length}` })] }),
+          rows.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "proj-hint", children: "还没有会话归入这个项目。在侧栏会话的 ⋯ 菜单里选「归入项目」。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-list", children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "proj-session-row", role: "button", tabIndex: 0, onClick: () => {
+            setSelectedId(void 0);
+            onResumeSession(row.path);
+          }, onKeyDown: (e) => {
+            if (e.key === "Enter") {
+              setSelectedId(void 0);
+              onResumeSession(row.path);
+            }
+          }, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-session-title", children: row.title }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-row-time", children: formatMessageTime(row.modifiedAt, Date.now()) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "proj-row-remove", title: "从这个项目移除（会话本身保留）", onClick: (e) => {
+              e.stopPropagation();
+              run(() => window.kami.assignProjectSession(row.path, null));
+            }, children: "移出" })
+          ] }, row.path)) }),
+          unresolvedPaths.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "proj-hint", children: `另有 ${unresolvedPaths.length} 条会话不在当前列表（可能已归档或文件暂时不可达），归组关系保留。` })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "proj-section", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "proj-section-title", children: ["产物", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-hint", children: `${artifacts?.length ?? 0}` })] }),
+          artifacts === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : artifacts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "proj-hint", children: "这个项目的会话还没有交付过产物。产物来自会话里 Agent 交付的成果文件。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-list", children: artifacts.map((a) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "proj-session-row", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-session-title", children: basename$2(a.path) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-row-time", children: a.exists === false ? "文件已不在" : `${Math.max(1, Math.round((a.size ?? 0) / 1024))} KB` })
+          ] }, a.path)) })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "proj-section proj-instruction", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "proj-section-title", children: ["常驻指令", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-hint", children: "这个项目的每个会话每轮都会带上这段要求" })] }),
+          /* 功能说明行（设计师终审第 4 条）：「常驻指令」对办公用户是个新词，
+             一句话讲清它发生什么——注入每一轮对话，而不是只在界面上存着。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "proj-hint", children: "这段话会作为系统要求注入该项目下每一轮对话的开头，修改后下一轮生效。" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", { value: instructionDraft ?? selected.instructions, onChange: (e) => setInstructionDraft(e.target.value), onBlur: saveInstruction, placeholder: "例：输出一律用中文；引用给出处；先看数据再下结论。", "aria-label": "项目常驻指令" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "proj-instruction-foot", children: [
+            status.over && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "over", children: `超出上限 ${status.count - INSTRUCTIONS_LIMIT} 字，先精简再离开输入框（超出部分不会被保存）` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `${status.count} / ${INSTRUCTIONS_LIMIT} 字` })
+          ] })
+        ] })
+      ] })
+    ] });
+  }
+  /* ── L1 卡片墙 ── */
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", "data-projects": "", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "项目" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /*
+       * 空态时 head 不放「新建项目」——空态中央已有唯一的第一步入口，
+       * 同屏双 CTA 会让人犹豫「这两个有什么区别」（设计师终审第 3 条）。
+       * creating 展开中照常显示输入行（那是已开始的动作，不能因为列表空而吞掉）。
+       */
+      creating ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "task-rename-input", value: draftName, autoFocus: true, placeholder: "项目名称", onChange: (e) => setDraftName(e.target.value), onKeyDown: (e) => {
+          if (e.key === "Enter") createProject();
+          if (e.key === "Escape") {
+            setCreating(false);
+            setDraftName("");
+          }
+        }, "aria-label": "新项目名称" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: createProject, children: "创建" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => {
+          setCreating(false);
+          setDraftName("");
+        }, children: "取消" })
+      ] }) : projects !== void 0 && projects.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn proj-create-btn", onClick: () => {
+        setDraftName("");
+        setCreating(true);
+      }, children: "新建项目" }) : null
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-projects": "true", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : projects === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : projects.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconProject, { size: 22 }),
+      title: "还没有项目",
+      description: "把「同一件正在推进的事」的会话装订成一本活页夹：会话、产物与一段常驻要求聚在一处，换台电脑打开也还在。",
+      action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: () => {
+        setDraftName("");
+        setCreating(true);
+      }, children: "新建第一个项目" })
+    }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "proj-grid", children: sortProjectCards(projects, sessionsByPath).map((card) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "proj-card", style: { "--proj-accent": projectColorVar(card.colorIndex) }, onClick: () => setSelectedId(card.id), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-card-name", children: card.name }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "proj-card-meta", children: [
+        card.resolvedSessionCount > 0 ? `${card.resolvedSessionCount} 个会话` : "还没有会话",
+        " · ",
+        formatMessageTime(card.lastActivity, Date.now())
+      ] }),
+      card.hasInstructions && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-card-chip", children: "常驻指令" })
+    ] }, card.id)) }) })
+  ] });
+}
 function AutomationsView({
   cwd: cwd2,
   onClose,
@@ -69066,6 +69309,9 @@ function App() {
       const finished = detectFinishedRuns(taskListRef.current ?? [], sessions);
       setTaskList(sessions);
       setTaskListError(void 0);
+      // 归组变化（归入/移出/解散）都会推这条：项目归属字段随列表一起刷新，
+      // 侧栏色点、⋯ 菜单的当前项目与 ProjectView 共用同一份 state，不会各说各话。
+      void reloadProjects();
       for (const item of finished) {
         if (item.id === visibleSessionIdRef.current && viewRef.current === "chat") continue;
         setUnreadIds((prev) => {
@@ -69825,6 +70071,35 @@ function App() {
     setView("library");
   }, [view]);
   /*
+   * 项目列表的单一数据源：侧栏「归入项目」菜单与 ProjectView 共用这份，
+   * 两边任何一处改了归属都会经它刷新（assignSession 还会推 taskListChanged，
+   * 那条链路在 App 挂载的订阅里顺带也刷它——侧栏色点与菜单永不各说各话）。
+   */
+  const [projects, setProjects] = reactExports.useState(void 0);
+  const [projectsError, setProjectsError] = reactExports.useState(void 0);
+  const reloadProjects = reactExports.useCallback(async () => {
+    try {
+      setProjects(await window.kami.listProjects());
+      setProjectsError(void 0);
+    } catch (e) {
+      setProjectsError(errorText(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void reloadProjects();
+  }, [reloadProjects]);
+  const openProjects = reactExports.useCallback(() => {
+    setReturnView(view === "chat" ? "chat" : "home");
+    setView("projects");
+    void reloadProjects();
+  }, [view, reloadProjects]);
+  const assignProjectSession = reactExports.useCallback((sessionPath, projectId) => {
+    void window.kami.assignProjectSession(sessionPath, projectId).then(() => {
+      void reloadProjects();
+      return void 0;
+    }).catch((e) => showToast(errorText(e), "error"));
+  }, [reloadProjects, showToast]);
+  /*
    * 打开模型对比。两个入口共用它（⌘K 动作与输入卡模型菜单里的那条）：
    * 「返回上一视图」的口径与 diagnostics / stats 一致 —— 从对话页进来的回对话页。
    * 入口本身不带问题（问题在对比屏自己的输入卡里），所以这里只切视图。
@@ -70065,6 +70340,9 @@ function App() {
         onOpenSkills: () => setView("skills"),
         onOpenAutomations: openAutomations,
         onOpenLibrary: openLibrary,
+        onOpenProjects: openProjects,
+        onAssignProject: assignProjectSession,
+        projects,
         onOpenPalette: () => setPaletteOpen(true)
       }
     ),
@@ -70229,6 +70507,18 @@ function App() {
         onPreviewArtifact: previewLibraryArtifact,
         onOpenExternal: openArtifact,
         onNewTask: newTask
+      }
+    ),
+    view === "projects" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      ProjectView,
+      {
+        onClose: () => setView(returnView),
+        sessions: taskList,
+        projects,
+        projectsError,
+        onReloadProjects: reloadProjects,
+        onResumeSession: resumeTask,
+        onToast: showToast
       }
     ),
     view === "chat" && /* @__PURE__ */ jsxRuntimeExports.jsx(

@@ -149,6 +149,22 @@ ${input.languageBody.trim()}` });
 ${input.memorySystemBody.trim()}`
     });
   }
+  /*
+   * 项目常驻指令（projects.json）：该会话所属项目的「工作要求」，每轮注入。
+   * 与 memorySystemBody 同型的追加段——空 / 未传时**不进这段**，组装结果
+   * 与无项目完全一致（回归口径：字节级不变）。来源标注 project-instructions，
+   * 诊断面板与 promptPreview 自动可见（同一条组装路径）。
+   */
+  if (input.projectInstructionsBody !== void 0 && input.projectInstructionsBody.trim() !== "") {
+    all.push({
+      source: "project-instructions",
+      text: `
+
+## 项目要求
+
+${input.projectInstructionsBody.trim()}`
+    });
+  }
   const piBlock = formatPiContextBlock(input);
   if (piBlock !== "") {
     all.push({ source: "pi-context", text: `
