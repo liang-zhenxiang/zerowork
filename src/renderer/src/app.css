@@ -1608,6 +1608,13 @@ textarea:focus-visible {
 	text-align: left;
 }
 
+/* 菜单内的分组小标题（「归入项目」分区）：只标注，不可点。 */
+.space-menu-label {
+	padding: var(--space-2) var(--space-3) var(--space-1);
+	font-size: var(--text-meta);
+	color: var(--text-faint);
+}
+
 .space-menu-item:hover {
 	background: var(--bg-hover);
 }
@@ -9435,6 +9442,209 @@ textarea:focus-visible {
 
 .ex-modal-use:hover {
 	background: var(--primary-hover);
+}
+
+/* ── 项目（projects）：L1 卡片墙 / L2 详情 ──────────────────────
+ * 骨架复用 .settings（同资料库 / 定时任务管理页）。视觉全部取既有 token；
+ * 项目色只用 --cat-1..6（daemon 按现存数轮转分配，CSS 不引入新颜色档）。
+ * 色条用 inset box-shadow（compare 通道先例）：不占布局宽，缩进不错位。
+ * ──────────────────────────────────────────────────────────────── */
+
+.proj-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+	gap: var(--space-4);
+}
+
+/* 头部「新建项目」：primary 语义但要贴 settings-head 的行高（primary-btn 默认偏大）。 */
+.proj-create-btn {
+	padding: var(--space-2) var(--space-4);
+}
+
+/* 项目卡：次级面（§3.3 卡片级别），底 --bg-raised、边框由圆角与底色承担。 */
+.proj-card {
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+	box-shadow: inset 2px 0 0 var(--proj-accent, --cat-1);
+	text-align: left;
+	transition: background var(--dur-fast) var(--ease-standard);
+	cursor: pointer;
+}
+
+.proj-card:hover {
+	background: var(--bg-hover);
+}
+
+.proj-card:active {
+	transform: scale(0.98);
+}
+
+.proj-card-name {
+	font-size: var(--text-body);
+	font-weight: 500;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.proj-card-meta {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 有常驻指令时的中性 chip（--bg-chip + 次文字；不借状态色、不做项目色 chip：
+   那要亮暗两套透明度计算，而且色条已经承担了项目身份）。 */
+.proj-card-chip {
+	display: inline-flex;
+	align-items: center;
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-full);
+	background: var(--bg-chip);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+/* ── 详情 ── */
+
+.proj-detail-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: var(--radius-full);
+	flex: none;
+}
+
+.proj-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+
+.proj-section + .proj-section {
+	margin-top: var(--space-6);
+}
+
+.proj-section-title {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	font-weight: 500;
+}
+
+.proj-session-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	cursor: pointer;
+	transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.proj-session-row:hover {
+	background: var(--bg-hover);
+}
+
+.proj-session-title {
+	flex: 1;
+	min-width: 0;
+	font-size: var(--text-list);
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.proj-row-time {
+	flex: none;
+	font-size: var(--text-meta);
+	color: var(--text-faint);
+}
+
+/* 行尾操作默认藏、hover 才现（§7.9 键盘可达：focus-visible 也现）。 */
+.proj-row-remove {
+	flex: none;
+	opacity: 0;
+	pointer-events: none;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	background: none;
+	border: none;
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	transition: opacity var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+}
+
+.proj-session-row:hover .proj-row-remove,
+.proj-row-remove:focus-visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.proj-row-remove:hover {
+	color: var(--text);
+}
+
+.proj-hint {
+	font-size: var(--text-meta);
+	color: var(--text-faint);
+}
+
+/* 指令编辑卡：与详情行同档（--bg-raised + --radius-md）。失焦自动保存。 */
+.proj-instruction {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+.proj-instruction textarea {
+	min-height: 96px;
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	font-size: var(--text-list);
+	line-height: 1.6;
+	resize: vertical;
+	transition: border-color var(--dur-fast) var(--ease-standard);
+}
+
+.proj-instruction textarea:focus {
+	outline: none;
+	border-color: var(--text-secondary);
+}
+
+.proj-instruction-foot {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text-faint);
+}
+
+.proj-instruction-foot .over {
+	color: var(--danger);
+}
+
+/* 侧栏会话行的项目色点（与文字 title 双冗余，§7.6）。 */
+.proj-dot-inline {
+	width: 8px;
+	height: 8px;
+	border-radius: var(--radius-full);
+	flex: none;
 }
 
 /* ── 定时任务管理页 ─────────────────────────────────────────────
