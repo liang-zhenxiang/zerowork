@@ -9450,6 +9450,12 @@ textarea:focus-visible {
  * 色条用 inset box-shadow（compare 通道先例）：不占布局宽，缩进不错位。
  * ──────────────────────────────────────────────────────────────── */
 
+/* 卡片墙是 auto-fill 网格：套设置页的 900px「阅读列宽」会把网格压成窄条、
+   右侧留白（compare 的 [data-compare] 同款理由与同款覆盖）。 */
+.settings-body[data-projects] {
+	max-width: none;
+}
+
 .proj-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -9588,6 +9594,7 @@ textarea:focus-visible {
 }
 
 .proj-session-row:hover .proj-row-remove,
+.proj-session-row:focus-within .proj-row-remove,
 .proj-row-remove:focus-visible {
 	opacity: 1;
 	pointer-events: auto;

@@ -60,7 +60,7 @@ function parseProject(raw, now = Date.now()) {
   const instructions = typeof raw.instructions === "string" ? raw.instructions.slice(0, PROJECT_INSTRUCTIONS_MAX) : "";
   const createdAt = typeof raw.createdAt === "number" && Number.isFinite(raw.createdAt) ? raw.createdAt : now;
   const sessionPaths = Array.isArray(raw.sessionPaths)
-    ? // 先 resolve 再去重：`/a/s.jsonl` 与 `/a/./s.jsonl` 去重时还是两个串，resolve 后才��同一个文件。
+    ? // 先 resolve 再去重：`/a/s.jsonl` 与 `/a/./s.jsonl` 去重时还是两个串，resolve 后才是同一个文件。
       [...new Set(raw.sessionPaths.filter((p) => typeof p === "string" && p !== "").map((p) => resolve(p)))]
     : [];
   return { id: raw.id, name: raw.name.trim(), colorIndex, instructions, createdAt, sessionPaths };

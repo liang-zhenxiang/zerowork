@@ -67789,7 +67789,7 @@ function ProjectView({ onClose, sessions, projects, projectsError, onReloadProje
     const { rows, unresolvedPaths } = projectSessionRows(selected, sessionsByPath);
     const artifacts = library === void 0 ? void 0 : projectArtifactRows(library.artifacts ?? [], selected);
     const status = instructionsStatus(instructionDraft ?? selected.instructions);
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", "data-projects": "", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回项目列表", onClick: () => setSelectedId(void 0), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-detail-dot", style: { background: projectColorVar(selected.colorIndex) }, "aria-hidden": "true" }),
@@ -67821,7 +67821,7 @@ function ProjectView({ onClose, sessions, projects, projectsError, onReloadProje
           }), children: "确认解散" })
         ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setConfirmingDisband(true), children: "解散项目" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", "data-projects": "true", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "proj-section", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "proj-section-title", children: ["会话", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-hint", children: `${rows.length}` })] }),
           rows.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "proj-hint", children: "还没有会话归入这个项目。在侧栏会话的 ⋯ 菜单里选「归入项目」。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-list", children: rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "proj-session-row", role: "button", tabIndex: 0, onClick: () => {
@@ -67851,6 +67851,9 @@ function ProjectView({ onClose, sessions, projects, projectsError, onReloadProje
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "proj-section proj-instruction", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "proj-section-title", children: ["常驻指令", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "proj-hint", children: "这个项目的每个会话每轮都会带上这段要求" })] }),
+          /* 功能说明行（设计师终审第 4 条）：「常驻指令」对办公用户是个新词，
+             一句话讲清它发生什么——注入每一轮对话，而不是只在界面上存着。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "proj-hint", children: "这段话会作为系统要求注入该项目下每一轮对话的开头，修改后下一轮生效。" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", { value: instructionDraft ?? selected.instructions, onChange: (e) => setInstructionDraft(e.target.value), onBlur: saveInstruction, placeholder: "例：输出一律用中文；引用给出处；先看数据再下结论。", "aria-label": "项目常驻指令" }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "proj-instruction-foot", children: [
             status.over && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "over", children: `超出上限 ${status.count - INSTRUCTIONS_LIMIT} 字，先精简再离开输入框（超出部分不会被保存）` }),
@@ -67862,11 +67865,16 @@ function ProjectView({ onClose, sessions, projects, projectsError, onReloadProje
     ] });
   }
   /* ── L1 卡片墙 ── */
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", "data-projects": "", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "项目" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /*
+       * 空态时 head 不放「新建项目」——空态中央已有唯一的第一步入口，
+       * 同屏双 CTA 会让人犹豫「这两个有什么区别」（设计师终审第 3 条）。
+       * creating 展开中照常显示输入行（那是已开始的动作，不能因为列表空而吞掉）。
+       */
       creating ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("input", { className: "task-rename-input", value: draftName, autoFocus: true, placeholder: "项目名称", onChange: (e) => setDraftName(e.target.value), onKeyDown: (e) => {
           if (e.key === "Enter") createProject();
@@ -67880,12 +67888,12 @@ function ProjectView({ onClose, sessions, projects, projectsError, onReloadProje
           setCreating(false);
           setDraftName("");
         }, children: "取消" })
-      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn proj-create-btn", onClick: () => {
+      ] }) : projects !== void 0 && projects.length > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn proj-create-btn", onClick: () => {
         setDraftName("");
         setCreating(true);
-      }, children: "新建项目" })
+      }, children: "新建项目" }) : null
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : projects === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : projects.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-projects": "true", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : projects === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : projects.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
       icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconProject, { size: 22 }),
       title: "还没有项目",
       description: "把「同一件正在推进的事」的会话装订成一本活页夹：会话、产物与一段常驻要求聚在一处，换台电脑打开也还在。",
