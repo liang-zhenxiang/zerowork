@@ -93,5 +93,13 @@ updates:
     #
     # xlsx 单独排除：npm 上 0.18.5 之后没有新版本（SheetJS 已迁到自有分发渠道），
     # 让它一直弹「无法修复」的告警只会造成告警疲劳。处置方式见 #15。
+    #
+    # vite 的 major 单独排除：本仓库的构建工具是 electron-vite，而它的 peer
+    # 把 vite 钉在 ^7 —— vite 8 装不上（ERESOLVE），每个大版本还会再来一次。
+    # 这条不是「不想升级」：先做 electron-vite 4 → 5（#168），再放开这里的 ignore。
+    # minor / patch 不受影响，照常提 PR。
     ignore:
       - dependency-name: "xlsx"
+      - dependency-name: "vite"
+        update-types:
+          - "version-update:semver-major"
