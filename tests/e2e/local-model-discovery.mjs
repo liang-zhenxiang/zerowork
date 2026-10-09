@@ -673,7 +673,7 @@ await h.check("连点两下「接上」只接入一次（mock 侧 /models 请求
 				usable: (snapshot?.models ?? []).filter((m) => m.available).map((m) => `${m.providerId}/${m.id}`),
 			};
 		});
-		throw new Error(`${error.message}｜失败现场：${JSON.stringify(scene)}`);
+		throw new Error(`${error.message}｜失败现场：${JSON.stringify(scene)}`, { cause: error });
 	}
 	const delta = mockOllama.probeRequests.length - probesBefore;
 	assert.equal(

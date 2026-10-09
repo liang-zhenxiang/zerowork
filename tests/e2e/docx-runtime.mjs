@@ -321,7 +321,7 @@ async function promptAndWait(text, expectSubstring, timeoutMs = 180_000) {
 
 	// 原来是页面里 `for × 60 + sleep 2s` 的手写轮询，换成 waitUntil
 	let state = null;
-	let why = "";
+	let why;
 	try {
 		await waitUntil(
 			async () => {

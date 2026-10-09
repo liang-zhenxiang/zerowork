@@ -228,7 +228,7 @@ async function readDocAndReport(filename, mark) {
 	// 原来是页面里 `for × 45 + sleep 2s` 的手写轮询，换成 waitUntil：
 	// 同样的 90 秒预算，超时时带上最后一次快照状态。
 	let state = null;
-	let why = "";
+	let why;
 	try {
 		await waitUntil(
 			async () => {

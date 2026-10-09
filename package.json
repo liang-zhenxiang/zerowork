@@ -127,6 +127,7 @@
   },
   "devDependencies": {
     "@corbe30/fortune-excel": "^2.3.3",
+    "@eslint/js": "^10.0.1",
     "@fortune-sheet/react": "^1.0.4",
     "@playwright/test": "^1.63.0",
     "@types/node": "26.6.3",
@@ -135,7 +136,7 @@
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
-    "eslint": "^9.0.0",
+    "eslint": "^10.12.0",
     "espree": "10.4.0",
     "katex": "^0.19.0",
     "monaco-editor": "^0.57.0",

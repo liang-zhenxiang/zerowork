@@ -35,7 +35,7 @@ const dim = (t) => paint('2', t);
 function main() {
 	process.stdout.write('\n行尾检查\n');
 
-	let out = '';
+	let out;
 	try {
 		// -I 跳过二进制；-l 只列文件名；-e $'\r' 匹配回车符
 		out = execFileSync('git', ['grep', '-I', '-l', '-e', '\r'], {

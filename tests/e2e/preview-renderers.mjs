@@ -285,7 +285,7 @@ async function waitForRequests(n, why) {
 			desc: `mock 收到第 ${n} 轮请求`,
 		});
 	} catch (error) {
-		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`, { cause: error });
 	}
 }
 
@@ -310,7 +310,7 @@ async function waitForComplete(desc, probe, { arg, timeout = 60_000, interval = 
 			{ timeout, interval, desc },
 		);
 	} catch (error) {
-		throw new Error(`${error.message}\n  最后一次探针状态：${JSON.stringify(last ?? "(未取到)").slice(0, 400)}`);
+		throw new Error(`${error.message}\n  最后一次探针状态：${JSON.stringify(last ?? "(未取到)").slice(0, 400)}`, { cause: error });
 	}
 }
 
@@ -375,8 +375,8 @@ async function clickFileRow(name) {
 			{ timeout: 40_000, interval: 1000, desc: `文件树里出现「${name}」并点开` },
 		);
 	} catch (error) {
-		if (listing !== "") throw new Error(`文件树里找不到「${name}」。现有条目：${listing}`);
-		throw new Error(`等了 40 秒文件树也没出现（.file-tree-row.file-tree-file 为空）—— ${error.message}`);
+		if (listing !== "") throw new Error(`文件树里找不到「${name}」。现有条目：${listing}`, { cause: error });
+		throw new Error(`等了 40 秒文件树也没出现（.file-tree-row.file-tree-file 为空）—— ${error.message}`, { cause: error });
 	}
 }
 

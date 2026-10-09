@@ -298,7 +298,7 @@ async function waitForRounds(mock, n, why) {
 	try {
 		await waitUntil(() => mock.requests.length >= n, { timeout: 60_000, interval: 100, desc: `mock 收到第 ${n} 轮请求` });
 	} catch (error) {
-		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`);
+		throw new Error(`mock 只收到 ${mock.requests.length} 轮请求（期望 ≥${n}）—— ${why}（${error.message}）`, { cause: error });
 	}
 }
 
@@ -457,7 +457,7 @@ await h.check("② 同一个任务里连点两个模型项，两个都进名单�
 		// 把此刻真正的名单读出来再抛：这条断言的失败现场就是「只剩后一个」那个形状，
 		// 光看「等待超时」看不出选中的到底是哪几个。
 		const scene = await readMenuState();
-		throw new Error(`${error.message}｜此刻选中的是 ${JSON.stringify(scene.picked)}（期望两个都在）`);
+		throw new Error(`${error.message}｜此刻选中的是 ${JSON.stringify(scene.picked)}（期望两个都在）`, { cause: error });
 	}
 	assert.deepEqual(state.picked.sort(), ["Mock Alpha", "Mock Beta"], `连点后选中的是 ${JSON.stringify(state.picked)}`);
 	assert.equal(state.button, "对比 2 个模型", `按钮文案不对：「${state.button}」`);
