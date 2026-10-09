@@ -61,10 +61,11 @@ function startMockModel() {
 				send({ tool_calls: [toolCall(1, "write", { path: "out-trace.txt", content: "trace e2e" })] });
 				send({}, "tool_calls");
 			} else if (toolResults <= 2) {
-				// 第二轮：read 不存在的文件 ×2 → 两条 error 合并成一个 bad 段（×2）。
-				// 平台无关，不依赖沙箱在 macOS 上的拒绝行为。
-				send({ tool_calls: [toolCall(0, "read", { path: "missing-file.txt" })] });
-				send({ tool_calls: [toolCall(1, "read", { path: "missing-file.txt" })] });
+				// 第二轮：read 两个不同的缺失文件 → 两条 error 合并成一个 bad 段（×2）。
+				// 平台无关，不依赖沙箱在 macOS 上的拒绝行为；两个文件不同名是刻意的：
+				// 同名同参的两条调用会被内核当作重复折叠掉（实测）。
+				send({ tool_calls: [toolCall(0, "read", { path: "missing-a.txt" })] });
+				send({ tool_calls: [toolCall(1, "read", { path: "missing-b.txt" })] });
 				send({}, "tool_calls");
 			} else {
 				for (const chunk of FINAL_TEXT.match(/.{1,8}/gu) ?? []) send({ content: chunk });
@@ -217,8 +218,17 @@ await h.check("bad 段有 ⚠ 形态（不看颜色也读得出）", async () =>
 	const r = await win.evaluate(() => {
 		const seg = document.querySelector(".trace-seg.bad");
 		if (seg === null) return { found: false };
-		return { found: true, hasAlert: seg.querySelector(".trace-seg-alert") !== null, aria: seg.getAttribute("aria-label"), title: seg.getAttribute("title") };
+		return {
+			found: true,
+			hasAlert: seg.querySelector(".trace-seg-alert") !== null,
+			aria: seg.getAttribute("aria-label"),
+			title: seg.getAttribute("title"),
+			// 可点性实证：段是 button，靠全局 button 规则拿到 pointer（评审曾疑漏配，
+			// 这里用计算样式钉死——谁把光标改没了这条会红）。
+			cursor: getComputedStyle(seg).cursor
+		};
 	});
+	assert.equal(r.cursor, "pointer", `段的光标不是 pointer（${r.cursor}）—— 点击暗示缺失`);
 	assert.ok(r.found, "没有 .trace-seg.bad —— 失败读文件那步没进轨迹或没标 bad");
 	assert.ok(r.hasAlert, "bad 段没有 ⚠ 图标");
 	assert.ok(r.aria?.includes("失败"), `bad 段 aria 没说清失败：${r.aria}`);

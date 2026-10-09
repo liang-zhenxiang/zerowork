@@ -4764,8 +4764,9 @@ textarea:focus-visible {
 	flex-wrap: wrap;
 	align-items: center;
 	gap: var(--space-1);
-	/* 贴在 turn-header 之下（header 自带 margin-bottom 一档），左缘与头像列对齐。 */
-	margin: 0 0 var(--space-2);
+	/* 贴在 turn-header 之下（header 自带 margin-bottom 一档），左缘与头像列对齐；
+	   下边距比上边距大一档 —— 轨迹是回合头的「收尾行」，与下方正文行之间要有分隔感。 */
+	margin: 0 0 var(--space-3);
 }
 
 .trace-seg {
@@ -4820,6 +4821,9 @@ textarea:focus-visible {
 .trace-seg.bad:hover {
 	background: color-mix(in srgb, var(--danger) 14%, transparent);
 	color: var(--danger);
+	/* 用户最想点的恰是失败段，hover 只动底色（8%→14% 掺混）肉眼难辨，
+	   描边同步加深补足反馈（UI/UX 评审意见，2026-10-10）。 */
+	border-color: color-mix(in srgb, var(--danger) 60%, transparent);
 }
 
 .trace-seg-alert {
@@ -4839,11 +4843,15 @@ textarea:focus-visible {
 }
 
 /* 段间连接符：短横线给出「轨道」的顺序感；换行时它跟随后段一起走，
-   行首的短横线读作「轨道延续」，不是断头（aria-hidden，纯装饰）。 */
+   行首的短横线读作「轨道延续」，不是断头（aria-hidden，纯装饰）。
+   底色用 --text-secondary 而不是 --border：--border（#e6e6e6）对白底
+   对比度约 1.2:1，实测截图里基本不可见，顺序感立不起来；10×2px 的小尺寸
+   压得住 --text-secondary 的强度（UI/UX 评审意见，2026-10-10）。 */
 .trace-conn {
-	width: 8px;
-	height: 1px;
-	background: var(--border);
+	width: 10px;
+	height: 2px;
+	border-radius: var(--radius-full);
+	background: var(--text-secondary);
 	flex: 0 0 auto;
 }
 
