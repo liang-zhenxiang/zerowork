@@ -20,3 +20,18 @@ token 纪律与状态语义无可挑剔：中性感分类、danger 只表 bad、
 
 - bad 段「不看颜色也读得出」做满了：⚠ 字形（12px）+ danger 文字与描边 + `aria-label`「有失败或被拦截」，且状态色零渗漏到读/写/命令分类（§2.4 严守）。
 - 键盘与可访问性完整：`focus-visible` 2px `--accent` 焦点环、`title` 提示、`<button type="button">` 可聚焦；深浅两套全部由同一组 token 派生，实拍一致性确认无漂移。
+
+## 第二轮（2026-10-10 补记）
+
+第一轮评审 agent 因回传挂起被停，其结论在合并后才送达——含一条**真实缺陷**，
+已在 `fix/turn-trace-hover-feedback` 分支全部处置：
+
+| 优先级 | 发现 | 处置 |
+| --- | --- | --- |
+| P0 | `.trace-seg:hover` 用 `--bg-hover` 比静态底 `--bg-chip` 更浅，两主题下 hover 都**变浅**，与全站 hover 加深语言相反，点击暗示趋零 | ✅ 改 `color-mix(var(--text) 12%)` + `border-color: var(--border)`，两主题统一加深一档 |
+| P1 | bad 段浅色 `--danger` 对白 3.67:1 低于 AA 小字标准，形态线索单靠 ⚠ | ✅ 补 `font-weight: 600`（形态双保险） |
+| P2 | `trace-seg.running` 类无对应 CSS 规则，进行中段与普通段只差呼吸点 | ✅ 补 `border-color: var(--border)` |
+| 勘误 | count 注释「降一档已由字号承担」与实现（同字号同色）不符 | ✅ 改为「区分由 mono 字形承担」 |
+| 间距节奏 / 折叠态结构 / count 样式 | 判断为成立不改 | — |
+
+（连接符可见度一条第一轮与第二轮意见一致，已在 #175 落地。）
