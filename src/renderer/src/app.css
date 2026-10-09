@@ -4788,8 +4788,13 @@ textarea:focus-visible {
 }
 
 .trace-seg:hover {
-	background: var(--bg-hover);
+	/* 不能用 --bg-hover：段的静态底是 --bg-chip（浅 6% 黑 / 深 10% 白），而 --bg-hover
+	   比它更浅（5% / 7%）——两套主题下 hover 都会「变浅」，与全站 hover 加深的语言
+	   相反（UI/UX 评审 P0，2026-10-10）。color-mix 按 --text 掺混，两主题统一加深一档；
+	   bad 段已有 color-mix 先例，不算新增颜色。 */
+	background: color-mix(in srgb, var(--text) 12%, transparent);
 	color: var(--text);
+	border-color: var(--border);
 }
 
 /* chip 档的按压缩放（§3.1）。 */
@@ -4807,13 +4812,16 @@ textarea:focus-visible {
 }
 
 .trace-seg-count {
-	/* 计数用等宽小字与类别名区分，同色（--text-secondary 降一档已由字号承担）。 */
+	/* 计数用等宽小字与类别名区分（同字号同色，区分由 mono 字形承担）。 */
 	font-family: var(--font-mono);
 }
 
-/* bad 段：危险色只表「这步出过错」的状态；边框 35% 掺透明避免整段过重。 */
+/* bad 段：危险色只表「这步出过错」的状态；边框 35% 掺透明避免整段过重。
+   font-weight 600 是形态线索（与 ⚠ 双保险）：浅色下 --danger 对白约 3.7:1
+   低于 AA 小字标准，低分屏/强光下 12px 红字先糊（UI/UX 评审 P1，2026-10-10）。 */
 .trace-seg.bad {
 	color: var(--danger);
+	font-weight: 600;
 	border-color: color-mix(in srgb, var(--danger) 35%, transparent);
 	background: color-mix(in srgb, var(--danger) 8%, transparent);
 }
@@ -4829,6 +4837,13 @@ textarea:focus-visible {
 .trace-seg-alert {
 	flex: 0 0 auto;
 	color: var(--danger);
+}
+
+/* running 段：边框亮出轮廓，与呼吸点互为��线索（组件挂 trace-seg running 类；
+   此前没有对应规则，进行中段与普通段只差 6px 呼吸点——UI/UX 评审 P2，2026-10-10）。
+   回合结束类摘除，边框自动消失，不碰状态色纪律。 */
+.trace-seg.running {
+	border-color: var(--border);
 }
 
 /* running 段的呼吸点：复用 .tool-dot.running 的 tool-pulse —— 「还在跑」
