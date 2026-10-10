@@ -97,12 +97,16 @@
   `ERR_MODULE_NOT_FOUND`。现在把它显式写进 `devDependencies`。顺带整改 10.x 新增的
   两条规则：`preserve-caught-error` 命中 26 处「重抛却丢掉原因」的 `catch`，补上
   `{ cause: error }` —— 失败信息里出错地点与根因不再断链；`no-useless-assignment`
-  命中 5 处「先赋空值又必被覆盖」的局部变量，去掉多余初始化。
+  命中 5 处「先赋空值又必被覆盖」的局部变量，去掉多余初始化。顺带把根目录显式声明的
+  `espree` 从 10.4.0 升到 11.2.0（#173）：eslint 10 自己就依赖 `espree ^11.2.0`，
+  而根 pin 停在 10.4.0，树里同时躺着两份 —— 现在去重成一份。`check-daemon-graph`
+  用的 `ecmaVersion: "latest"` + `sourceType: "module"` 在 11 上没有变化。
 - **Dependabot 不再提 `vite` 的大版本**（[#168](https://github.com/liang-zhenxiang/zerowork/issues/168)）。
   #135 想把 vite 7 → 8，装不上：构建工具 `electron-vite` 的 peer 把 vite 钉在 `^7`，
   稳定版 5.0.0 也还没支持 8（只有 6.0.0-beta 支持）。放着不管它每到一个大版本就回来
   一次，所以在 `dependabot.yml` 里排除 vite 的 major；**先做 electron-vite 4 → 5**，
-  完成后再放开。minor / patch 不受影响。
+  完成后再放开。`@vitejs/plugin-react` 一并排除 —— 它的 6.x 同样要求 `vite ^8`
+  （#172 就是这么红的），卡在同一条链上，要放开就一起放开。minor / patch 不受影响。
 
 ## [0.5.0] - 2026-10-08
 

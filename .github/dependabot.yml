@@ -97,9 +97,14 @@ updates:
     # vite 的 major 单独排除：本仓库的构建工具是 electron-vite，而它的 peer
     # 把 vite 钉在 ^7 —— vite 8 装不上（ERESOLVE），每个大版本还会再来一次。
     # 这条不是「不想升级」：先做 electron-vite 4 → 5（#168），再放开这里的 ignore。
+    # @vitejs/plugin-react 一起排除：它的 6.x 同样要求 vite ^8，卡在同一条链上
+    # （#172 就是这么红的）。两者要放开就一起放开，理由与跟踪 Issue 都是 #168。
     # minor / patch 不受影响，照常提 PR。
     ignore:
       - dependency-name: "xlsx"
       - dependency-name: "vite"
+        update-types:
+          - "version-update:semver-major"
+      - dependency-name: "@vitejs/plugin-react"
         update-types:
           - "version-update:semver-major"
