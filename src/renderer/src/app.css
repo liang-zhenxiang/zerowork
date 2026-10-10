@@ -4839,7 +4839,7 @@ textarea:focus-visible {
 	color: var(--danger);
 }
 
-/* running 段：边框亮出轮廓，与呼吸点互为��线索（组件挂 trace-seg running 类；
+/* running 段：边框亮出轮廓，与呼吸点互为线索（组件挂 trace-seg running 类；
    此前没有对应规则，进行中段与普通段只差 6px 呼吸点——UI/UX 评审 P2，2026-10-10）。
    回合结束类摘除，边框自动消失，不碰状态色纪律。 */
 .trace-seg.running {
