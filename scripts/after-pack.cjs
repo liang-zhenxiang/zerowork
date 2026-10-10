@@ -31,19 +31,58 @@ function findAppBundle(appOutDir) {
 	return null;
 }
 
-/** electron-builder 的 platform/arch → esbuild 的平台目录名。 */
+/**
+ * electron-builder 的 platform/arch → esbuild 的平台目录名。
+ *
+ * **键必须与 `builder-util` 的 `Arch` 枚举名一一对应**（见下面的 `ARCH_NAMES`）：
+ * 查到就保留那个目录、删掉其余；查不到（`undefined`）表示「表里没有这个组合」，
+ * 走保守分支 —— 全留 + 警告（宁可臃肿，不能删错）。
+ *
+ * 2026-10-10 除了修 arch 数字，还清掉了两类**不可达条目**：
+ *   · `linux.arm` 应为 `linux.armv7l` —— 枚举名是 `armv7l`，写 `arm` 的话
+ *     linux/armv7l 也会掉进兜底分支（与 x64 那次同一个病）
+ *   · `linux.ppc64` / `linux.riscv64` —— 这两个 **不是 `Arch` 的枚举值**，
+ *     `context.arch` 永远取不到，留着只会制造「已经考虑过」的错觉
+ */
 const ESBUILD_PLATFORM = {
 	darwin: { arm64: 'darwin-arm64', x64: 'darwin-x64' },
 	win32: { x64: 'win32-x64', arm64: 'win32-arm64', ia32: 'win32-ia32' },
-	linux: {
-		arm64: 'linux-arm64',
-		x64: 'linux-x64',
-		arm: 'linux-arm',
-		ia32: 'linux-ia32',
-		ppc64: 'linux-ppc64',
-		riscv64: undefined, // esbuild 无此目录；表里占位说明「linux+riscv64 不保留」
-	},
+	linux: { arm64: 'linux-arm64', x64: 'linux-x64', armv7l: 'linux-arm', ia32: 'linux-ia32' },
 };
+
+/**
+ * electron-builder 的 `Arch` 枚举值 → 名字。
+ *
+ * ⚠️ 这几个数字是**抄自上游**的，不是我们定的：来源是
+ * `node_modules/builder-util/out/arch.js`（electron-builder 的依赖）：
+ *     ia32=0, x64=1, armv7l=2, arm64=3, universal=4
+ *
+ * 2026-10-10 修掉的正是这里：原表写成 `{1:'ia32', 2:'x64', 3:'arm64'}`（差一位），
+ * 于是 x64 目标被认成 ia32、走进「未知平台组合」兜底分支 —— 裁剪对
+ * darwin-x64 / win32-x64 / linux-x64 **全部静默失效**，而 arm64 恰好蒙对。
+ *
+ * 上游若再改枚举，`tests/unit/after-pack-trim.test.mjs` 里那条「对着装着的
+ * builder-util 反查」会变红 —— 不依赖谁记得回来改这张表。
+ */
+const ARCH_NAMES = {
+	0: 'ia32',
+	1: 'x64',
+	2: 'armv7l',
+	3: 'arm64',
+	4: 'universal',
+};
+
+/**
+ * 纯函数：`(平台, arch) → 要保留的 esbuild 目录名`。
+ *
+ * `arch` 可以是 electron-builder 的枚举数字，也可以是字符串（CLI 传 arch 名时）。
+ * 返回字符串 = 保留它；返回 `undefined` = 表里没有这个组合（调用方走保守分支）。
+ */
+function esbuildDirFor(platformName, arch) {
+	const archName = typeof arch === 'string' ? arch : (ARCH_NAMES[arch] ?? String(arch));
+	const byPlatform = ESBUILD_PLATFORM[platformName];
+	return byPlatform === undefined ? undefined : byPlatform[archName];
+}
 
 // ---------------------------------------------------------------------------
 // ① 裁剪 @esbuild 的跨平台二进制（2026-10-02，update-channels）
@@ -56,10 +95,8 @@ const ESBUILD_PLATFORM = {
 // ---------------------------------------------------------------------------
 function trimEsbuild(context) {
 	const platformName = context.electronPlatformName;
-	// context.arch 是 electron-builder 的 Arch 枚举（数字：ia32=1、x64=2、arm64=3）
-	const archNumber = { 1: 'ia32', 2: 'x64', 3: 'arm64' };
-	const archName = archNumber[context.arch] ?? String(context.arch);
-	const keep = ESBUILD_PLATFORM[platformName]?.[archName];
+	// context.arch 是 electron-builder 的 Arch 枚举数字，映射见 ARCH_NAMES
+	const keep = esbuildDirFor(platformName, context.arch);
 
 	const app = findAppBundle(context.appOutDir);
 	if (app === null) {
@@ -72,16 +109,28 @@ function trimEsbuild(context) {
 		return;
 	}
 	if (keep === undefined) {
+		const archName = typeof context.arch === 'string' ? context.arch : (ARCH_NAMES[context.arch] ?? String(context.arch));
 		console.warn(`[afterPack] 未知的平台组合 ${platformName}/${archName}：@esbuild 全部保留（请补 ESBUILD_PLATFORM 表）`);
 		return;
 	}
+	const removed = trimEsbuildDir(target, keep);
+	console.log(`[afterPack] @esbuild 裁剪：保留 ${keep}，删除 ${removed} 个平台目录`);
+}
+
+/**
+ * 在 `@esbuild` 目录里执行裁剪：只留下 `keep`，其余全删。返回删掉的目录个数。
+ *
+ * 抽成可测函数是为了夹具能证明它**真的会删** —— 本机只有一个平台目录时，
+ * 原来的实现（连 keep 都算错）看不出任何异常。
+ */
+function trimEsbuildDir(target, keep) {
 	let removed = 0;
 	for (const name of readdirSync(target)) {
 		if (name === keep) continue;
 		rmSync(join(target, name), { recursive: true, force: true });
 		removed += 1;
 	}
-	console.log(`[afterPack] @esbuild 裁剪：保留 ${keep}，删除 ${removed} 个平台目录`);
+	return removed;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +174,16 @@ function adhocSign(context) {
 	console.log('[afterPack] ad-hoc 签名完成并通过校验');
 }
 
-module.exports = async function afterPack(context) {
+async function afterPack(context) {
 	trimEsbuild(context);
 	adhocSign(context);
-};
+}
+
+// electron-builder 的契约是「模块导出一个函数」——命名导出挂在它身上，
+// 供单测直接验证，不改变 electron-builder 的调用方式。
+module.exports = afterPack;
+module.exports.esbuildDirFor = esbuildDirFor;
+module.exports.trimEsbuild = trimEsbuild;
+module.exports.trimEsbuildDir = trimEsbuildDir;
+module.exports.ARCH_NAMES = ARCH_NAMES;
+module.exports.ESBUILD_PLATFORM = ESBUILD_PLATFORM;
