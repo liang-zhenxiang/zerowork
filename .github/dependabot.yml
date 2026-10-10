@@ -95,10 +95,11 @@ updates:
     # 让它一直弹「无法修复」的告警只会造成告警疲劳。处置方式见 #15。
     #
     # vite 的 major 单独排除：本仓库的构建工具是 electron-vite，而它的 peer
-    # 把 vite 钉在 ^7 —— vite 8 装不上（ERESOLVE），每个大版本还会再来一次。
-    # 这条不是「不想升级」：先做 electron-vite 4 → 5（#168），再放开这里的 ignore。
+    # 把 vite 钉在 ^5 || ^6 || ^7 —— vite 8 装不上（ERESOLVE），每个大版本还会再来一次。
+    # 这条不是「不想升级」：#168 已把 electron-vite 升到 5.0.0，但**它的 peer 仍然没有 8**
+    # （只有 6.0.0-beta 支持）。所以 ignore 继续留着，改由 #182 跟踪「上游放开后再升」。
     # @vitejs/plugin-react 一起排除：它的 6.x 同样要求 vite ^8，卡在同一条链上
-    # （#172 就是这么红的）。两者要放开就一起放开，理由与跟踪 Issue 都是 #168。
+    # （#172 就是这么红的）。两者要放开就一起放开，理由与跟踪 Issue 都与 vite 相同。
     # minor / patch 不受影响，照常提 PR。
     ignore:
       - dependency-name: "xlsx"
