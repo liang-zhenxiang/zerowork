@@ -102,6 +102,14 @@
 
 ### 变更
 
+- **构建工具 electron-vite 4.0.1 → 5.0.0**（[#168](https://github.com/liangzhenxiang/zerowork/issues/168)）。
+  本仓库的构建工具落后两级，而它正是「vite 升不上去」那条链的源头（#135 / #172 两个
+  Dependabot 提案都因此装不上）。升到稳定版 5 之后，**配置零改动**（`electron.vite.config.mjs`
+  原样可用），产物结构不变：25 个 chunk 全部同名产出、依赖表 24 项全命中。
+  **但 vite 8 仍然装不上** —— 5.0.0 的 peer 是 `^5 \|\| ^6 \|\| ^7`，只有 `6.0.0-beta`
+  支持 8。所以 `dependabot.yml` 里那两条 major ignore **继续保留**，改由
+  [#182](https://github.com/liang-zhenxiang/zerowork/issues/182) 跟踪「上游稳定版放开后再升」。
+
 - **构建工具链升到 eslint 10**（#134）。eslint 10 移除了对 `@eslint/js` 的传递提供，
   而本仓库的扁平配置正是从它取 `js.configs.recommended` —— 此前这个包一直是条
   **幽灵依赖**（本地与 CI 都靠 eslint 9 的依赖树把它带进来），eslint 一升大版本就
