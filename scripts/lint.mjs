@@ -121,6 +121,7 @@ function main() {
 	runCheck('发布说明的首次运行指引', process.execPath, ['scripts/check-release-notes.mjs']);
 	runCheck('随包内容完整性', process.execPath, ['scripts/check-resources.mjs']);
 	runCheck('行尾一致性', process.execPath, ['scripts/check-line-endings.mjs']);
+	runCheck('中文内容无替换字符', process.execPath, ['scripts/check-unicode.mjs']);
 
 	// 渲染层产物契约：需要先构建。没构建就明确跳过，不假装通过。
 	if (existsSync(path.join(ROOT, 'out/renderer/assets'))) {
