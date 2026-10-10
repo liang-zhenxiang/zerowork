@@ -102,6 +102,20 @@
 
 ### 变更
 
+- **Agent 内核 `@earendil-works/pi-coding-agent` 0.87.1 → 1.0.0**（#170）。这是内核的
+  第一个大版本，所以先核对了三件可能「静默坏掉」的事，再动手：
+  **① 我们消费的 12 个导出在 1.0.0 里全在**（`SessionManager` / `loadSkills` /
+  `parseFrontmatter` / `stripFrontmatter` / `ModelRuntime` / `createAgentSession` /
+  `DefaultResourceLoader` / `SettingsManager` / `getAgentDir` / `createSyntheticSourceInfo` /
+  `formatSkillsForPrompt` 等）；**② 会话文件格式没变** —— 两版的 `CURRENT_SESSION_VERSION`
+  都是 `3`，用户已有的会话不需要迁移；**③ 随包体积不涨** —— 子包净减约 6 MB
+  （`pi-agent-core` 从 5.1 MB 缩到 0.27 MB，新增的 `pi-codemode` / `pi-mcp` 各不到 0.4 MB）。
+  实测：单测 706 条全过（含直接 `import { SessionManager }` 那条），端到端**真实启动**跑通
+  启动健康度 23/23、主链路 11/11、工具循环 6/6、子代理 6/6、团队 10/10、项目 8/8、
+  工作轨迹 8/8、对比保留列 10/10、resume 回落 4/4。
+  **已知的两条 high 没有变化**：`brace-expansion` 仍在 pi 子树（1.0.0 的 minimatch 是
+  10.2.6），`xlsx` 是随包 vendored —— 处置仍见 `SECURITY.md` 与 #140。
+
 - **构建工具 electron-vite 4.0.1 → 5.0.0**（[#168](https://github.com/liangzhenxiang/zerowork/issues/168)）。
   本仓库的构建工具落后两级，而它正是「vite 升不上去」那条链的源头（#135 / #172 两个
   Dependabot 提案都因此装不上）。升到稳定版 5 之后，**配置零改动**（`electron.vite.config.mjs`
