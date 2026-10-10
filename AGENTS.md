@@ -83,23 +83,18 @@ git status --short && git log --oneline -3
 #### 中文内容质量（本项目高频踩坑，每次编辑中文后都要做）
 
 ```bash
-python3 -c "
-import pathlib
-SKIP={'.git','node_modules','out','release','artifacts','coverage'}
-LEGIT={'src/renderer/src/code-preview.js','src/renderer/src/workspace.js','src/renderer/src/app.js'}
-bad=[]
-for p in pathlib.Path('.').rglob('*'):
-    if not p.is_file() or any(s in p.parts for s in SKIP) or str(p) in LEGIT: continue
-    try: t=p.read_text(encoding='utf-8')
-    except Exception: continue
-    if chr(0xfffd) in t:
-        for i,l in enumerate(t.splitlines(),1):
-            if chr(0xfffd) in l: bad.append(f'{p}:{i}')
-print('\n'.join(bad) if bad else 'OK')
-"
+npm run check:unicode          # 已进 lint:all 与 CI，不是人工步骤
+npm run check:unicode -- --all # 需要时连 resources/** 一起扫
 ```
 
-> 那三个 `LEGIT` 文件里的替换字符是 **vendored 解码器与 XML 字符集里的合法字面量**，不要动。
+> 这条**曾经是人工步骤**，于是 2026-10-10 滑过去一次：`app.css` 的一句注释被写坏，
+> 而 **CSS 注释会被压缩器原样保留进构建产物** —— 乱码跟着 beta 包发出去，且**不可逆**
+> （写坏的字节是合法的 U+FFFD，原文从 git 历史里直接消失，只能靠上下文反推）。
+> 现在是 `scripts/check-unicode.mjs` 守的：扫被 git 跟踪的文本文件，顺带抓非法 UTF-8 字节。
+>
+> 豁免两个范围：**三个合法字面量文件**（`src/renderer/src/code-preview.js`、
+> `workspace.js`、`app.js` —— vendored 解码器与 XML 字符集里的正当 U+FFFD，**不要动**）；
+> 以及 `resources/**`（红线 5 的工具链边界，用 `--all` 才扫）。
 >
 > **修的时候按行号整行重写，不要 `replace(单个替换字符)`** —— 一行里可能有**连续多个**
 > U+FFFD，`replace` 会把它整段换成完整文本，产出「用用于最佳努力的清理用于最佳努力的清理」
@@ -303,7 +298,8 @@ python3 ./.trellis/scripts/init_developer.py <你的名字>
   （`code-reuse-thinking-guide.md`、`cross-layer-thinking-guide.md` 之类）
   **是给开发 Trellis 本身的人看的**，与本项目无关 —— 已删除，
   **不要再从 `trellis update` 的产物里恢复它们**
-- **中文内容编辑后必扫 U+FFFD**（脚本见上「中文内容质量」）
+- **中文内容编辑后必扫 U+FFFD** —— 已由 `npm run check:unicode` 覆盖
+  （进 `lint:all` 与 CI；用法与豁免范围见上「中文内容质量」）
 
 ---
 

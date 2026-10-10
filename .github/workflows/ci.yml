@@ -107,6 +107,14 @@ jobs:
       - name: 校验行尾一致性
         run: npm run check:line-endings
 
+      # 中文内容里混入的 U+FFFD 替换字符。此前这件事靠 AGENTS.md 里一段人工脚本，
+      # 于是它滑过去了一次：app.css 的一句注释在 #177 写坏，而**CSS 注释会被压缩器
+      # 原样保留进构建产物** —— 乱码跟着 beta 包发了出去，且替换字符不可逆
+      # （写坏的字节是合法的 U+FFFD），原文从 git 历史里直接消失。
+      # 见 scripts/check-unicode.mjs
+      - name: 校验中文内容无替换字符
+        run: npm run check:unicode
+
   # ---------------------------------------------------------------------------
   # 单元测试：保留 Windows leg。
   #

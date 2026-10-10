@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "静态契约层的位置与写法：scripts/check-*.mjs 不跑代码只查契约；单测放 tests/unit 且必须是可 import 的纯函数"}
+{"file": ".trellis/workflow.md", "reason": "本仓库叠加规则：一任务一分支一 PR、规划产物必须落盘、提交走 AGENTS.md 的约定式提交"}
+{"file": "AGENTS.md", "reason": "中文内容质量一节（原人工扫描脚本与「按行号整行重写」的坑）、红线 5（resources/** 不参与本项目工具链）、常用命令"}
+{"file": "docs/MAINTAINER_GUIDE.md", "reason": "守卫类脚本的登记方式与审查清单；改维护流程要与该文件同步"}
+{"file": "scripts/check-line-endings.mjs", "reason": "同形参考：git ls-files/git grep 取清单、彩色输出、退出码、不在 git 仓库时显式跳过"}
+{"file": "scripts/next-beta-version.mjs", "reason": "导出纯函数供单测 + 「直接执行才跑 main」的守卫写法，照抄这一形"}
+{"file": ".github/workflows/ci.yml", "reason": "静态检查 job 的步骤写法与注释风格（新检查要接在这里）"}
