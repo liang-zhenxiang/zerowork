@@ -12,7 +12,7 @@
  *   3. `trimEsbuildDir` **真的会删**：夹具里放多个平台目录，断言只剩目标那一个
  *      （本机只有一个平台目录，所以这条以前根本没法证伪）
  */
-import { mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -27,8 +27,9 @@ const tempRoots = [];
 
 /** 造一个假的 `node_modules/@esbuild` 目录，里面放若干平台目录。 */
 function makeEsbuildFixture(names) {
-	const root = join(tmpdir(), `zerowork-esbuild-trim-${process.pid}-${tempRoots.length}`);
-	mkdirSync(root, { recursive: true });
+	// mkdtempSync 而不是「tmpdir + 可预测名字」：可预测的临时目录会被
+	// CodeQL 判为 insecure temporary file（也确实可被预创建/符号链接利用）。
+	const root = mkdtempSync(join(tmpdir(), 'zerowork-esbuild-trim-'));
 	tempRoots.push(root);
 	for (const name of names) {
 		mkdirSync(join(root, name), { recursive: true });
@@ -125,7 +126,7 @@ describe('trimEsbuild —— 从 context 到真删的整条接线', () => {
 	 * 这样整条接线（找 .app → 定位 @esbuild → 算 keep → 删）都能在不真打包的前提下跑。
 	 */
 	function makeAppFixture(platformDirs) {
-		const outDir = join(tmpdir(), `zerowork-appfx-${process.pid}-${tempRoots.length}`);
+		const outDir = mkdtempSync(join(tmpdir(), 'zerowork-appfx-'));
 		const app = join(outDir, 'ZeroWork.app');
 		mkdirSync(join(app, 'Contents'), { recursive: true });
 		writeFileSync(join(app, 'Contents', 'Info.plist'), '<plist/>');
@@ -174,8 +175,7 @@ describe('trimEsbuild —— 从 context 到真删的整条接线', () => {
 	});
 
 	it('找不到 .app 时安全跳过（不抛）', () => {
-		const outDir = join(tmpdir(), `zerowork-appfx-none-${process.pid}`);
-		mkdirSync(outDir, { recursive: true });
+		const outDir = mkdtempSync(join(tmpdir(), 'zerowork-appfx-none-'));
 		tempRoots.push(outDir);
 		expect(() =>
 			trimEsbuild({ electronPlatformName: 'darwin', arch: 1, appOutDir: outDir }),
