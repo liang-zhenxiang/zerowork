@@ -15277,6 +15277,21 @@ function HomeRecentSessions({ sessions, onResume }) {
     ))
   ] });
 }
+/*
+ * 上手清单的骨架宽度：前三条对应真行的三句待办，末一条是那句「本地优先」说明
+ * —— 与真行同结构、同尺寸（§4 的骨架纪律），所以数据到达时是「同一片区域被填上」，
+ * 而不是整块内容被换掉（今天就是整块换掉：清单出现时输入卡会被顶下去一次）。
+ */
+const GUIDE_SKELETON_WIDTHS = ["68%", "52%", "60%", "42%"];
+/*
+ * 骨架的文字位撑到 1lh —— 与 `TASK_SKELETON_TITLE_STYLE` 同一手法：不这么做，
+ * 12px 高的骨架条会把行高压到比真行矮，数据到达时整块高度会跳一下。
+ */
+const GUIDE_SKELETON_TEXT_STYLE = {
+  display: "flex",
+  alignItems: "center",
+  minHeight: "1lh"
+};
 function OnboardingChecklist({
   modelId,
   cwd: cwd2,
@@ -15336,7 +15351,36 @@ function OnboardingChecklist({
       alive = false;
     };
   }, []);
-  if (error !== void 0 || snapshot === void 0 || workspaces === void 0 || sessions === void 0) return null;
+  /*
+   * 三态互斥且各自可辨（docs/DESIGN.md §4）。
+   *
+   * 这里此前是一句 `return null`，把「加载中」与「读失败」一起压成了「什么都不显示」——
+   * 而只有「三步都完成且未展开」才该什么都不显示。于是读失败的用户读成「这个应用没有
+   * 引导」，而不是「读不到」；§4 要求的「错误就地呈现并给出重试动作」没有落点。
+   *
+   * 两态都复用清单那块「填色无边」的次级面：§3.9 只允许主列有一个内容卡（输入卡），
+   * 搬带边框的 `.state-error` 进来等于加第二个盒子。底距仍由 `.home-guide` 的
+   * `--space-5` 出，§3.8 的 12 / 12 / 24 / 16 不因此改变。
+   *
+   * 两个态各自带**状态类**（`.home-guide-error` / `.home-guide-loading`）：三态在 DOM 上
+   * 显式可辨，别处（含端到端用例）不必靠嗅探行内样式或文案来判断现在处于哪一态 ——
+   * 「`.home-guide` 出现了」从此**不再等于**「数据到位」，这条必须先说清。
+   *
+   * 视觉方案见 .trellis/tasks/10-11-checklist-states/research/ux-proposal.md。
+   */
+  if (error !== void 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-guide home-guide-error", role: "alert", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon home-guide-icon-alert", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 15 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: `读取失败：${error}` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: load, children: "重试" })
+    ] }) });
+  }
+  if (snapshot === void 0 || workspaces === void 0 || sessions === void 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-guide home-guide-loading", role: "status", "aria-label": "正在读取上手清单", children: GUIDE_SKELETON_WIDTHS.map((width) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 15, height: 15 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", style: GUIDE_SKELETON_TEXT_STYLE, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width }) })
+    ] }, width)) });
+  }
   const readiness = judgeModelReadiness(modelId ?? snapshot.activeModelId, snapshot.models);
   const modelReady = readiness.kind === "ready";
   const workspaceReady = workspaces.length > 0;
