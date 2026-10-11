@@ -27,6 +27,7 @@ import {
 	deleteCustomProvider,
 	listOwnedProviderIds,
 	readCustomProvider,
+	readModelsJson,
 	upsertCustomProvider,
 	upsertProviderModel,
 } from "./models.js";
@@ -39,6 +40,26 @@ import {
 	removeApiKey,
 	writeApiKey,
 } from "./auth.js";
+import { LOCAL_PLACEHOLDER_API_KEY } from "./local-endpoints.js";
+
+/**
+ * 这条服务商的凭据是不是**本机服务一键接入写进去的占位值**（见
+ * `local-endpoints.js` 里 `LOCAL_PLACEHOLDER_API_KEY` 的注释）。
+ *
+ * 为什么要这么绕：凭据**不出 daemon**（`readCustomProvider` 刻意不回填 `apiKey`，
+ * 见 `docs/ARCHITECTURE.md` 的决策表），所以「这一行没有东西可换」这件事必须在这里
+ * 翻译成一个布尔事实交给渲染层 —— 而不是把 Key 发过去让它自己比。
+ *
+ * 判据刻意选「凭据的值」而不是「baseUrl 是不是回环」：用户按 `docs/USAGE.md` 手工添加
+ * 本机服务时**会自己填一个占位 Key**，那一条的「更换 Key」是该给的（他填的，他能改）。
+ * 只有「凭据恰好等于我们写的那个常量」才说明这行是应用替用户接上的。
+ *
+ * 自愈：用户一旦用「编辑」填了自己的 Key，这一位自动变回 false、按钮回来。
+ */
+export function hasPlaceholderCredential(modelsPath, providerId) {
+	const entry = readModelsJson(modelsPath).providers[providerId];
+	return entry !== void 0 && entry.apiKey === LOCAL_PLACEHOLDER_API_KEY;
+}
 
 class ModelCatalog {
   constructor(runtime, modelsPath) {
@@ -189,6 +210,9 @@ class ModelCatalog {
       source,
       credentialLabel: status.label,
       custom: owned.has(id),
+      // 占位凭据（本机服务一键接入）—— 渲染层据此把动作位从「更换 Key」换成一句说明，
+      // 并且不给「清除」：占位删掉之后 pi 会把这条服务商的模型判成不可用。
+      placeholderCredential: hasPlaceholderCredential(this.modelsPath, id),
       modelCount: this.runtime.getModels(id).length
     };
   }

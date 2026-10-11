@@ -408,11 +408,28 @@ async function goHome() {
 	await win.evaluate(() => {
 		[...document.querySelectorAll("button")].find((b) => (b.textContent || "").includes("新建任务"))?.click();
 	});
-	await waitUntil(() => win.evaluate(() => document.querySelector(".home-guide") !== null), {
-		timeout: 30_000,
-		desc: "首页上手清单挂上（.home-guide）",
-	});
+	await waitForGuideLoaded();
 }
+
+/**
+ * 等首页清单**加载完**。
+ *
+ * `.home-guide` 出现**不等于**数据到位（#148 起加载中骨架与读失败态都挂这个类）——
+ * 只等它出现，可能在骨架态就往下断言，CI 上真的踩过（onboarding 那次「可点的去处按钮数=0」）。
+ */
+const waitForGuideLoaded = () =>
+	waitUntil(
+		() =>
+			win.evaluate(() => {
+				const guide = document.querySelector(".home-guide");
+				if (guide === null) return false;
+				return (
+					!guide.classList.contains("home-guide-loading") &&
+					!guide.classList.contains("home-guide-error")
+				);
+			}),
+		{ timeout: 30_000, desc: "首页上手清单加载完成（不是骨架态、也不是读失败态）" },
+	);
 
 /** 切主题（截图用）。切完等属性真的落上再截。 */
 async function setTheme(theme) {
@@ -736,6 +753,124 @@ await h.check("接入后设置页同一行变成「已接入」，且不再给�
 	const row = localRow(await readLocalSection(), "Ollama");
 	assert.ok(row.meta.includes("个模型"), `已接入那行的模型数丢了：${JSON.stringify(row.meta)}`);
 	assert.equal(row.button, null, `已接入的行还在给「接入」按钮：${JSON.stringify(row.button)}`);
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+ * ④b 「服务商」那一行的动作位（issue #147）
+ *
+ * 与上面那个区块不是同一处：「本机模型服务」是**探测与接入**的地方，
+ * 「服务商」是**已配置了哪些**的地方。一键接入会在后者里多出一行，
+ * 而那一行此前挂着「更换 Key」—— 一个没有东西可换的动作。
+ * ══════════════════════════════════════════════════════════════════════ */
+
+/** 「设置 → 模型 → 服务商」那一节的每一行（动作位按**行**取，不按整个面板取）。 */
+const readProviderSectionRows = () =>
+	win.evaluate(() => {
+		const section = [...document.querySelectorAll(".settings-section")].find(
+			(s) => (s.querySelector("h2")?.textContent ?? "").trim() === "服务商",
+		);
+		if (section === undefined) return null;
+		return [...section.querySelectorAll(".provider-row")].map((row) => ({
+			name: (row.querySelector(".provider-name")?.textContent ?? "").trim(),
+			meta: (row.querySelector(".provider-meta")?.textContent ?? "").trim(),
+			hint: (row.querySelector(".provider-hint")?.textContent ?? "").trim(),
+			buttons: [...row.querySelectorAll(".mini-btn")].map((b) => (b.textContent ?? "").trim()),
+			visible: row.getClientRects().length > 0,
+		}));
+	});
+
+await h.check("一键接入的本机服务那行不再挂「更换 Key」，也不给「清除」（issue #147）", async () => {
+	await win.evaluate(() =>
+		[...document.querySelectorAll(".settings-section")]
+			.find((s) => (s.querySelector("h2")?.textContent ?? "").trim() === "服务商")
+			?.scrollIntoView({ block: "center" }),
+	);
+	await h.waitForSettled();
+	const rows = await readProviderSectionRows();
+	await h.shoot("settings-provider-rows-light");
+
+	const row = (rows ?? []).find((r) => r.name === "本机 Ollama");
+	assert.ok(
+		row !== undefined,
+		`「服务商」里没有一键接入那一行。现有：${(rows ?? []).map((r) => r.name).join(" / ")}`,
+	);
+	assert.ok(row.visible, "本机服务那一行在 DOM 里但没渲染出来");
+	assert.equal(
+		row.hint,
+		"无需 Key",
+		`本机服务那行的动作位不是说明：${JSON.stringify(row)}`,
+	);
+	assert.ok(
+		!row.buttons.some((b) => b.includes("Key")),
+		`本机服务那行还挂着 Key 动作（凭据是应用写的占位值，没有东西可换）：${JSON.stringify(row.buttons)}`,
+	);
+	assert.ok(
+		!row.buttons.includes("清除"),
+		`本机服务那行还挂着「清除」—— 删掉占位凭据后 pi 会判这条服务商未配置，它的模型随即全部不可选：${JSON.stringify(row.buttons)}`,
+	);
+	// 行内 meta 也不能说「已保存 API Key」：用户没有保存过任何 Key
+	assert.match(
+		row.meta,
+		/已接入本机服务/,
+		`本机服务那行的 meta 描述不对：${JSON.stringify(row.meta)}`,
+	);
+});
+
+await h.check("用户自己填过 Key 的服务商那行照旧给「更换 Key」（判据是凭据，不是地址）", async () => {
+	// 故意也用**回环地址**：地址回环与否不参与判断 —— 判据是「凭据是不是我们写的占位值」。
+	// 用户按 docs/USAGE.md 手工添加本机服务时会自己填一个占位 Key，那一条的按钮是该给的。
+	const saved = await win.evaluate(
+		async ({ baseUrl }) => {
+			try {
+				await globalThis.kami.saveCustomProvider(
+					{
+						id: "user-key-loopback",
+						name: "用户填了 Key 的回环服务",
+						baseUrl,
+						api: "openai-completions",
+						models: [
+							{
+								id: "some-model",
+								name: "some-model",
+								contextWindow: 128000,
+								maxTokens: 4096,
+								reasoning: false,
+								vision: false,
+							},
+						],
+					},
+					"sk-user-typed-this",
+				);
+				return { ok: true };
+			} catch (e) {
+				return { ok: false, err: String(e?.message ?? e).slice(0, 200) };
+			}
+		},
+		{ baseUrl: `http://127.0.0.1:${PORT.ollama}/v1` },
+	);
+	assert.ok(saved.ok, `配置「用户填了 Key」的服务商失败：${saved.err}`);
+
+	// 直接写 IPC 不会让已开的设置面板重拉快照 —— 关掉再开，走用户那条路
+	await win.evaluate(() => {
+		const close = document.querySelector('[aria-label="关闭设置"]');
+		if (close !== null) close.click();
+	});
+	await openSettingsModels();
+	const rows = await readProviderSectionRows();
+	const row = (rows ?? []).find((r) => r.name === "用户填了 Key 的回环服务");
+	assert.ok(
+		row !== undefined,
+		`「服务商」里没有刚添加的那一行。现有：${(rows ?? []).map((r) => r.name).join(" / ")}`,
+	);
+	assert.ok(
+		row.buttons.some((b) => b.includes("更换")),
+		`用户自己填过 Key 的服务商那行没有「更换 Key」：${JSON.stringify(row.buttons)}`,
+	);
+	assert.ok(
+		row.buttons.includes("清除"),
+		`用户自己填过 Key 的服务商那行没有「清除」：${JSON.stringify(row.buttons)}`,
+	);
+	assert.equal(row.hint, "", `不该给说明文案（它有真凭据可换）：${JSON.stringify(row.hint)}`);
 });
 
 await h.check("探到但零模型：显示「已探到，但还没有模型」+ 指引语，且**没有**接入按钮", async () => {

@@ -29,6 +29,7 @@ import {
 	upsertCustomProvider,
 	writeModelsJson,
 } from "../../src/main/daemon/models.js";
+import { hasPlaceholderCredential } from "../../src/main/daemon/model-catalog.js";
 
 let configDir;
 let previousConfigDir;
@@ -279,5 +280,47 @@ describe("既有行为不变（动 apiKey 这一处不能顺手改坏别的）",
 		expect(diskEntry().models[0].thinkingLevelMap).toEqual({ low: "low" });
 		// 两条继承同时成立：apiKey 来自旧条目、thinkingLevelMap 来自旧模型
 		expect(diskEntry().apiKey).toBe(PLACEHOLDER);
+	});
+});
+
+/**
+ * `hasPlaceholderCredential` —— 「这一行的凭据是不是我们写的占位值」（issue #147）。
+ *
+ * 渲染层据此把「更换 Key」换成一句说明。判据选**凭据的值**而不是 baseUrl 是否回环：
+ * 用户按文档手工添加本机服务时会自己填一个占位 Key，那一条的「更换 Key」是该给的。
+ * 这个函数是 daemon 把「凭据」翻译成「布尔事实」的唯一出口 —— 凭据本身不出 daemon。
+ */
+describe("hasPlaceholderCredential —— 占位凭据的判据", () => {
+	it("一键接入写进去的占位值 → true", () => {
+		upsertCustomProvider(getModelsPath(), providerInput());
+		expect(hasPlaceholderCredential(getModelsPath(), "local-ollama")).toBe(true);
+	});
+
+	it("用户自己填的 Key → false（哪怕是同一个回环地址）", () => {
+		// 这条是判据的关键：地址回环与否**不参与判断** —— 手工添加的本机服务
+		// 地址同样是 127.0.0.1，但那条的「更换 Key」是该给的（他填的，他能改）。
+		upsertCustomProvider(getModelsPath(), providerInput({ apiKey: "sk-user-supplied" }));
+		expect(hasPlaceholderCredential(getModelsPath(), "local-ollama")).toBe(false);
+	});
+
+	it("编辑一次（apiKey 缺省、走继承分支）之后仍是 true —— 占位不该被编辑动作洗掉", () => {
+		const path = getModelsPath();
+		upsertCustomProvider(path, providerInput());
+		upsertCustomProvider(path, withoutKey({ name: "改过的名字" }));
+		expect(diskEntry().name).toBe("改过的名字");
+		expect(hasPlaceholderCredential(path, "local-ollama")).toBe(true);
+	});
+
+	it("没有这条服务商 → false（不能对不存在的条目说「它是本机服务」）", () => {
+		expect(hasPlaceholderCredential(getModelsPath(), "no-such-provider")).toBe(false);
+	});
+
+	it("条目没有 apiKey → false", () => {
+		upsertCustomProvider(getModelsPath(), withoutKey());
+		expect(hasPlaceholderCredential(getModelsPath(), "local-ollama")).toBe(false);
+	});
+
+	it("models.json 不存在（全新安装）→ false，而不是抛错", () => {
+		expect(hasPlaceholderCredential(getModelsPath(), "local-ollama")).toBe(false);
 	});
 });
