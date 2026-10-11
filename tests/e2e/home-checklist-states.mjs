@@ -47,6 +47,9 @@ const readGuide = () =>
 		const style = getComputedStyle(guide);
 		return {
 			present: true,
+			// 状态类是三态在 DOM 上的显式判据（见 app.css 里那段说明）—— 不靠嗅探样式或文案
+			loading: guide.classList.contains("home-guide-loading"),
+			error: guide.classList.contains("home-guide-error"),
 			role: guide.getAttribute("role"),
 			ariaLabel: guide.getAttribute("aria-label"),
 			rows: guide.querySelectorAll(".home-guide-row").length,
@@ -149,14 +152,16 @@ const clickRetry = () =>
 await h.check("读失败时清单就地报错并给出重试，而不是整块消失（issue #148）", async () => {
 	await setInjection("reject");
 	await remountChecklist();
-	await waitUntil(async () => (await readGuide()).role === "alert", {
+	await waitUntil(async () => (await readGuide()).error === true, {
 		timeout: 30_000,
-		desc: "清单进入错误态（.home-guide[role=alert]）",
+		desc: "清单进入错误态（.home-guide-error）",
 	});
 	const guide = await readGuide();
 	await h.shoot("checklist-error");
 
 	assert.equal(guide.present, true, "读失败时清单整块消失了 —— 这正是 #148 要修的形态");
+	assert.equal(guide.loading, false, "错误态与加载态同时成立（状态类互斥性被破坏）");
+	assert.equal(guide.role, "alert", "错误态缺少 role=alert（屏幕阅读器读不到这是一条报错）");
 	assert.ok(
 		guide.texts.some((text) => text.includes("读取失败")),
 		`错误态没有「读取失败」的文案：${JSON.stringify(guide.texts)}`,
@@ -181,13 +186,15 @@ await h.check("读失败时清单就地报错并给出重试，而不是整块�
 await h.check("点重试先回到「加载中」的骨架：与真行同结构，不是空白也不是停在错误上", async () => {
 	await setInjection("hold");
 	assert.equal(await clickRetry(), true, "错误态里没有可点的「重试」按钮");
-	await waitUntil(async () => (await readGuide()).role === "status", {
+	await waitUntil(async () => (await readGuide()).loading === true, {
 		timeout: 30_000,
-		desc: "清单从错误态转到加载态（.home-guide[role=status]）",
+		desc: "清单从错误态转到加载态（.home-guide-loading）",
 	});
 	const guide = await readGuide();
 	await h.shoot("checklist-loading");
 
+	assert.equal(guide.error, false, "加载态里还留着错误态的状态类");
+	assert.equal(guide.role, "status", "加载态缺少 role=status（「在读取」的语义）");
 	assert.equal(guide.ariaLabel, "正在读取上手清单", `加载态缺少在读取的语义：${guide.ariaLabel}`);
 	assert.equal(
 		guide.rows,
@@ -210,7 +217,7 @@ await h.check("数据到达后同一块区域被填上：真实行回来，骨�
 	await waitUntil(
 		async () => {
 			const guide = await readGuide();
-			return guide.present && guide.bars === 0 && guide.texts.length > 0;
+			return guide.present && guide.loading === false && guide.error === false && guide.bars === 0 && guide.texts.length > 0;
 		},
 		{ timeout: 30_000, desc: "骨架被真实行替换（同一块区域被填上）" },
 	);

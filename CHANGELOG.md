@@ -175,6 +175,10 @@ afterPack 的 @esbuild 裁剪对**所有 x64 目标**静默失效（Intel 包 / 
   端到端新增 `home-checklist-states`（主进程侧换掉 IPC handler 注入读失败 / 挂起，
   真实启动走完「失败 → 重试 → 骨架 → 数据到达」并各留一张截图）；反向验证：把错误分支
   改回 `return null`，钉住修复的那条断言立刻变红（另两条因起点是错误态而连带失败）。
+  **顺带修了一处被这次改动照出来的测试前提**：`.home-guide` 出现从此**不再等于**
+  「数据到位」（加载骨架与读失败态都挂这个类），`onboarding.mjs` 里四处「等它出现」
+  因此改判「等加载完」—— CI 上已经因这条假过了一次（表现为「可点的去处按钮数=0」，
+  开发机上 IPC 快所以看不见；用一个注入 2.5 秒延迟的实验确认了旧判据确实在骨架态就为真）。
 
 - **afterPack 的 @esbuild 裁剪对 x64 目标静默失效**（[#183](https://github.com/liangzhenxiang/zerowork/issues/183)）。
   此前错在哪：`scripts/after-pack.cjs` 手抄的 arch 数字映射（`{1:'ia32', 2:'x64', 3:'arm64'}`）

@@ -2206,6 +2206,12 @@ textarea:focus-visible {
 	color: var(--danger);
 }
 
+/* 状态类：`.home-guide-loading`（加载中的骨架）与 `.home-guide-error`（读失败）。
+   两者都只标记「现在是哪一态」，视觉全部继承 `.home-guide` —— 写在这里是为了讲清
+   它们**不是样式钩子，是状态钩子**：端到端用例（tests/e2e/home-checklist-states.mjs）
+   靠它们判态，而不是靠嗅探行内样式或文案。三态换形态不换槽，所以这两个类是唯一能区分
+   「`.home-guide` 出现了」到底意味着什么的东西。 */
+
 /* 首页输入框的外层渐变槽：
    灰白渐变底 + 24px 圆角 + 上/左右 2px、下 4px 内边距 —— 白卡与下方的
    工作空间/权限 chips 都坐在这一层浅灰渐变上。

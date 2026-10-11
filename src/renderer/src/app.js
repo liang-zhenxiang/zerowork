@@ -15361,17 +15361,22 @@ function OnboardingChecklist({
    * 两态都复用清单那块「填色无边」的次级面：§3.9 只允许主列有一个内容卡（输入卡），
    * 搬带边框的 `.state-error` 进来等于加第二个盒子。底距仍由 `.home-guide` 的
    * `--space-5` 出，§3.8 的 12 / 12 / 24 / 16 不因此改变。
+   *
+   * 两个态各自带**状态类**（`.home-guide-error` / `.home-guide-loading`）：三态在 DOM 上
+   * 显式可辨，别处（含端到端用例）不必靠嗅探行内样式或文案来判断现在处于哪一态 ——
+   * 「`.home-guide` 出现了」从此**不再等于**「数据到位」，这条必须先说清。
+   *
    * 视觉方案见 .trellis/tasks/10-11-checklist-states/research/ux-proposal.md。
    */
   if (error !== void 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-guide", role: "alert", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-guide home-guide-error", role: "alert", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon home-guide-icon-alert", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 15 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", children: `读取失败：${error}` }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: load, children: "重试" })
     ] }) });
   }
   if (snapshot === void 0 || workspaces === void 0 || sessions === void 0) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-guide", role: "status", "aria-label": "正在读取上手清单", children: GUIDE_SKELETON_WIDTHS.map((width) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-guide home-guide-loading", role: "status", "aria-label": "正在读取上手清单", children: GUIDE_SKELETON_WIDTHS.map((width) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide-row", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-icon", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 15, height: 15 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-guide-text", style: GUIDE_SKELETON_TEXT_STYLE, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width }) })
     ] }, width)) });

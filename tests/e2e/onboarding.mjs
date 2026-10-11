@@ -62,6 +62,29 @@ const readHome = () =>
 		tail: (document.body.innerText || "").slice(-300),
 	}));
 
+/**
+ * 清单此刻的形态：`missing` / `loading` / `error` / `loaded`。
+ *
+ * **`.home-guide` 出现 ≠ 数据到位**（#148）：加载中的骨架与读失败态都挂同一个类。
+ * 这个区分不是洁癖 —— CI 上 IPC 比开发机慢，只等 `.home-guide` 会在骨架态就往下断言，
+ * 表现为莫名其妙地「可点的去处按钮数=0」（真实发生过一次）。
+ */
+const readGuideState = () =>
+	win.evaluate(() => {
+		const guide = document.querySelector(".home-guide");
+		if (guide === null) return "missing";
+		if (guide.classList.contains("home-guide-loading")) return "loading";
+		if (guide.classList.contains("home-guide-error")) return "error";
+		return "loaded";
+	});
+
+/** 等清单**真的加载完**（不是骨架、不是读失败）。 */
+const waitForChecklistLoaded = () =>
+	waitUntil(async () => (await readGuideState()) === "loaded", {
+		timeout: 30_000,
+		desc: "清单加载完成（不是骨架态、也不是读失败态）",
+	});
+
 /** 点「新建任务」回首页（侧栏在任何视图下都在）。 */
 async function goHome() {
 	await win.evaluate(() => {
@@ -102,10 +125,7 @@ const readNavItem = (label) =>
 await h.shoot("home-first-run");
 
 await h.check("首次运行出现三步清单（三项待办 + 一句本地优先）", async () => {
-	await waitUntil(() => win.evaluate(() => document.querySelector(".home-guide") !== null), {
-		timeout: 30_000,
-		desc: "首页渲染出上手清单（.home-guide）",
-	});
+	await waitForChecklistLoaded();
 	const now = await readChecklist();
 	assert.equal(now.rowCount, 4, `清单行数=${now.rowCount}；首页尾部：${(await readHome()).tail}`);
 	assert.equal(
@@ -132,10 +152,7 @@ await h.check("点清单里的模型去处，跳到设置页", async () => {
 
 await h.check("配好模型之前，清单不整块消失（另外两项还没完成）", async () => {
 	await goHome();
-	await waitUntil(() => win.evaluate(() => document.querySelector(".home-guide") !== null), {
-		timeout: 30_000,
-		desc: "回到首页且清单还在",
-	});
+	await waitForChecklistLoaded();
 	const now = await readChecklist();
 	assert.equal(now.rowCount, 4, `清单行数=${now.rowCount}`);
 	assert.equal(now.actionCount, 3, `可点的去处按钮数=${now.actionCount}`);
@@ -292,17 +309,16 @@ await h.check("三项全完成 → 清单消失，只留一个「上手清单」
 	// 发完消息会切到对话页，而清单只长在首页上 —— 先回首页
 	await goHome();
 	// 先等「清单组件画出了结果」这个正向信号：要么是清单本身，要么是回头路入口。
-	// **不能**拿「.home-guide 不见了」当完成证据。这条以前还兼着排除「三个 IPC 还在路上」
-	// 假过的职责；#148 之后「还在路上」有了自己的骨架形态（`.home-guide[role=status]`），
-	// 那种歧义消失，但「某一次读失败也会让清单让位」这条仍在 —— 所以仍然等正向信号。
+	// **不能**拿「.home-guide 不见了」当完成证据：读失败也会让清单让位。
+	// 而且 #148 之后 `.home-guide` 出现**不再等于**数据到位（加载中的骨架与读失败态
+	// 都挂这个类），所以正向信号要认「加载完的清单」—— 就是 readGuideState 的 loaded。
 	await waitUntil(
-		() =>
-			win.evaluate(
-				() =>
-					document.querySelector(".home-guide") !== null ||
-					[...document.querySelectorAll(".mini-btn")].some((b) => b.textContent.trim() === "上手清单"),
+		async () =>
+			(await readGuideState()) === "loaded" ||
+			win.evaluate(() =>
+				[...document.querySelectorAll(".mini-btn")].some((b) => b.textContent.trim() === "上手清单"),
 			),
-		{ timeout: 30_000, desc: "清单组件画出结果（清单本身或回头路入口）" },
+		{ timeout: 30_000, desc: "清单组件画出结果（加载完的清单，或回头路入口）" },
 	);
 	await h.shoot("checklist-hidden");
 	const now = await readChecklist();
@@ -317,10 +333,7 @@ await h.check("点「上手清单」能再调出来，且三项都标成已完�
 	await win.evaluate(() => {
 		[...document.querySelectorAll(".mini-btn")].find((b) => b.textContent.trim() === "上手清单")?.click();
 	});
-	await waitUntil(() => win.evaluate(() => document.querySelector(".home-guide") !== null), {
-		timeout: 30_000,
-		desc: "清单被重新调出来",
-	});
+	await waitForChecklistLoaded();
 	const now = await readChecklist();
 	assert.equal(now.actionCount, 0, `已完成还留着可点的去处按钮：${now.text}`);
 	assert.equal(new Set(now.markShapes).size, 1, "完成态三行的图标不是同一个（对勾），形态上读不出「都做完了」");
