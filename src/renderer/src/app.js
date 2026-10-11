@@ -63720,6 +63720,9 @@ function MemoryEvolutionSection({ busy }) {
   ] });
 }
 function sourceLabel$1(provider) {
+  // 占位凭据（本机服务一键接入）优先于 pi 的 source：那一行的来源是「一键接入」，
+  // 说「已保存 API Key」不准确 —— 用户没有保存过任何 Key（见 #147）。
+  if (provider.placeholderCredential === true) return "已接入本机服务";
   switch (provider.source) {
     case "subscription":
       return "已用订阅账号登录";
@@ -63738,6 +63741,9 @@ function sourceLabel$1(provider) {
   }
 }
 function canRemoveKey(provider) {
+  // 占位凭据不给「清除」：那不是用户存的密钥，删掉它等于把这条服务商弄坏
+  // （pi 的 getProviderAuthStatus 会判成未配置，它的模型随即全部不可选）。
+  if (provider.placeholderCredential === true) return false;
   return provider.source === "stored" || provider.source === "runtime";
 }
 function ProviderRow({
@@ -63772,6 +63778,11 @@ function ProviderRow({
       provider.source === "subscription" ? (
         // 订阅登录（Claude Pro / ChatGPT Plus 等）走 OAuth，不能用输入框改。
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-hint", children: "订阅账号，无需填写" })
+      ) : provider.placeholderCredential === true ? (
+        // 本机服务一键接入那条：凭据是应用写的占位值，**没有东西可以换** ——
+        // 挂一个「更换 Key」等于让用户去改一个不存在的设置（#147）。手法与上面订阅那行
+        // 一致：动作位放一句说明，而不是一个假按钮。
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-hint", children: "无需 Key" })
       ) : /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => setOpen((v) => !v), children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconKey, { size: 13 }),
         provider.configured ? "更换" : "填写",

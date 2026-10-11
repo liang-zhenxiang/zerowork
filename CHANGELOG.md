@@ -161,6 +161,23 @@ afterPack 的 @esbuild 裁剪对**所有 x64 目标**静默失效（Intel 包 / 
 
 ### 修复
 
+- **一键接入的本机服务商那行挂着「更换 Key」—— 一个没有东西可换的动作**（[#147](https://github.com/liangzhenxiang/zerowork/issues/147)）。
+  此前错在哪：一键接入写进条目的凭据是占位值 `local-no-auth`（本机服务不校验它），
+  但「设置 → 模型 → 服务商」那一行的动作位只看 `source`，于是对用户说「更换 Key」；
+  更糟的是它**还挂着「清除」**—— 点下去会把占位删掉，pi 随即判这条服务商未配置，
+  它的模型全部变成选不中（同一个错的两半）。现在 daemon 在 `toProviderInfo` 里多给一个
+  布尔事实 `placeholderCredential`（凭据**不出 daemon**，这件事必须在那边翻译），
+  渲染层据此把动作位换成一句说明「无需 Key」、meta 改成「已接入本机服务」、并**不给「清除」**。
+  判据刻意选「凭据是不是我们写的那个占位值」而不是「baseUrl 是不是回环」：用户按
+  `docs/USAGE.md` 手工添加本机服务时会自己填一个占位 Key，那一条的「更换 Key」是该给的。
+  用户一旦用「编辑」填了自己的 Key，这一位自动变回 false、按钮回来（自愈）。
+  单测 6 条钉住判据（占位 → true、用户填的 Key → false、编辑后仍 true、条目不存在 → false
+  且不抛错）；端到端新增两条断言（本机那行不再有 Key/清除动作 + **用户填过 Key 的回环服务
+  照旧有**「更换 Key」，后者同时钉住「判据是凭据、不是地址」）。反向验证两个方向都真跑过：
+  判据恒假 → 本机那行变红；恒真 → 用户那行变红，且都只红相关那一条。
+  顺带把 `local-model-discovery.mjs` 里 `goHome()` 的等待改成「等清单加载完」——
+  #148 之后 `.home-guide` 出现不再等于数据到位，同一个坑在 onboarding 上已经踩过一次。
+
 - **首页上手清单读失败时整块消失，与「加载中」「三步完成」三者不可辨**（[#148](https://github.com/liangzhenxiang/zerowork/issues/148)）。
   此前错在哪：`OnboardingChecklist` 用一句
   `if (error !== undefined || 数据没到齐) return null` 把三种情形压成了同一个画面 ——
