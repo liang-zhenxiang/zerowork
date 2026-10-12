@@ -101,6 +101,15 @@ const INVOKE = {
    */
   sessionList: "session:list",
   /**
+   * 首页「继续推进」的交接摘要：对若干会话文件各折一句「干到哪了」
+   * （{kind:"delivered"|"text"|"fallback"}，判定见 daemon/session-digest.js）。
+   * **拉式**：渲染层只对首页可见的几张卡按需调用，刻意不进 sessionList ——
+   * 那是每次 run 边界都推的热路径，而这里要 stat + 解析会话文件尾部，
+   * 读文件的开销不能挂上去。单个 path 失败不整体失败，记 {kind:"error"}
+   * （首页还要渲染其余卡）。
+   */
+  sessionDigest: "session:digest",
+  /**
    * 恢复指定历史会话为当前活动会话。path 来自 SessionSummary.path，
    * daemon 侧有路径守卫（限会话目录内的 .jsonl，防 ../ 穿越）。
    */

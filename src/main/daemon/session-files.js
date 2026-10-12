@@ -57,6 +57,7 @@ import { SessionArchive } from "./archive.js";
 import { readLibraryArtifacts } from "./library.js";
 import { SessionPinStore } from "./pin.js";
 import { ProjectsStore } from "./projects.js";
+import { DIGEST_LARGE_FILE_BYTES, summarizeLastActivity } from "./session-digest.js";
 import { hasExportableContent, renderSessionMarkdown } from "./session-markdown.js";
 import {
 	loadMemorySystemPrompt,
@@ -3514,6 +3515,71 @@ async function listSessions() {
   }), ...pending].sort((a, b) => b.modifiedAt - a.modifiedAt);
 }
 
+/*
+ * 首页「继续推进」的交接摘要（spec: home-resume-deck）。
+ *
+ * 刻意不挂进 listSessions：那是每次 run 边界都推的热路径，这里的 stat + 解析
+ * 开销只能由渲染层对首页可见的几张卡**按需**触发。摘要判定本身是纯逻辑，
+ * 见 ./session-digest.js（单测也在那边）。
+ *
+ * 单个 path 失败不整体失败（首页还要渲染其余卡）：失败项记 {kind:"error"}，
+ * 渲染层按 fallback 处理但不吞——错误信息在界面控制台可见。顺序处理而非并发池：
+ * 入参上限 8（首页只要 3-4 张，留一倍余量防手写调用），每个文件至多一次
+ * stat + 一次 ≤2MB 的解析，顺序成本可接受，不值得引入池的复杂度。
+ */
+const DIGEST_PATHS_MAX = 8;
+
+async function sessionDigest(paths) {
+  if (!Array.isArray(paths)) throw new Error("sessionDigest 需要会话路径数组");
+  if (paths.length > DIGEST_PATHS_MAX) {
+    throw new Error(`sessionDigest 一次最多 ${DIGEST_PATHS_MAX} 个会话（收到 ${paths.length} 个）`);
+  }
+  const sessionsDir = getSessionsDir();
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const digests = {};
+  for (const path of paths) {
+    // 键用调用方传来的原样字符串：渲染层拿 session.path 查表，这里做 resolve
+    // 归一反而会让「发出去的键」与「查表的键」对不上。
+    if (typeof path !== "string" || path === "") {
+      digests[path] = { kind: "error", message: "会话路径非法" };
+      continue;
+    }
+    // 与 sessionResume 同一道路径守卫：paths 来自渲染层（可被攻破面），限会话
+    // 目录内的 .jsonl，防 ../ 穿越。
+    const pathError = validateSessionFilePath(path, sessionsDir);
+    if (pathError !== void 0) {
+      digests[path] = { kind: "error", message: pathError };
+      continue;
+    }
+    let size;
+    try {
+      size = statSync(path).size;
+    } catch (error) {
+      // 列表有、文件没了（未落盘的 pending 项 / 同步盘暂不可达）：如实报，
+      // 渲染层以 messageCount 兜底文案。与 listSessions 的可见性口径不追赶。
+      digests[path] = isEnoent(error)
+        ? { kind: "error", message: "会话文件不存在" }
+        : { kind: "error", message: `读取会话文件失败：${error instanceof Error ? error.message : String(error)}` };
+      continue;
+    }
+    if (size > DIGEST_LARGE_FILE_BYTES) {
+      // 超限退化（不读）：JSONL 条目跨行，尾部按字节截断会碎出半行坏 JSON；
+      // 真实会话多在百 KB 级，这条退化极少触发（design.md §8 的权衡）。
+      digests[path] = { kind: "fallback" };
+      continue;
+    }
+    try {
+      // getEntries() 返回逐行 JSON.parse 的条目数组（SessionEntry[]，与文件
+      // 原始行对象同构，形态见 pi 的 session-manager.d.ts），直接喂纯函数 ——
+      // 尾部窗口（200 条）在纯函数里截，这里不重复做。
+      digests[path] = summarizeLastActivity(SessionManager.open(path, sessionsDir).getEntries());
+    } catch (error) {
+      digests[path] = { kind: "error", message: `解析会话文件失败：${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+  return { digests };
+}
+
 function moveToTrash(filePath) {
   const trashDir = join(getConfigDir(), "trash");
   mkdirSync(trashDir, { recursive: true });
@@ -4347,6 +4413,12 @@ const handlers = {
   [INVOKE.newTask]: async ([cwd]) => newTask(cwd),
   /* ── 历史会话 ─────────────────────────────────────────────────── */
   [INVOKE.sessionList]: async () => listSessions(),
+  /**
+   * 首页「继续推进」的交接摘要（拉式）：paths 是 SessionSummary.path 数组，
+   * 逐个折成一句「干到哪了」。见上方 sessionDigest 的注释（为什么拉式、
+   * 为什么单路径失败不整体失败）与 ./session-digest.js（判定逻辑）。
+   */
+  [INVOKE.sessionDigest]: async ([paths]) => sessionDigest(paths),
   /**
    * 资料库：汇总**全部会话**交付过的产物（跨会话、跨工作区）。
    *

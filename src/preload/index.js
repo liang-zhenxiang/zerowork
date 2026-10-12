@@ -80,6 +80,12 @@ const INVOKE = {
    */
   sessionList: "session:list",
   /**
+   * 首页「继续推进」的交接摘要（拉式，刻意不进 sessionList 热路径 —— 那是
+   * 每次 run 边界都推的通道，读文件的开销不能挂上去）。与 shared/ipc.js 的
+   * 注释同源（两份手工副本，ipc 单测守一致性）。
+   */
+  sessionDigest: "session:digest",
+  /**
    * 恢复指定历史会话为当前活动会话。path 来自 SessionSummary.path，
    * daemon 侧有路径守卫（限会话目录内的 .jsonl，防 ../ 穿越）。
    */
@@ -638,6 +644,8 @@ const bridge = {
   setModel: (modelId) => ipcRenderer.invoke(INVOKE.setModel, modelId),
   setThinkingLevel: (level) => ipcRenderer.invoke(INVOKE.setThinkingLevel, level),
   listSessions: () => ipcRenderer.invoke(INVOKE.sessionList),
+  // 首页「继续推进」的交接摘要：paths 是 SessionSummary.path 数组（首页可见的几张卡）。
+  sessionDigest: (paths) => ipcRenderer.invoke(INVOKE.sessionDigest, paths),
   resumeSession: (path) => ipcRenderer.invoke(INVOKE.sessionResume, path),
   renameSession: (path, name) => ipcRenderer.invoke(INVOKE.sessionRename, path, name),
   restartSessionFrom: (path, anchorEntryId, options) => ipcRenderer.invoke(INVOKE.sessionRestart, path, anchorEntryId, options),
