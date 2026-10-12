@@ -121,11 +121,11 @@ await h.check("准备：注册可用服务商、不选全局模型", async () =>
 await h.check("① 没选过全局模型，点开会话也能进入（回落到会话记录的模型）", async () => {
 	await waitUntil(
 		() => win.evaluate((text) => document.body.innerText.includes(text), SESSION_TITLE_TEXT),
-		{ timeout: 30_000, interval: 500, desc: "首页最近会话出现目标会话" },
+		{ timeout: 30_000, interval: 500, desc: "首页继续推进出现目标会话" },
 	);
 	await h.shoot("home-with-session");
 	await win.evaluate(() => {
-		const row = [...document.querySelectorAll(".home-recent-row")].find((r) =>
+		const row = [...document.querySelectorAll(".home-resume-card")].find((r) =>
 			(r.textContent ?? "").includes("用会话里记录的模型接我回去"),
 		);
 		if (row === null) throw new Error("最近会话行不在");
@@ -165,12 +165,12 @@ await h.check("③ 进去后继续发消息，会话自己的模型真的能回�
 // ── ④ 反向：记录的模型不存在 → 报错点名模型并指路设置，而非泛泛一句 ─────
 await h.check("④ 反向：记录的模型接不上时，报错点名模型（宁可拒绝，不静默换脑）", async () => {
 	await win.evaluate(() => document.querySelector('[aria-label="返回首页"]')?.click());
-	await waitUntil(() => win.evaluate(() => document.querySelector(".home-recent-row") !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector(".home-resume-card") !== null), {
 		timeout: 30_000,
 		desc: "回到首页",
 	});
 	await win.evaluate(() => {
-		const row = [...document.querySelectorAll(".home-recent-row")].find((r) =>
+		const row = [...document.querySelectorAll(".home-resume-card")].find((r) =>
 			(r.textContent ?? "").includes("记录的模型早已不在"),
 		);
 		if (row === null) throw new Error("反向会话行不在");

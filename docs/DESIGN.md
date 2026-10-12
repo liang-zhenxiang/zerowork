@@ -317,7 +317,10 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
   `opacity` / `transform`，不碰布局属性（§5.1），已加入 §10.3.1 的关停清单
 - **工作轨迹的运行呼吸点**（2026-10-10）—— `.trace-seg-live` 复用 `.tool-dot.running`
   的 `tool-pulse`（1.1s `ease-in-out` infinite）：「还在跑」在工具行与轨迹条上
-  是同一套语言。关停后停在静态实心点，仍是「进行中」，已加入关停清单第 ② 组
+  是同一套语言。关停后停在静态实心点，仍是「进行中」，已加入关停清单第 ② 组。
+  2026-10-12 增加第三宿主（spec: home-resume-deck）：首页续摊卡的
+  `.home-resume-live-dot` 逐字同款——「还在跑」在工具行、轨迹条、续摊卡上
+  是同一套语言，已同步进第 ② 组关停清单
 - **工作轨迹的定位闪光**（2026-10-10）—— `.entry-flash` 是点击轨迹段定位到工具行后的
   一次性高亮（`entry-flash-fade`，900ms `--ease-out`，`background` + `box-shadow`
   从强调色淡出到无）。一次性入场族：基础态即终态（无高亮），已加入关停清单第 ③ 组

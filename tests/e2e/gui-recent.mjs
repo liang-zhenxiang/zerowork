@@ -1,14 +1,14 @@
 /**
- * 首页「最近会话」的 GUI 测试。
+ * 首页「继续推进」（原「最近会话」，2026-10-12 升级为续摊卡）的 GUI 测试。
  *
  * 这块功能的存在理由：把「第二次打开」的路径从两跳（会话列表 → 翻找）
  * 缩成一跳（首页直接点）。对应地，测试锁住的就是这条路径本身：
  *
  * 断言：
- *   ① 新环境首页没有「最近会话」区（新用户只看到上手清单，不出现空壳）；
+ *   ① 新环境首页没有「继续推进」区（新用户只看到上手清单，不出现空壳）；
  *   ② 用真实 UI 路径发出一条消息（mock 模型）→ 会话创建；
- *   ③ 返回首页后「最近会话」出现，且包含刚才会话的标题；
- *   ④ 点击该行 → 真的恢复进会话视图（标题对得上），不是只做了跳转动画；
+ *   ③ 返回首页后「继续推进」出现，且包含刚才会话的标题；
+ *   ④ 点击该卡 → 真的恢复进会话视图（标题对得上），不是只做了跳转动画；
  *   ⑤ 浅色与深色（沿用已落地的外观切换）下都截图 + 像素断言——
  *      新组件的次级面语言在两套主题里都不破。
  *
@@ -32,9 +32,9 @@ const win = h.window();
 const currentTheme = () => win.evaluate(() => document.documentElement.dataset.theme ?? null);
 
 // ── ① 新环境首页没有最近会话区 ────────────────────────────────
-await h.check("新环境首页不出现「最近会话」（无空壳）", async () => {
-	const found = await win.evaluate(() => document.querySelector(".home-recent") !== null);
-	assert.equal(found, false, "没有历史会话时不应渲染最近会话区");
+await h.check("新环境首页不出现「继续推进」（无空壳）", async () => {
+	const found = await win.evaluate(() => document.querySelector(".home-resume") !== null);
+	assert.equal(found, false, "没有历史会话时不应渲染继续推进区");
 });
 await h.shoot("home-empty");
 
@@ -75,7 +75,7 @@ await h.check("注册 mock provider 并发出第一条消息", async () => {
 });
 
 // ── ③ 回首页，最近会话出现 ────────────────────────────────────
-await h.check("返回首页后「最近会话」出现且含本会话", async () => {
+await h.check("返回首页后「继续推进」出现且含本会话", async () => {
 	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="返回首页"]') !== null), {
 		timeout: 30_000,
 		desc: "进入会话视图",
@@ -88,20 +88,20 @@ await h.check("返回首页后「最近会话」出现且含本会话", async ()
 	await win.evaluate(() => document.querySelector('[aria-label="返回首页"]').click());
 	await waitUntil(
 		() => win.evaluate(() => {
-			const zone = document.querySelector(".home-recent");
+			const zone = document.querySelector(".home-resume");
 			if (zone === null) return false;
 			return (zone.textContent ?? "").includes("会议日程");
 		}),
-		{ timeout: 30_000, interval: 500, desc: "首页最近会话区出现并含会话标题" },
+		{ timeout: 30_000, interval: 500, desc: "首页继续推进区出现并含会话标题" },
 	);
 });
 await h.shoot("home-with-recent");
 
 // ── ④ 点击恢复 ────────────────────────────────────────────────
-await h.check("点击最近会话行能恢复进会话", async () => {
+await h.check("点击继续推进卡能恢复进会话", async () => {
 	await win.evaluate(() => {
-		const row = document.querySelector(".home-recent-row");
-		if (row === null) throw new Error("最近会话行不在");
+		const row = document.querySelector(".home-resume-card");
+		if (row === null) throw new Error("继续推进卡不在");
 		row.click();
 	});
 	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="返回首页"]') !== null), {
@@ -113,9 +113,9 @@ await h.check("点击最近会话行能恢复进会话", async () => {
 });
 
 // ── ⑤ 深色下的最近会话 ────────────────────────────────────────
-await h.check("深色主题下最近会话区正常渲染", async () => {
+await h.check("深色主题下继续推进区正常渲染", async () => {
 	await win.evaluate(() => document.querySelector('[aria-label="返回首页"]').click());
-	await waitUntil(() => win.evaluate(() => document.querySelector(".home-recent") !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector(".home-resume") !== null), {
 		timeout: 30_000,
 		desc: "回到首页",
 	});

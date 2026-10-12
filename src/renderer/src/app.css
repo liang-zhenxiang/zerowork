@@ -1647,9 +1647,12 @@ textarea:focus-visible {
    内联 SVG 默认坐在基线上会整体偏上，故下沉 0.18em——量与手法同 .clickable-path-icon
    （相对字号的量，不引入新的间距/尺寸档位）。
    置顶标记 hover 时**不隐藏**（它是常驻形态，不挂在 .task-item-ops 上）：
-   hover 正是用户去看「这行是什么」的时刻，此时把状态抹掉等于状态在需要时消失。 */
+   hover 正是用户去看「这行是什么」的时刻，此时把状态抹掉等于状态在需要时消失。
+   首页续摊卡的 .home-resume-pin 同款加入（2026-10-12，spec: home-resume-deck）：
+   扩的是选择器不是值，仍是「改一处两边生效」，不另复制视觉档。 */
 .task-branch-mark,
-.task-pin-mark {
+.task-pin-mark,
+.home-resume-pin {
 	display: inline-block;
 	vertical-align: -0.18em;
 	margin-right: var(--space-1);
@@ -2077,13 +2080,14 @@ textarea:focus-visible {
 	color: var(--warning);
 }
 
-/* ── 首页「最近会话」───────────────────────────────────────────────
- * 与 home-guide 同族：--bg-raised 次级面、无边框（§3.7）、行距 --space-3。
- * 行是 button（整行可点、键盘可达），hover 走唯一 hover 底色 --bg-hover。
- * 标题/时间两档文字（--text-list 主 / --text-meta 次），不引入新档。
- * 与清单的间距同「清单→输入卡」的 --space-5：两块都是输入卡上方的次级面，
- * 节奏一致；内部行距 --space-3 与清单行距一致。 */
-.home-recent {
+/* ── 首页「继续推进」（spec: home-resume-deck）───────────────────────
+ * 替换原「最近会话」（2026-10-12）：同一槽位、同一数据源，升级的是行内信息
+ * 层级——每张卡三行（身份 / 交接摘要 / 注脚）。仍是 home-guide 同族的
+ * --bg-raised 次级面、无边框（§3.7）；**卡是透明行不是子盒子**：不加边框、
+ * 不做浮起（浮起是浮层语言，会与输入卡的唯一渐变槽 + 唯一阴影争层级）。
+ * 与清单的间距沿用「清单→输入卡」的 --space-5：两块都是输入卡上方的次级面，
+ * 节奏一致。 */
+.home-resume {
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-2);
@@ -2093,39 +2097,122 @@ textarea:focus-visible {
 	border-radius: var(--radius-md);
 }
 
-.home-recent-head {
+.home-resume-head {
 	font-size: var(--text-meta);
 	color: var(--text-secondary);
 }
 
-.home-recent-row {
+/* 卡 = button（整卡可点、键盘可达，全局 focus 环天然获得）。
+ * 组间呼吸 = 容器 gap 6px + 卡自身上下 padding 6px = 12px，大于卡内行距 4px
+ * （组间 > 组内，§3.8 的推论在卡内复用，两行不会读成同一句）。
+ * active 叠卡片级 scale(.98)；四态过渡统一 --dur-fast + --ease-standard，
+ * 只走背景色与 transform 两个属性。 */
+.home-resume-card {
 	display: flex;
-	align-items: baseline;
-	gap: var(--space-3);
-	padding: var(--space-1) var(--space-2);
+	flex-direction: column;
+	gap: var(--space-1);
+	padding: var(--space-2);
 	border-radius: var(--radius-sm);
-	font-size: var(--text-list);
-	color: var(--text);
 	text-align: left;
-	transition: background-color var(--dur-fast) var(--ease-standard);
+	transition: background-color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
 }
 
-.home-recent-row:hover {
+.home-resume-card:hover {
 	background: var(--bg-hover);
 }
 
-.home-recent-title {
+.home-resume-card:active {
+	transform: scale(0.98);
+}
+
+/* 身份行：钉住标记 + 标题（单行省略）+ 右端状态槽。
+ * 取 center 而不是 baseline：行内混排的是无文字的盒子（12px 图钉、6px 呼吸点、
+ * inline-flex 徽标），它们的合成基线是各自底缘，baseline 对齐会把「进行中」
+ * 整体顶高 2-3px；center 让图标与文字的光学中线对齐（侧栏那条 -0.18em 的
+ * 手动下沉是在行内排版里的等价物，flex 项不吃 vertical-align，各用各的）。 */
+.home-resume-title-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-width: 0;
+}
+
+.home-resume-title {
 	flex: 1 1 auto;
 	min-width: 0;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	font-size: var(--text-list);
+	color: var(--text);
 }
 
-.home-recent-time {
+/* 进行中的状态槽：flex:none 保证永不被省略号裁掉（块级布局右端有专属槽位，
+ * 与侧栏「标记压标题前」是两种场景的取舍，各自成立）。
+ * 文字与呼吸点一起承担「进行中」，不借状态色（§7.6：形态 + 文字双通道，
+ * 颜色只是第三层补充）；hover 下保持可见——hover 正是用户去看状态的时刻。 */
+.home-resume-live {
 	flex: none;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
 	font-size: var(--text-meta);
 	color: var(--text-secondary);
+}
+
+/* 呼吸点：逐字复用 .tool-dot.running / .trace-seg-live 的 tool-pulse——
+ * 「还在跑」在工具行、轨迹条、续摊卡上是同一套语言（docs/DESIGN.md §10.3
+ * 已登记第三宿主）。reduced-motion 关停后停在静态实心点，「进行中」由相邻
+ * 文字承担，终态仍正确（app.css 末尾关停清单第 ② 组）。 */
+.home-resume-live-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	background: var(--text-secondary);
+	flex: 0 0 auto;
+	animation: tool-pulse 1.1s ease-in-out infinite;
+}
+
+/* 灵魂行：交接摘要。与标题同字号、降一档色（§2.1 的「降一档」），读起来是
+ * 「标题下面那句补充」，比注脚行实一档。行高 1.6 是 §2.6 正文基准——它是卡内
+ * 唯一可能折行的多行文本。两行是防御上限（实际文案多为一句 ≤60 字），
+ * -webkit-line-clamp 是 .case-title 同款既有手法，非新登记项。
+ * 摘要里的文件名不染 --accent：整卡可点，文件名单独染链接色会暗示
+ * 「可以单独点开这个文件」，而点击行为是续摊，不是打开文件。 */
+.home-resume-digest {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 2;
+	overflow: hidden;
+	font-size: var(--text-list);
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+/* 注脚行：时间戳与注脚的既有口径（--text-meta + --text-secondary）。
+ * 不用 --text-faint——那是禁用态与最弱图标的档位，正常可读的元信息不降两档。
+ * 与摘要的层次：同色，靠字号分档（13 vs 12）+ 摘要可两行 / 注脚恒一行。
+ * 文字分隔符「·」随文案走，比装饰性分隔线克制；超长工作区名单行省略
+ * （该段 min-width:0 + overflow），末项时间 flex:none 不参与压缩。 */
+.home-resume-meta {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-1);
+	min-width: 0;
+	white-space: nowrap;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.home-resume-meta-ws {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.home-resume-meta-time {
+	flex: none;
 }
 
 .home-guide {
@@ -12011,7 +12098,9 @@ button.agent-row {
 	.spinner,
 	.tool-dot.running,
 	/* 工作轨迹 running 段的呼吸点：关掉后停在静态实心点，仍是「进行中」。 */
-	.trace-seg-live {
+	.trace-seg-live,
+	/* 首页续摊卡的进行中呼吸点（tool-pulse 第三宿主）：同上，「进行中」由相邻文字承担。 */
+	.home-resume-live-dot {
 		animation: none;
 	}
 
