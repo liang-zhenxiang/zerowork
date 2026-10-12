@@ -134,8 +134,8 @@
   Dependabot 与 `npm audit` 永远看不到它们，升级 `package.json` 也不改变随包的字节。
   为什么审计工具看不见、以及全部 `vendor-*.js` 的清单与巡检机制，见下文
   「随包的 vendored 依赖：审计盲区」。
-- **仓库根的生产依赖有 1 条 high 未修**（`brace-expansion`，由
-  `@earendil-works/pi-coding-agent` 传递引入，`npm audit fix` 可修）。
+- **仓库根的生产依赖已无未修高危**（2026-10-12 更新）。此前唯一一条 `brace-expansion`
+  （由 `@earendil-works/pi-coding-agent` 传递引入）已由上游修复 —— 来龙去脉见下节。
   作为对照：`officeparser` 早年依赖的 `decompress` 曾有一条 Zip Slip 类 critical，
   已随 officeparser 迁移到 8.x（改用 `fflate`）自行消失 —— 那一类**会随升级消失**，
   上面那条 vendored 盲区**不会**。跟踪在
@@ -215,19 +215,28 @@ Dependabot 的**条数不是风险量级** —— 同一批告警里，有的随
 | **无 npm 修复版的**（`xlsx`） | 1 | **已处置**：随包那份 vendored bundle 升到 0.20.3（见下节与 #61）。npm 上的 `xlsx` 停在 0.18.5，只用于**测试夹具**（`tests/e2e/preview-renderers.mjs` 造 xlsx），不随包 |
 | **审计工具看不见的**（`src/renderer/src/vendor-*.js`） | 0（原 2 个 high） | **已处置**：升级 + 静态门禁 + 每周 OSV 巡检（见下节） |
 
-**唯一一条随包代码里的高危：`brace-expansion`（经由 Agent 内核）**
+**随包那一半的高危：`brace-expansion`（已由上游修复，2026-10-12）**
 
-`npm audit --omit=dev` 当前只有一条：`brace-expansion@5.0.9`，
-路径是 `@earendil-works/pi-coding-agent → minimatch@10 → brace-expansion`。
-修复版是 **5.0.12**，而 5.x **只发 ESM**（`"type": "module"`），本仓库另一批 CJS 使用者
-（eslint 链上的 minimatch@1/2/5）需要 1.x/2.x —— **全局 override 会把构建打断**
-（实测：要么装不上，要么 `require()` 直接失败）。
+`npm audit --omit=dev` 现在返回 **`found 0 vulnerabilities`** —— 随包发给用户的那一半**没有高危**了。
 
-因此这条**不由本仓库修**：正确的动作是上游 `pi-coding-agent` 升级它的 `minimatch`。
-已开 [Issue #140](https://github.com/liang-zhenxiang/zerowork/issues/140) 跟踪，
-并在 `package.json` 里**刻意不加**会伪装修好的 override（加了反而掩盖问题）。
-影响面：brace 展开的 ReDoS（栈耗尽 / 二次方展开），触发条件是**该库收到的模式串**，
-不是用户直接投喂的文件；出现位置在 Agent 内核的 glob 匹配上。
+此前唯一一条是 `brace-expansion@5.0.9`（路径 `pi-coding-agent → minimatch@10 → brace-expansion`，
+ReDoS 族：嵌套花括号导致的栈耗尽 / 二次方展开。触发条件是**该库收到的模式串**，
+不是用户直接投喂的文件；出现位置在 Agent 内核的 glob 匹配上）。它当时**修不了**，
+这条记录留着有用：修复版 **5.0.12 只发 ESM**（`"type": "module"`），而本仓库另一批 CJS 使用者
+（eslint 链上的 minimatch@1/2/5）需要 1.x/2.x —— 全局 override 会把构建打断
+（实测：要么装不上，要么 `require()` 直接失败），嵌套 override 实测**根本不生效**。
+
+所以当时的决定是**不由本仓库修**：等上游 `pi-coding-agent` 升级它的 `minimatch`，
+并在 `package.json` 里**刻意不加**会伪装修好的 override（加了只会掩盖问题）。
+**这一步在 2026-10-12 等到了**：内核升到 1.0.2（#191）之后，它的子树带的是
+`brace-expansion@5.0.12`，告警随之消失；跟踪用的 [Issue #140](https://github.com/liang-zhenxiang/zerowork/issues/140)
+已按此关闭。
+
+> 教训值得单说：**「本仓库修不了」不等于「没人能修」**。当时没有硬造 override，
+> 而是把「等上游哪一步」写清楚（升级 `minimatch`），四个月不到就等到了 ——
+> 反过来，如果当时加了一个「看起来修好了」的 override，这条就会永远显示为已处置，
+> 没人会再去看上游到底修没修。
+
 
 **为什么 `resources/**` 的告警按「不适用」关闭而不是修**
 
