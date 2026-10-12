@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/main/index.md", "reason": "IPC 通道改动的检查清单与进程模型;本轮新增 sessionDigest 通道要走对四处联动(已核实 main/index.js 批量转发机制,无需登记路由)"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层规范:app.js 是 chunk 粒度大文件,禁止大规模重排;新组件按既有模式插入;视觉值必须来自 token"}
+{"file": ".trellis/spec/shared/index.md", "reason": "shared 层只放跨进程契约;INVOKE 常量的注释纪律"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层规范:纯模块模式(library.js 先例)、单测要求"}
+{"file": ".trellis/spec/testing/index.md", "reason": "测试分层、harness 用法、假等待门禁(waitUntil 谓词必须会返回假)、验收标准"}
+{"file": ".trellis/tasks/10-12-home-resume-deck/prd.md", "reason": "需求与验收标准(本任务)"}
+{"file": ".trellis/tasks/10-12-home-resume-deck/design.md", "reason": "技术方案:模块边界、契约、摘要算法、成本控制(本任务)"}
+{"file": ".trellis/tasks/10-12-home-resume-deck/research/ux-proposal.md", "reason": "视觉方案合流稿(UI/UX 设计师产出):卡片结构、类名、Token 取值"}
