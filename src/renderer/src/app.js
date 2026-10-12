@@ -15265,7 +15265,9 @@ function pickBestLocalCandidate(candidates) {
  */
 function homeDigestFallbackText(task) {
   const count = task.messageCount ?? 0;
-  return count > 0 ? `最近 ${count} 轮对话` : "还没有对话";
+  /* 单位是「条消息」不是「轮」:messageCount 是 user+assistant 条数之和(1 问 1 答
+     计 2),写「轮」数字会说谎(设计评审 R1,2026-10-12)。 */
+  return count > 0 ? `最近 ${count} 条消息` : "还没有对话";
 }
 /*
  * 摘要行的文案。返回 undefined 表示「还没到」（调用方渲染同尺寸骨架，数据到达时
@@ -15325,8 +15327,11 @@ function HomeResumeDeck({ sessions, digests, onResume }) {
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-resume-meta", children: [
               workspace !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-meta-ws", children: workspace }),
               workspace !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "·" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `${task.messageCount ?? 0} 轮` }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "·" }),
+              /* 条数而非轮数:messageCount 是 user+assistant 之和(评审 R1);
+                 0 条时整个省略(R3)——「0 条消息」与摘要「还没有对话」重复,
+                 且以 0 开头的注脚像数据缺失。 */
+              (task.messageCount ?? 0) > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `${task.messageCount} 条消息` }),
+              (task.messageCount ?? 0) > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "·" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-meta-time", children: formatMessageTime(stamp, Date.now()) })
             ] })
           ]
