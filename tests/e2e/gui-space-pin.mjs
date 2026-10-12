@@ -91,23 +91,45 @@ await h.check("在两个工作空间各建一个会话", async () => {
 });
 
 await h.check("当前工作空间（项目B）置顶且带「当前」徽标", async () => {
-	const r = await waitUntil(
-		async () =>
-			await win.evaluate(() => {
-				const headers = [...document.querySelectorAll(".space-group-header")];
-				if (headers.length < 2) return { found: false, count: headers.length };
-				const first = headers[0];
-				return {
-					found: true,
-					firstIsCurrent: first.classList.contains("space-group-current"),
-					firstBadge: first.querySelector(".space-group-badge")?.textContent ?? null,
-					firstName: first.querySelector(".space-group-name")?.textContent ?? null,
-					secondName: headers[1]?.querySelector(".space-group-name")?.textContent ?? null,
-				};
-			}),
-		{ timeout: 30_000, interval: 500, desc: "空间区出现两组" },
-	);
-	assert.ok(r.found, `空间区组数不足：${r.count}`);
+	/*
+	 * 谓词未就绪时**必须交出假值**（#150）。
+	 *
+	 * 这里曾经在 headers 不足两组时返回 `{ found: false, count }`，而 `waitUntil` 的判据是
+	 * `if (value) return value` —— 对象恒真，那个 `timeout: 30_000` 一次都没参与，
+	 * 断言读到的是「第二组还没渲染出来」的那一帧。症状是红灯指向断言内容
+	 * （「置顶的组不对」），而不是「还没出现」—— 让人去查一个不存在的问题。
+	 *
+	 * 现在：未就绪 → `null`（继续轮询），就绪 → 交出对象（`ready: true`）。
+	 * `ready` 与断言的载荷分开命名，是为了让「等待的闸门」与「断言的输入」读起来能分辨：
+	 * 凡是拿到的对象，一定已经是就绪的那一份。
+	 */
+	let lastCount = "(未取到)";
+	let r;
+	try {
+		r = await waitUntil(
+			async () => {
+				const s = await win.evaluate(() => {
+					const headers = [...document.querySelectorAll(".space-group-header")];
+					if (headers.length < 2) return { ready: false, count: headers.length };
+					const first = headers[0];
+					return {
+						ready: true,
+						count: headers.length,
+						firstIsCurrent: first.classList.contains("space-group-current"),
+						firstBadge: first.querySelector(".space-group-badge")?.textContent ?? null,
+						firstName: first.querySelector(".space-group-name")?.textContent ?? null,
+						secondName: headers[1]?.querySelector(".space-group-name")?.textContent ?? null,
+					};
+				});
+				lastCount = s.count;
+				return s.ready ? s : null;
+			},
+			{ timeout: 30_000, interval: 500, desc: "空间区出现两组" },
+		);
+	} catch (error) {
+		// 改等待不能把失败现场弄丢：超时时也说清「等到的是几组」
+		throw new Error(`${error.message}；最后一次探到 ${lastCount} 组`, { cause: error });
+	}
 	assert.ok(r.firstIsCurrent, `第一组没有 space-group-current（置顶的应是当前空间，读到 ${r.firstName}）`);
 	assert.equal(r.firstBadge, "当前", `第一组徽标文字是 ${r.firstBadge}`);
 	assert.ok(String(r.firstName).includes("项目B"), `置顶组应是项目B，读到 ${r.firstName}`);
