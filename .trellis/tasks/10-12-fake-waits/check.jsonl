@@ -1,0 +1,3 @@
+{"file": "tests/e2e/gui-updates.mjs", "reason": "同一个形态的第一次现场（#114）：那条 40 秒超时从未生效，作为判定器的回归样本核对过"}
+{"file": "tests/e2e/gui-formula.mjs", "reason": "第二次现场（#149）：已修的一处，用来确认判定器没有把已修好的写法再报一遍"}
+{"file": "CHANGELOG.md", "reason": "分类固定六类；修复类要写清「此前错在哪、有什么后果」"}

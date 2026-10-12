@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e 写法的权威约定：§三.1「用信号等待」与谓词必须能返回假值那条禁令（本轮要把方法补进去的地方）"}
+{"file": "tests/e2e/lib/harness.mjs", "reason": "waitUntil 的判据 `if (value) return value` 与超时信息的形状 —— 判定器要照着它写"}
+{"file": "tools/check-daemon-graph.mjs", "reason": "同类静态检查的写法参考：espree 解析、彩色输出、退出码、不依赖网络"}
+{"file": "scripts/check-unicode.mjs", "reason": "「导出纯函数供单测 + 直接执行才跑 main」的入口守卫写法，本轮判定器照抄这一形"}
+{"file": "scripts/lint.mjs", "reason": "本地统一入口的 runCheck 列表（新检查要接在这里）"}
+{"file": ".github/workflows/ci.yml", "reason": "静态检查 job 的步骤写法与注释风格"}
