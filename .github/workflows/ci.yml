@@ -168,7 +168,15 @@ jobs:
       - name: 安装依赖
         run: npm ci --no-audit --no-fund
 
+      # 覆盖率基线只在 ubuntu 上强制：阈值是按实测值定的（见 vitest.config.mjs），
+      # 两个 leg 各按同一套数字判定时，平台差异会变成假红。Windows leg 照旧跑单元测试
+      # —— 它守的是路径分隔符、大小写、保留设备名那些**只在 Windows 上暴露**的东西。
+      - name: 单元测试 + 覆盖率基线
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run test:coverage
+
       - name: 单元测试
+        if: matrix.os != 'ubuntu-latest'
         run: npm run test
 
   # ---------------------------------------------------------------------------
