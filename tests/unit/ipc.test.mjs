@@ -44,6 +44,10 @@ describe("IPC 通道常量", () => {
 		expect(INVOKE.daemonStatus).toBe("daemon:status");
 	});
 
+	it("sessionDigest 通道存在（首页交接摘要，按需拉取、不进 sessionList 热路径）", () => {
+		expect(INVOKE.sessionDigest).toBe("session:digest");
+	});
+
 	it("本机模型服务的两条通道已登记（探测 / 一键接入）", () => {
 		expect(INVOKE.probeLocalEndpoints).toBe("settings:probe-local-endpoints");
 		expect(INVOKE.connectLocalEndpoint).toBe("settings:connect-local-endpoint");

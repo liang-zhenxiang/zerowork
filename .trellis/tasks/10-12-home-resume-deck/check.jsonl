@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "检查测试是否符合分层与验收标准;假等待门禁与盲区表"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "检查渲染层改动:token 纪律、四态、三态互斥、无大规模重排"}
+{"file": ".trellis/spec/shared/index.md", "reason": "检查契约改动是否最小且注释到位"}
+{"file": ".trellis/tasks/10-12-home-resume-deck/prd.md", "reason": "对照验收标准逐条核查"}
+{"file": ".trellis/tasks/10-12-home-resume-deck/design.md", "reason": "对照技术方案核查实现一致性(尤其热路径隔离与成本控制)"}

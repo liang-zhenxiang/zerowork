@@ -15254,27 +15254,91 @@ function pickBestLocalCandidate(candidates) {
   return best;
 }
 /*
- * 首页「最近会话」——把「第二次打开」的路径从两跳（会话列表 → 找）缩成一跳。
- * 显示条件与上手清单互补：有历史会话就出现（老用户的首页不再只有静态引导）；
- * 新用户看不到它，只看到清单。视觉语言与 home-guide 一致（--bg-raised 次级面、
- * 无边框——§3.7 次级辅助面不带边框），行是列表不是内容卡。
+ * 首页「继续推进」——把「回来续摊」从两跳（进会话 → 翻历史才知道干到哪了）
+ * 缩成一跳：卡上先给一句交接摘要，用户再决定点不点。替换原「最近会话」纯文字行
+ * （HomeRecentSessions，2026-10-12）；槽位与数据源不变，升级的是行内信息层级。
+ *
+ * 摘要来自 daemon 的只读投影 sessionDigest（按需拉取，见 App 里那个 useEffect
+ * 的注释），本组件只负责呈现：digest 报事实（交付了什么 / 最后一句说了什么），
+ * 「进行中」信号、相对时间、单位换算全在渲染层。视觉仍是 home-guide 同族的
+ * --bg-raised 次级面，卡是透明行不是子盒子——整个区不新增任何盒子（ux-proposal）。
  */
-function HomeRecentSessions({ sessions, onResume }) {
+function homeDigestFallbackText(task) {
+  const count = task.messageCount ?? 0;
+  /* 单位是「条消息」不是「轮」:messageCount 是 user+assistant 条数之和(1 问 1 答
+     计 2),写「轮」数字会说谎(设计评审 R1,2026-10-12)。 */
+  return count > 0 ? `最近 ${count} 条消息` : "还没有对话";
+}
+/*
+ * 摘要行的文案。返回 undefined 表示「还没到」（调用方渲染同尺寸骨架，数据到达时
+ * 同一片区域被填上，不是整块替换）；delivered / text 按 digest 的事实呈现；
+ * fallback / error / 整体拉取失败都落到「最近 N 轮对话」——错误态不伪装成加载态，
+ * 卡内高度稳定（App 层在拉取失败时会把每个 path 归一成 fallback，见那边注释）。
+ */
+function homeDigestText(digest, task) {
+  if (digest === void 0) return void 0;
+  if (digest.kind === "delivered") {
+    const names = Array.isArray(digest.names) ? digest.names.filter((name2) => typeof name2 === "string" && name2 !== "") : [];
+    if (names.length > 0) {
+      const extra = typeof digest.extra === "number" ? digest.extra : 0;
+      return extra > 0 ? `已交付 ${names.join("、")} 等 ${names.length + extra} 个` : `已交付 ${names.join("、")}`;
+    }
+  }
+  if (digest.kind === "text" && typeof digest.text === "string" && digest.text !== "") return digest.text;
+  return homeDigestFallbackText(task);
+}
+function HomeResumeDeck({ sessions, digests, onResume }) {
   if (sessions.length === 0) return null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-recent", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-recent-head", children: "最近会话" }),
-    sessions.map((task) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      "button",
-      {
-        type: "button",
-        className: "home-recent-row",
-        onClick: () => onResume(task.path),
-        children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-recent-title", children: task.title === void 0 || task.title === "" ? "未命名会话" : task.title }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-recent-time", children: formatMessageTime(task.modifiedAt, Date.now()) })
-        ] },
-      task.id
-    ))
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-resume", children: [
+    /* 区头只有一行字，不设「查看全部」：侧栏任务列表全量常驻、⌘K 可搜会话，
+       首页再加入口属于重复导航（2026-10-12 评审裁决）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-resume-head", children: "继续推进" }),
+    sessions.map((task) => {
+      const digest = digests?.[task.path];
+      const summary = homeDigestText(digest, task);
+      /*
+       * 注脚行的时间：优先 digest 锚点时刻（交付 / 末句的 timestamp，比列表的
+       * modifiedAt 更贴「干到哪了」），缺失（at=0，含 fallback / error）退用
+       * modifiedAt。取 now 的方式与侧栏 task 行同款：渲染时 Date.now()，不挂 tick。
+       */
+      const stamp = typeof digest?.at === "number" && digest.at > 0 ? digest.at : task.modifiedAt;
+      const workspace = task.isTempTask ? "" : basename$2(task.cwd ?? "");
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          /* is-running 是 e2e 判态钩子（同 .home-guide-loading 的口径：状态类不是样式钩子）。 */
+          className: `home-resume-card${task.running ? " is-running" : ""}`,
+          onClick: () => onResume(task.path),
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-resume-title-row", children: [
+              /* 钉住标记是展示性的（「我钉住了它」），不可点，管理动作留在侧栏；
+                 视觉与 .task-pin-mark 共用一条规则（选择器扩展，不复制视觉值）。 */
+              isPinned(task) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-pin", title: "已置顶", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPin, { size: 12 }) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-title", children: task.title === void 0 || task.title === "" ? "未命名会话" : task.title }),
+              /* 进行中信号三通道（§7.6）：位置（右端状态槽，flex:none 不被省略号
+                 裁掉）+ 形态（呼吸点）+ 文字（「进行中」），hover 下保持可见。 */
+              task.running && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-resume-live", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-live-dot" }),
+                "进行中"
+              ] })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-digest", children: summary === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: GUIDE_SKELETON_TEXT_STYLE, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "72%" }) }) : summary }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-resume-meta", children: [
+              workspace !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-meta-ws", children: workspace }),
+              workspace !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "·" }),
+              /* 条数而非轮数:messageCount 是 user+assistant 之和(评审 R1);
+                 0 条时整个省略(R3)——「0 条消息」与摘要「还没有对话」重复,
+                 且以 0 开头的注脚像数据缺失。 */
+              (task.messageCount ?? 0) > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `${task.messageCount} 条消息` }),
+              (task.messageCount ?? 0) > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "·" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-meta-time", children: formatMessageTime(stamp, Date.now()) })
+            ] })
+          ]
+        },
+        task.id
+      );
+    })
   ] });
 }
 /*
@@ -16265,6 +16329,7 @@ function HomeView({
   welcome,
   modelId,
   recentSessions,
+  sessionDigests,
   onResumeSession,
   thinkingLevel,
   availableThinkingLevels,
@@ -16412,9 +16477,10 @@ function HomeView({
         ),
         /* 放清单正下方：老用户三步全绿后清单自动收起，这块顶上来成为输入卡上方的主体。 */
         /* @__PURE__ */ jsxRuntimeExports.jsx(
-          HomeRecentSessions,
+          HomeResumeDeck,
           {
             sessions: recentSessions,
+            digests: sessionDigests,
             onResume: onResumeSession
           }
         ),
@@ -69926,7 +69992,7 @@ function App() {
     setView("home");
   }, []);
   /*
-   * 首页「最近会话」的数据源：taskList 按 modifiedAt 倒序取前 3。
+   * 首页「继续推进」的数据源：taskList 按 modifiedAt 倒序取前 3。
    * 排序用 byModifiedDesc（谁最近动过谁靠前），
    * 不在这里另写比较器。当前会话也在列表里——从首页点它等于「回到刚才那屏」，
    * 与侧栏行为一致，不特判剔除。
@@ -69956,6 +70022,33 @@ function App() {
     () => [...taskList ?? []].sort(byModifiedDesc).slice(0, 3),
     [taskList]
   );
+  /*
+   * 续摊卡的交接摘要（design.md §4 的数据流）：recentForHome 变化（首拉 +
+   * sessionListPush 每次 run 边界都会刷新 taskList）→ 按 path 拉一次 digest。
+   * 这条链路正是「run 结束 → 卡上摘要就地更新」的入口，不在这里做轮询。
+   *
+   * 失败整体降级：把每个 path 归一成 {kind:"fallback"}，卡内摘要位显示
+   * 「最近 N 轮对话」——不是骨架（错误态不伪装成加载态），也不空转重试
+   * （digest 是纯投影，下一次 sessionListPush 自然会再触发）。
+   * in-flight 期间 state 仍是上一轮的 map：老 path 显示旧摘要（内容只是略旧），
+   * 新 path 显示骨架，不会整区闪白。
+   */
+  const [sessionDigests, setSessionDigests] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    if (recentForHome.length === 0) {
+      setSessionDigests(void 0);
+      return;
+    }
+    let alive = true;
+    window.kami.sessionDigest(recentForHome.map((task) => task.path)).then((result) => {
+      if (alive) setSessionDigests(result?.digests ?? {});
+    }).catch(() => {
+      if (alive) setSessionDigests(Object.fromEntries(recentForHome.map((task) => [task.path, { kind: "fallback" }])));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [recentForHome]);
   const resumeSeqRef = reactExports.useRef(0);
   const resumeTask = reactExports.useCallback(
     (path2) => {
@@ -70510,6 +70603,7 @@ function App() {
         onOpenConnectors: () => openSkillsAt("connectors"),
         onTodo: showTodo,
         recentSessions: recentForHome,
+        sessionDigests,
         onResumeSession: resumeTask
       }
     ),
