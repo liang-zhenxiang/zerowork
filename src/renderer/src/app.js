@@ -15272,7 +15272,7 @@ function homeDigestFallbackText(task) {
 /*
  * 摘要行的文案。返回 undefined 表示「还没到」（调用方渲染同尺寸骨架，数据到达时
  * 同一片区域被填上，不是整块替换）；delivered / text 按 digest 的事实呈现；
- * fallback / error / 整体拉取失败都落到「最近 N 轮对话」——错误态不伪装成加载态，
+ * fallback / error / 整体拉取失败都落到「最近 N 条消息」——错误态不伪装成加载态，
  * 卡内高度稳定（App 层在拉取失败时会把每个 path 归一成 fallback，见那边注释）。
  */
 function homeDigestText(digest, task) {
