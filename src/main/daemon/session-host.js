@@ -74,6 +74,7 @@ import {
 	entryTokens,
 	thinkingOf,
 } from "./messages.js";
+import { recordVersion, shouldRecordVersion } from "./version-store.js";
 
 class SessionHost {
   constructor(session, options, sceneId, interactionId, expertId, skills) {
@@ -1020,10 +1021,15 @@ class SessionHost {
         });
         let stash;
         if (event.toolName === "write" || event.toolName === "edit") {
-          const oldContent = this.readOverwriteTarget(event.args);
-          const changeType = oldContent === void 0 ? "created" : "modified";
+          // readOverwriteTarget 同时给出「绝对路径」与「改动前全文」——旧内容只
+          // 在这里读得到（写下去就被覆盖了），文件时光机复用这一份、不新增读盘。
+          const target = this.readOverwriteTarget(event.args);
+          const oldContent = target === void 0 ? void 0 : target.content;
+          const changeType = target === void 0 ? "created" : "modified";
           const change = event.toolName === "write" ? changeFromWrite(event.args, oldContent) : changeFromEdit(event.args, oldContent);
-          stash = { change, changeType };
+          // path/oldContent 是给「成功回执处记版本」（见下方 tool_execution_end）用的
+          // 新增字段。既有消费点只看 change 与 changeType，用法一行不动。
+          stash = { change, changeType, path: target === void 0 ? void 0 : target.path, oldContent };
           this.pendingChanges.set(event.toolCallId, stash);
         }
         const todos = event.toolName === "todo_write" ? parseTodoArgs(event.args) : void 0;
@@ -1087,6 +1093,33 @@ class SessionHost {
         }
         const sources = event.toolName === "web_search" ? parseSources(toolResultDetails(event.result)) : void 0;
         const subagents = childAgentsOf(toolResultDetails(event.result));
+        /*
+         * 文件时光机：工具**成功**且是「覆盖」时，把改动前的那一版留进版本存储。
+         * 判据走 shouldRecordVersion（纯函数）而不是就地判断 —— 这样「成功才记 /
+         * 新建不记」能被单测钉住（session-host 依赖 Electron，单测够不到）。
+         * 顺序在 emit 之前：落盘先于界面更新（spec/daemon §三）。
+         * sessionId 用宿主既有来源 this.session.sessionId（与 createLedger 同源）。
+         */
+        if (shouldRecordVersion({ outcome, changeType: stash?.changeType })) {
+          const recorded = recordVersion({
+            path: stash.path,
+            content: stash.oldContent,
+            at: Date.now(),
+            sessionId: this.session.sessionId,
+            tool: event.toolName,
+            added: stash.change?.added,
+            removed: stash.change?.removed
+          });
+          /*
+           * 只报**真出错**的那一类。binary / too-large / no-content 是预期内的跳过
+           *（前两类已计入 meta.skipped、由界面说出来），打印它们只会刷屏；
+           * io-error 却是磁盘满 / 权限 / 路径不可写 —— 这类现在会**静默地**让版本
+           * 记录停摆，没人会发现。带上文件路径与原始 message，才够定位。
+           */
+          if (recorded.reason === "io-error") {
+            console.error(`[version-store] 版本记录写盘失败（${stash.path}）：${recorded.message}`);
+          }
+        }
         emit({
           type: "tool_finished",
           card: {
@@ -1387,8 +1420,10 @@ class SessionHost {
   }
   /**
    * 读 write/edit 目标文件的旧内容（执行前调用，此后旧内容就被写掉了）。
-   * 返回 undefined 表示目标原本不存在（新建）；存在但不可读时按空串处理
-   * 不如让它响 —— 读盘失败说明环境有问题，掩成「新建」会把 diff 全算错。
+   * 返回 `{ path, content }`：`path` 是解析后的**绝对路径**（文件时光机记录要
+   * 用它做 key），`content` 是改动前全文。返回 undefined 表示目标原本不存在
+   *（新建）；存在但不可读时让它响 —— 读盘失败说明环境有问题，掩成「新建」
+   * 会把 diff 全算错。
    */
   readOverwriteTarget(args) {
     if (typeof args !== "object" || args === null) return void 0;
@@ -1396,7 +1431,7 @@ class SessionHost {
     if (typeof path !== "string" || path === "") return void 0;
     const abs = resolve(this.sessionCwd, path);
     if (!existsSync(abs)) return void 0;
-    return readFileSync(abs, "utf8");
+    return { path: abs, content: readFileSync(abs, "utf8") };
   }
   /**
    * toolcall_delta 的处理：累积参数原文，并在 id/name 稳定后发出生成中卡片。

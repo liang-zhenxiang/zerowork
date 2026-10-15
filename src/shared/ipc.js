@@ -158,6 +158,26 @@ const INVOKE = {
    */
   libraryList: "library:list",
   /**
+   * 文件时光机（versions/ 索引）：Agent 用 write / edit 覆盖过的文件清单。
+   *
+   * **拉式**：只在用户打开「文件历史」页面时调用。返回
+   * `{ files: [{ key, path, name, dir, count, skipped, lastAt, lastSessionId?, lastTool?, exists }], truncated }`
+   *（`truncated` 与资料库同族 —— 超出上限要如实说出来，不静默截断）。
+   */
+  fileHistoryList: "versions:list",
+  /**
+   * 读一个文件的版本元数据 +（可选）某一版正文。入参 `{ key, id? }`。
+   * 返回 `{ ok:true, path, versions, content?, contentAt? }` 或
+   * `{ ok:false, reason, message }`（reason ∈ unknown / missing / no-such-version）。
+   */
+  fileHistoryRead: "versions:read",
+  /**
+   * 还原到某一版。入参 `{ key, id }`。成功先读当前内容留一版、再写回目标版本，
+   * 写一条 `file/restored` 审计。返回 `{ ok:true, at, versions, unchanged }` 或
+   * `{ ok:false, reason, message }`（失败一律返回值表达、不 reject）。
+   */
+  fileHistoryRestore: "versions:restore",
+  /**
    * 项目（projects.json 索引）：把「同一件正在推进的事」的会话装订成活页夹。
    * 与工作空间（磁盘目录）正交——项目不建目录、不动文件、不改会话 cwd，
    * 只是一层组织引用。**拉式**（打开项目视图时读，与 library 同口径）；

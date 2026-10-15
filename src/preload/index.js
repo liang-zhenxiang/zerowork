@@ -131,6 +131,16 @@ const INVOKE = {
    */
   libraryList: "library:list",
   /**
+   * 文件时光机：Agent 用 write / edit 覆盖过的文件清单 / 某一版正文 / 还原。
+   * **拉式**（打开「文件历史」页面时读）。与 shared/ipc.js 的注释同源
+   *（两份手工副本，ipc 单测守一致性）。
+   */
+  fileHistoryList: "versions:list",
+  /** 读一个文件的版本元数据 +（可选）某一版正文。入参 `{ key, id? }`。 */
+  fileHistoryRead: "versions:read",
+  /** 还原到某一版。入参 `{ key, id }`。 */
+  fileHistoryRestore: "versions:restore",
+  /**
    * 项目（projects.json 索引）：会话 + 产物 + 常驻指令的活页夹，与工作空间
    * （磁盘目录）正交。**拉式**（打开项目视图时读）；归属变化复用
    * taskListChanged 推送。与 shared/ipc.js 的注释同源（两份手工副本，ipc 单测
@@ -656,6 +666,10 @@ const bridge = {
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
   exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
+  // 文件时光机：入参统一是 `{ key, id? }`（design.md §3.1），返回值里失败用 ok:false 表达。
+  listFileHistory: () => ipcRenderer.invoke(INVOKE.fileHistoryList),
+  readFileHistory: (input) => ipcRenderer.invoke(INVOKE.fileHistoryRead, input),
+  restoreFileHistory: (input) => ipcRenderer.invoke(INVOKE.fileHistoryRestore, input),
   listProjects: () => ipcRenderer.invoke(INVOKE.projectsList),
   createProject: (name) => ipcRenderer.invoke(INVOKE.projectsCreate, name),
   renameProject: (id, name) => ipcRenderer.invoke(INVOKE.projectsRename, id, name),
