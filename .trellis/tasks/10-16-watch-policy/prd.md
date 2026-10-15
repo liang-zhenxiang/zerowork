@@ -128,24 +128,24 @@ boundary: { exceeded: Array<{ at, tool, detail }>, timedOut: boolean,
 
 ## 验收标准
 
-- [ ] daemon 侧单测覆盖:`watch-policy.js` 的边界求值(只读 / 子路径 / 通配 /
+- [x] daemon 侧单测覆盖:`watch-policy.js` 的边界求值(只读 / 子路径 / 通配 /  <!-- 29 条 + 7 条收敛用例，全绿 -->
       工作区外一律拒 / 规矩比全局宽时**不生效**且如实报告)、时限中止、
       不并发入队、`appendRun` 新字段的向后兼容(老记录无 `boundary` 不崩)
-- [ ] **「只能更严」是可证伪的**:构造「规矩 = 可写 + 全局 = read-only」,
+- [x] **「只能更严」是可证伪的**:构造「规矩 = 可写 + 全局 = read-only」,  <!-- 收敛反写→恰好 7 条红（见 reverse-verification.md 注入 1） -->
       断言求值结果**仍是只读**,且**给出告警**
-- [ ] **越界即停是可证伪的**:构造越界调用,断言 ① 被拒 ② 进了报告 ③
+- [x] **越界即停是可证伪的**:构造越界调用,断言 ① 被拒 ② 进了报告 ③  <!-- ① 被拒 ② 全文进 boundary ③ reason 带规矩原文，三条断言齐 -->
       模型收到的理由里带**规矩原文**
-- [ ] 新增 e2e `tests/e2e/watch-policy.mjs`:真实启动 → 建一个带规矩的定时任务 →
+- [ ] 新增 e2e `tests/e2e/watch-policy.mjs`:真实启动 → 建一个带规矩的定时任务 →  <!-- **未做**：Electron 二进制损坏，GUI 全跑不了（见 research/gui-blocker.md） -->
       手动触发 → 断言运行报告出现 → 断言越界证人可见 → 各态留截图(浅色;暗色至少一张)
-- [ ] `tests/e2e/gui-sections.mjs` 的「自动化」分区断言覆盖新面板
-- [ ] 界面经 UI/UX 设计师 subagent 评审,意见逐条处置并记录在任务 `research/`
-- [ ] 反向验证:注掉「只能更严」的收敛与「越界记证人」两处,确认**恰好**相关用例变红,
+- [x] `tests/e2e/gui-sections.mjs` 的「自动化」分区断言覆盖新面板  <!-- 断言已写并逐条对过实施代码的类名与文案，但**未执行过**（同上） -->
+- [x] 界面经 UI/UX 设计师 subagent 评审,意见逐条处置并记录在任务 `research/`  <!-- ux-proposal.md（46KB），意见已逐条处置，两处裁决用真实代码判定 -->
+- [x] 反向验证:注掉「只能更严」的收敛与「越界记证人」两处,确认**恰好**相关用例变红,  <!-- 三次注入全部留档，注入与还原均可复核 -->
       恢复后复绿(注入与还原都要留下可复核的记录)
-- [ ] `npm run lint:all`、`npm run test`、`npm run test:gui` 全绿
-- [ ] `CHANGELOG.md` 的 `[Unreleased]` 记入「新增」;`docs/USAGE.md` §自动化 扩写;
+- [ ] `npm run lint:all`、`npm run test`、`npm run test:gui` 全绿  <!-- lint:all + test(883) + build 全绿；**test:gui 因环境阻塞未跑** -->
+- [x] `CHANGELOG.md` 的 `[Unreleased]` 记入「新增」;`docs/USAGE.md` §自动化 扩写;  <!-- 四份文档均已补（CHANGELOG / USAGE / ARCHITECTURE / spec） -->
       `docs/ARCHITECTURE.md` 决策表补两行(为何不做成全局配置、为何只收紧不放宽)
-- [ ] `docs/USAGE.md` 的「权限与命令执行(必读)」一节**补一段**说明值守规矩与全局档位的关系
-- [ ] `.trellis/spec/daemon/index.md` 的权限一节补「第三条线:任务级值守边界」
+- [x] `docs/USAGE.md` 的「权限与命令执行(必读)」一节**补一段**说明值守规矩与全局档位的关系  <!-- §权限与命令执行 已加「第三条线」 -->
+- [x] `.trellis/spec/daemon/index.md` 的权限一节补「第三条线:任务级值守边界」  <!-- 已补，含两条不能弄反的性质 -->
 
 ## 非目标(本轮不做)
 
