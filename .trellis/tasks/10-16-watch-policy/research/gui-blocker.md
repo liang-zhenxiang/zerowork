@@ -54,9 +54,31 @@ failed to scan ...: -10822
 **推断**：03:29 前后有一次对 `node_modules/electron` 的不完整重装/覆盖，
 留下了结构完整、签名自洽、但内核拒绝加载的包。
 
+## 推翻上面的推断（同日补测，结论反转）
+
+上面的推断**是错的**。补做的四个实验：
+
+| 实验 | 结果 |
+| --- | --- |
+| 从本机 Electron 官方缓存 `~/Library/Caches/electron/…/electron-v44.4.4-darwin-arm64.zip`（`unzip -t` 校验无损）解压到 `/tmp` 的全新副本 | **仍 134** |
+| 同法解压 44.4.3、44.3.0 | **均 134** |
+| 直接运行**正在运行中**的百度网盘（Electron 26）的二进制 | **134** |
+| `open /System/Applications/Calculator.app`（macOS 自带） | **`kLSNoExecutableErr`，同一个错** |
+
+**所以不是文件损坏、不是 Electron 版本、不是本仓库。** 03:29 那批时间戳是
+`npm` 一次重装留下的正常痕迹 —— 恰好与失败同时发生，是**巧合**；
+我先前把巧合当成了因果。**同时发生不等于因果**，这正是那次推断错的地方。
+
+真实原因：**本会话的 shell 无法启动任何 GUI 程序**（含 macOS 自带的 Calculator）。
+`open` 对任何 `.app` 都返回 `-10827`，直接 exec 一律 `SIGABRT(134)`。
+这是本执行环境的限制，与本项目无关，也**无法通过改代码或重装依赖绕过**。
+
+（`node_modules/electron/dist` 已用缓存里的 44.4.4 覆盖还原，比 03:29 那份更可信；
+还原后行为不变，仍 134 —— 再次印证与文件无关。）
+
 ## 为什么无法自行修复
 
-重装需要网络，而本机**到 npm registry 不通**：
+重装需要网络，而本机**到 npm registry 与 github.com 都不通**（DNS 无法解析）：
 
 ```
 $ npm install electron@44.4.4 --registry=https://registry.npmjs.org/
@@ -72,6 +94,14 @@ npm error network In most cases you are behind a proxy or have bad network setti
 
 ## 恢复方式
 
-在有网络的环境执行 `npm rebuild electron` 或删掉 `node_modules/electron` 后重装。
-恢复后**必须**补跑：`npm run test:gui:sections`，然后按 PRD 跑完整
-`npm run test:gui` 并留截图。
+**换一个能启动 GUI 程序的执行环境**（不是重装依赖 —— 依赖是好的）。
+在那种环境里跑：
+
+```
+npm run test:gui:sections     # 先验证本轮新增的断言
+npm run test:gui              # 再按 PRD 跑完整回归并留截图
+```
+
+按 PRD 还欠一条独立用例 `tests/e2e/watch-policy.mjs`（真实启动 → 建带规矩的
+定时任务 → 手动触发 → 断言运行报告与越界证人 → 各态截图），
+它也必须在能跑 GUI 的环境里补。
