@@ -12395,25 +12395,34 @@ button.agent-row {
 	position: relative;
 	display: flex;
 	justify-content: center;
+	/* 主线要跨过行内上下各 --space-2 的 padding（见下面 :before 的负偏移），
+	   槽自己不能裁剪。 */
+	overflow: visible;
 }
 
 .fh-node-mark::before {
 	content: "";
 	position: absolute;
-	top: 0;
-	bottom: 0;
+	/* 负偏移让相邻两行的主线在行间相连：每行上下各有 --space-2 的 padding，
+	   从 0 起止会在中间留出 6+6 = 12px 的空档，读完是一串短横线而不是一条轴
+	   （独立评审 P1-2：「时间在流动」是这条线唯一的存在理由）。两端仍由下面的
+	   .first / .last 裁掉。 */
+	top: calc(-1 * var(--space-2));
+	bottom: calc(-1 * var(--space-2));
 	width: 1px;
 	background: var(--border);
 }
 
-/* 线是「时间在流动」的记号：首行上半段与末行下半段裁掉，单节点则整条不画。 */
+/* 线是「时间在流动」的记号：首行上半段与末行下半段裁掉，单节点则整条不画。
+   圆点中心距刻度槽顶 9px（margin-top 4px + 直径 10px / 2），两端都停在那个点上。 */
 .fh-node.first .fh-node-mark::before {
 	top: 9px;
 }
 
 .fh-node.last .fh-node-mark::before {
+	top: calc(-1 * var(--space-2));
 	bottom: auto;
-	height: 9px;
+	height: calc(var(--space-2) + 9px);
 }
 
 .fh-node.first.last .fh-node-mark::before {
@@ -12477,11 +12486,25 @@ button.agent-row {
 	color: var(--text-secondary);
 }
 
-/* 变化行走 .tool-change 的既有口径：等宽 + meta 档，符号自身承担语义（不看颜色也读得出）。 */
+/* 字体与档位沿用 .tool-change（等宽 + meta 档），**颜色不借用状态色**：
+   docs/DESIGN.md §2.4「状态色只表状态」——diff 行数不是状态。全站上色那两处
+   （.tool-change / .changes-summary）出现在「一次工具运行的结果」上下文里，与
+   「历史里某一版被谁替换」不是同一件事；一屏 20 行红绿也会让时间轴失去主角地位。
+   符号自身承担语义（§7.6：不看颜色也读得出 +/−）。 */
 .fh-node-change {
 	font-family: var(--font-mono);
 	font-size: var(--text-meta);
 	color: var(--text-secondary);
+}
+
+/* broken 的版本靠「空心点 + 整行淡出 + 这句文字」三重表达禁用。那句文字承担的是
+   「**为什么**不能还原」，行级 opacity 0.55 叠在 --text-secondary 上会把亮色对比度
+   压到 1.96:1 / 暗色 2.75:1（独立评审 P0-1 的实测），所以它单独回到 --text ——
+   0.55 × --text 实测亮 4.74:1 / 暗 5.27:1，回到次文基准之上。
+   （docs/DESIGN.md §3.4 的附则：淡出不得把文字对比度压到次文基准以下，
+   必须读得出的那一句走 --text。） */
+.fh-node.broken .fh-node-change {
+	color: var(--text);
 }
 
 .fh-node-ago {
@@ -12505,8 +12528,14 @@ button.agent-row {
 }
 
 /* 一律等宽正文、不做 markdown 渲染：存的是原始字节，等宽是唯一忠实的呈现
-   （ux-proposal §3.6）。行数级限高 + 滚动，不做字级截断（§3.7）。 */
-.fh-preview-body {
+   （ux-proposal §3.6）。行数级限高 + 滚动，不做字级截断（§3.7）。
+   
+   选择器带 .code-block 前缀是**必须的，不是啰嗦**：预览正文是 `.code-block > pre`，
+   而 `.code-block pre { max-height: 60vh }`（0-1-1）会盖掉裸 `.fh-preview-body`
+   （0-1-0）—— 与书写顺序无关，方案写死的 `min(50vh, 420px)` 曾经从未生效
+   （独立评审 P1-1）。这里提到 0-2-0，且 e2e 断言 computed max-height，
+   下次再被顶掉会当场变红。 */
+.code-block .fh-preview-body {
 	margin: 0;
 	padding: var(--space-3) var(--space-4);
 	max-height: min(50vh, 420px);

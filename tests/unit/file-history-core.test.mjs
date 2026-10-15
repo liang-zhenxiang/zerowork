@@ -35,10 +35,18 @@ import {
 const at = (y, mo, d, h = 0, mi = 0) => new Date(y, mo - 1, d, h, mi, 0, 0).getTime();
 
 describe("formatVersionTime", () => {
-	it("固定为 MM-DD HH:mm（节点身份行 / 预览头 / 确认句同格式）", () => {
-		expect(formatVersionTime(at(2026, 10, 15, 14, 32))).toBe("10-15 14:32");
-		expect(formatVersionTime(at(2026, 1, 5, 9, 7))).toBe("01-05 09:07");
-		expect(formatVersionTime(at(2026, 12, 31, 0, 0))).toBe("12-31 00:00");
+	it("固定为 MM-DD HH:mm:ss（节点身份行 / 预览头 / 确认句 / toast 同格式）", () => {
+		expect(formatVersionTime(at(2026, 10, 15, 14, 32))).toBe("10-15 14:32:00");
+		expect(formatVersionTime(at(2026, 1, 5, 9, 7))).toBe("01-05 09:07:00");
+		expect(formatVersionTime(at(2026, 12, 31, 0, 0))).toBe("12-31 00:00:00");
+	});
+
+	it("带秒：同一分钟内的两版必须能分辨（评审 P1-3 —— 确认句要能定位到具体一版）", () => {
+		const a = new Date(2026, 9, 15, 16, 22, 4, 0).getTime();
+		const b = new Date(2026, 9, 15, 16, 22, 37, 0).getTime();
+		expect(formatVersionTime(a)).toBe("10-15 16:22:04");
+		expect(formatVersionTime(b)).toBe("10-15 16:22:37");
+		expect(formatVersionTime(a)).not.toBe(formatVersionTime(b));
 	});
 });
 
@@ -223,13 +231,13 @@ describe("truncated / skipped 的说明行", () => {
 describe("还原确认句", () => {
 	it("三个事实按顺序：文件名 / 时间点 / 先存成一条新版本", () => {
 		expect(restoreConfirmText({ name: "周报.md", at: at(2026, 10, 15, 14, 32) })).toBe(
-			"把「周报.md」还原到 10-15 14:32 的样子？现在的内容会先存成一条新版本，之后还能再退回来。"
+			"把「周报.md」还原到 10-15 14:32:00 的样子？现在的内容会先存成一条新版本，之后还能再退回来。"
 		);
 	});
 
 	it("exists:false 时补一句「会重新创建它」（design.md §5 的既定行为）", () => {
 		const text = restoreConfirmText({ name: "预算.xlsx", at: at(2026, 10, 15, 9, 5), exists: false });
-		expect(text).toContain("把「预算.xlsx」还原到 10-15 09:05 的样子？");
+		expect(text).toContain("把「预算.xlsx」还原到 10-15 09:05:00 的样子？");
 		expect(text).toContain("现在的内容会先存成一条新版本，之后还能再退回来。");
 		expect(text.endsWith("文件已不在，还原会重新创建它。")).toBe(true);
 	});
@@ -237,7 +245,7 @@ describe("还原确认句", () => {
 
 describe("还原成功 / 失败的文案", () => {
 	it("成功 toast 报出还原到的时间点", () => {
-		expect(restoreSuccessText(at(2026, 10, 15, 14, 32))).toBe("已还原到 10-15 14:32");
+		expect(restoreSuccessText(at(2026, 10, 15, 14, 32))).toBe("已还原到 10-15 14:32:00");
 	});
 
 	it("每种 reason 都有自己的话术，且不回落到「操作失败」", () => {

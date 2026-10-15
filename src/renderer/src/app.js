@@ -68005,6 +68005,16 @@ function FileHistoryView({ onClose, sessions, onToast }) {
   const pickerRef = reactExports.useRef(null);
   const { copied, copy } = useCopyWithTick();
   /*
+   * 重拉详情时要知道「用户此刻选的是哪一版 / 选的是哪个文件」，但这两个值不能进
+   * effect 的依赖数组（那会让每次点选都重新拉一次 IPC，甚至自激）。所以在 effect
+   * 之外用 ref 留一份镜像：effect 自己 setSelectedId 写回的值也会在下一提交同步进来。
+   */
+  const selectedFileKeyRef = reactExports.useRef(void 0);
+  const selectedIdRef = reactExports.useRef(void 0);
+  reactExports.useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+  /*
    * 版本条目只带 sessionId；标题从 App 层的会话列表里翻（不另拉一份快照）。
    * 翻不到就是「来源会话已不在」——对用户来说裸 id 没有意义（ux-proposal §2.2）。
    */
@@ -68030,7 +68040,19 @@ function FileHistoryView({ onClose, sessions, onToast }) {
     }
     if (selectedKey === void 0 || !files.some((f) => f.key === selectedKey)) setSelectedKey(files[0].key);
   }, [list, files, selectedKey]);
-  /* 选中的文件换了（或整页刷新）→ 重拉它的版本元数据，并默认选中最新一版。 */
+  /*
+   * 选中的文件换了（或整页刷新）→ 重拉它的版本元数据。
+   *
+   * **重拉**与**重选**是两件事（独立评审 P0-2）：
+   *   · `selectedKey` 变了（用户换了文件）→ 重置选中，载入后落在最新一版
+   *     （「打开这一页十有八九是为了退回最近那一次改动」，是好默认）；
+   *   · 只是 `reloadToken` 变了（刷新 / 还原后重拉）→ **保留用户当前选中的那一版**，
+   *     只要它还在新的 versions 里（20 版裁剪可能把它挤掉，那时才回落末位）。
+   * 后者不这么做的话，还原成功后画面会跳到末尾那条「还原快照」——那恰好是**刚被
+   * 覆盖掉的旧内容**，与同一屏的 toast「已还原到 …」互相打架，用户读到的是
+   * 「没还原成功」或「还原到别的版本去了」。保留之后，预览正文此刻**就等于磁盘内容**，
+   * 那才是最好的成功证据；末尾那条快照仍在列表里，信息一点没少。
+   */
   reactExports.useEffect(() => {
     if (selectedKey === void 0) {
       setDetail(void 0);
@@ -68038,12 +68060,16 @@ function FileHistoryView({ onClose, sessions, onToast }) {
       setSelectedId(void 0);
       setContent(void 0);
       setContentError(void 0);
+      selectedFileKeyRef.current = void 0;
       return;
     }
     let cancelled = false;
+    const keyChanged = selectedFileKeyRef.current !== selectedKey;
+    selectedFileKeyRef.current = selectedKey;
+    const keepId = keyChanged ? void 0 : selectedIdRef.current;
     setDetail(void 0);
     setDetailError(void 0);
-    setSelectedId(void 0);
+    if (keyChanged) setSelectedId(void 0);
     setContent(void 0);
     setContentError(void 0);
     setConfirming(false);
@@ -68057,8 +68083,12 @@ function FileHistoryView({ onClose, sessions, onToast }) {
           return;
         }
         setDetail(res);
-        const index = defaultVersionIndex(res.versions);
-        if (index >= 0) setSelectedId(res.versions[index].id);
+        const versions = res.versions ?? [];
+        const index =
+          keepId !== void 0 && versions.some((v) => v.id === keepId)
+            ? versions.findIndex((v) => v.id === keepId)
+            : defaultVersionIndex(versions);
+        if (index >= 0) setSelectedId(versions[index].id);
       } catch (e) {
         if (!cancelled) setDetailError(errorText(e));
       }

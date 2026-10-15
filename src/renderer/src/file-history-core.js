@@ -42,15 +42,22 @@ function pad2(n) {
 	return n < 10 ? `0${n}` : `${n}`;
 }
 
-/** 绝对时间 `MM-DD HH:mm` —— 节点身份行、预览头与确认句共用同一格式。 */
+/**
+ * 绝对时间 `MM-DD HH:mm:ss` —— 节点身份行、预览头、确认句、成功 toast 共用同一格式。
+ *
+ * **带秒是刻意的**（独立评审 P1-3）：Agent 连写同一个文件多次是常态，本轮 fixture
+ * 的三个版本就落在同一分钟内。只到分钟时，确认句「把「周报.md」还原到 10-15 16:22 的
+ * 样子？」会同时对应两三行，用户在按下确认前**无法在那句话里定位自己选的是哪一版** ——
+ * 而那正是二次确认的全部价值。代价是每行多 3 个字符。
+ */
 export function formatVersionTime(at) {
 	const d = new Date(at);
-	return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+	return `${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
 
 /**
  * 相对时间：刚刚 / N 分钟前 / N 小时前 / 昨天 / N 天前 / MM-DD。
- * 超过一个月就不再「N 天前」（那个数字读起来已经失去意义），落到绝对日期。
+ * 超过一个月就不再「N 天前」（那个数字读起来已经失去意义），落到绝对日期（只到日）。
  */
 export function formatRelativeTime(at, now = Date.now()) {
 	const diff = Math.max(0, now - at);

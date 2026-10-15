@@ -46,9 +46,26 @@ import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 const FILE_NAME = "周报.md";
 const V1 = "# 周报\n\n第一版：VERSION-ONE\n";
-const V2 = "# 周报\n\n第二版：VERSION-TWO\n";
+/*
+ * 第二版刻意写长（60 行）：预览的限高 `min(50vh, 420px)` 曾被 `.code-block pre`
+ * 的 `60vh` 以特异性顶掉，而 36 B 的 fixture 永远看不出来（独立评审 P1-1）。
+ * 长正文让「限高真的生效」变成可断言的事实：computed max-height 正确 **且**
+ * 正文确实溢出、内部滚动（scrollHeight > clientHeight）。
+ */
+const V2_BODY = Array.from({ length: 60 }, (_, i) => `- 第 ${i + 1} 行：第二版正文`).join("\n");
+const V2 = `# 周报\n\n第二版：VERSION-TWO\n\n${V2_BODY}\n`;
 const V3 = "# 周报\n\n第三版：VERSION-THREE\n";
 const FINAL_TEXT = "FILE_HISTORY_E2E_DONE";
+
+/**
+ * mock 每轮之间刻意停 1.1s。
+ *
+ * 这不是「用 sleep 盖竞态」（测试自己一律等信号）：它是**夹具的时间性质** ——
+ * 版本只到秒，三轮写入必须落在**不同秒**上，「同一分钟里的多个版本要能分辨」
+ * （评审 P1-3）才是一条确定的断言而不是碰运气。1.1s > 1s，因此两次记录必然
+ * 落在不同秒。
+ */
+const ROUND_SPACING_MS = 1100;
 
 /**
  * mock 模型：按「请求里已经出现过几条 role:"tool"」决定这一轮干什么。
@@ -85,20 +102,24 @@ function startMockModel() {
 				function: { name, arguments: JSON.stringify(args) }
 			});
 
-			send({ role: "assistant", content: "" });
 			const toolResults = (parsed?.messages ?? []).filter((m) => m.role === "tool").length;
 			const writes = [V1, V2, V3];
+			const respond = () => {
+				send({ role: "assistant", content: "" });
+				if (toolResults < writes.length) {
+					send({ tool_calls: [toolCall("write", { path: FILE_NAME, content: writes[toolResults] })] });
+					send({}, "tool_calls");
+				} else {
+					for (const chunk of FINAL_TEXT.match(/.{1,8}/gu) ?? []) send({ content: chunk });
+					send({}, "stop");
+				}
+				res.write("data: [DONE]\n\n");
+				res.end();
+			};
 
-			if (toolResults < writes.length) {
-				send({ tool_calls: [toolCall("write", { path: FILE_NAME, content: writes[toolResults] })] });
-				send({}, "tool_calls");
-			} else {
-				for (const chunk of FINAL_TEXT.match(/.{1,8}/gu) ?? []) send({ content: chunk });
-				send({}, "stop");
-			}
-
-			res.write("data: [DONE]\n\n");
-			res.end();
+			// 写入轮之间拉开到不同秒（见 ROUND_SPACING_MS 的说明）。
+			if (toolResults < writes.length) setTimeout(respond, ROUND_SPACING_MS);
+			else respond();
 		});
 	});
 	return new Promise((ok) => {
@@ -201,6 +222,28 @@ const waitView = (pred, desc) =>
 		return pred(state) ? state : null;
 	}, { timeout: 20_000, desc });
 
+/**
+ * 在一张已解码的截图里采样「刻度槽那一列」，返回给定纵带内**每一行**的最深像素值。
+ *
+ * 用途是评审 P1-2 那条：时间轴主线必须跨过行内 padding、在相邻两行之间连着。
+ * 竖线是 `--border`（亮色 #e6e6e6 = 230），行间空隙的底色是卡片的白（255）——
+ * 于是「每一行都能采到 ≤249 的像素」等价于「主线没有断」。评审就是这么做实测的，
+ * 这里把同一套方法固化成断言（只取 R 通道：线是中性灰，三个通道等值）。
+ */
+function darkestPerRow(img, { xDevice, yStart, yEnd, halfWidthDevice }) {
+	const { width, height, channels, data } = img;
+	const rows = [];
+	for (let y = Math.max(0, yStart); y < Math.min(height, yEnd); y += 1) {
+		let min = 255;
+		for (let x = Math.max(0, xDevice - halfWidthDevice); x <= Math.min(width - 1, xDevice + halfWidthDevice); x += 1) {
+			const value = data[(y * width + x) * channels];
+			if (value < min) min = value;
+		}
+		rows.push(min);
+	}
+	return rows;
+}
+
 const clickNav = async (label) => {
 	const ok = await win.evaluate((text) => {
 		const btn = [...document.querySelectorAll(".sidebar-nav button")].find((b) => (b.textContent ?? "").trim() === text);
@@ -286,7 +329,7 @@ await h.check("③ 侧栏进入「文件历史」：清单里出现那个文件�
 	await clickNav("文件历史");
 	await waitView((s) => s.present && s.title === "文件历史" && s.nodes.length >= 2, "文件历史视图挂上并出现 2 个节点");
 	await h.waitForSettled();
-	await h.shoot("file-history-list-light");
+	const shot = await h.shoot("file-history-list-light");
 
 	const s = await readView();
 	assert.equal(s.title, "文件历史", "页头标题不对");
@@ -303,6 +346,19 @@ await h.check("③ 侧栏进入「文件历史」：清单里出现那个文件�
 
 	assert.equal(s.nodes.length, 2, `时间轴应恰好 2 个节点（写 3 次、新建不记）：${JSON.stringify(s.nodes.map((n) => n.change))}`);
 	/*
+	 * 时间必须带秒、且同一分钟里的两版真的能分开（独立评审 P1-3）：Agent 连写同一个文件
+	 * 是常态，只到分钟时确认句会同时对应好几行，用户在按下确认前无法定位自己选的是哪一版。
+	 * 夹具为此把两轮之间拉开到不同秒（见 ROUND_SPACING_MS）。
+	 */
+	for (const node of s.nodes) {
+		assert.match(node.time, /^\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, `节点身份行的时间应是 MM-DD HH:mm:ss：${JSON.stringify(node.time)}`);
+	}
+	assert.equal(
+		new Set(s.nodes.map((n) => n.time)).size,
+		s.nodes.length,
+		`同一屏的版本必须两两可分辨（带秒后仍相同就说明夹具没拉开）：${JSON.stringify(s.nodes.map((n) => n.time))}`
+	);
+	/*
 	 * 契约里 added / removed 是「替换掉这一版的那次改动」的增删行数（design.md §3.1），
 	 * 所以：旧的那一版有数字，**最新一版没有**（它之后没有已记录的改动）。
 	 */
@@ -314,9 +370,95 @@ await h.check("③ 侧栏进入「文件历史」：清单里出现那个文件�
 	assert.equal(s.restoreButton, true, "预览头应有「还原到此版本」");
 	assert.equal(s.hasDialog, false, "这一页不该出现模态对话框");
 	assert.ok(s.previewHead.includes("只读"), `预览头应标「只读」：${JSON.stringify(s.previewHead)}`);
+	assert.match(s.previewHead, /\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, `预览头的时间应与节点同一格式：${JSON.stringify(s.previewHead)}`);
 
 	// 选中态是双通道：行底 + 圆点。至少要能观察到「选中与未选中的圆点不一样」。
 	assert.notEqual(s.nodes[0].dot, s.nodes[1].dot, "选中节点的圆点应与未选中的可分辨（不能只靠颜色深浅的都一样）");
+
+	/*
+	 * 预览限高必须真的是设计值 min(50vh, 420px)（独立评审 P1-1）。
+	 * 数值本身与内容长度无关，所以先钉 computed 值，再钉「长正文确实溢出、内部滚动」——
+	 * 后者才是「限高真的生效」的行为证据。
+	 */
+	const cap = await win.evaluate(() => {
+		const pre = document.querySelector(".fh-preview-body");
+		if (pre === null) return null;
+		return {
+			maxHeight: getComputedStyle(pre).maxHeight,
+			clientHeight: pre.clientHeight,
+			scrollHeight: pre.scrollHeight,
+			expected: Math.min(window.innerHeight * 0.5, 420)
+		};
+	});
+	assert.ok(cap !== null, "找不到 .fh-preview-body");
+	assert.equal(
+		Math.round(Number.parseFloat(cap.maxHeight)),
+		Math.round(cap.expected),
+		`预览体限高应为 min(50vh, 420px) = ${Math.round(cap.expected)}px，实际 ${cap.maxHeight}（被 .code-block pre 的 60vh 顶掉过）`
+	);
+	assert.ok(
+		cap.scrollHeight > cap.clientHeight,
+		`长正文应被限高并内部滚动：scrollHeight=${cap.scrollHeight} clientHeight=${cap.clientHeight}`
+	);
+
+	/*
+	 * 时间轴主线必须跨过行内 padding、在相邻两行之间连着（独立评审 P1-2）。
+	 * 方法就是评审那一套：沿刻度槽列逐行采样，看行间的 12px 空隙带里有没有线的像素。
+	 */
+	const markGeometry = await win.evaluate(() => {
+		const nodes = [...document.querySelectorAll(".fh-timeline .fh-node")];
+		const marks = nodes.map((n) => n.querySelector(".fh-node-mark").getBoundingClientRect());
+		return {
+			viewportWidth: window.innerWidth,
+			markCenterX: marks.map((r) => (r.left + r.right) / 2),
+			markBottom: marks.map((r) => r.bottom),
+			markTop: marks.map((r) => r.top)
+		};
+	});
+	const scale = shot.img.width / markGeometry.viewportWidth;
+	const band = darkestPerRow(shot.img, {
+		xDevice: Math.round(markGeometry.markCenterX[0] * scale),
+		yStart: Math.ceil(markGeometry.markBottom[0] * scale),
+		yEnd: Math.floor(markGeometry.markTop[1] * scale),
+		halfWidthDevice: Math.max(1, Math.round(3 * scale))
+	});
+	assert.ok(band.length >= 8, `行间空隙带的采样高度异常：${band.length} 设备像素（期望 ~12 CSS px × ${scale.toFixed(2)}）`);
+	assert.ok(
+		Math.max(...band) <= 249,
+		`主线在行间断开了：空隙带里最亮的那一行最深像素 ${Math.max(...band)}（≈255 = 只有卡片底色；主线是 ~230）`
+	);
+	/*
+	 * 中间连起来的同时，**首末端仍必须裁掉**：线只在「节点之间」表示时间在流动，
+	 * 越过首节点向上、越过末节点向下就变成了装饰。判据取语义而不是字面值 ——
+	 * 首端 top 必须为正（线从圆点起，不是从槽顶起），末端必须给死高度且短于整个槽。
+	 */
+	const clip = await win.evaluate(() => {
+		const marks = [...document.querySelectorAll(".fh-timeline .fh-node")].map((n) => n.querySelector(".fh-node-mark"));
+		const read = (el) => {
+			const cs = getComputedStyle(el, "::before");
+			return { top: cs.top, bottom: cs.bottom, height: cs.height, markHeight: el.getBoundingClientRect().height };
+		};
+		return { first: read(marks[0]), last: read(marks[marks.length - 1]) };
+	});
+	assert.ok(
+		Number.parseFloat(clip.first.top) > 0,
+		`首节点的线上端应被裁掉（top > 0 = 它没有向上一行延伸），实际 top=${clip.first.top}`
+	);
+	/*
+	 * 末节点的线必须**停在圆点中心**（圆点 margin-top 4 + 直径 10 → 中心在 9px），
+	 * 而不是贯穿整个刻度槽。注意不能断言 computed `bottom === "auto"`：绝对定位元素
+	 * 一旦给了 height，getComputedStyle 返回的是**用值**（实测 58.19px 这种），
+	 * 不是声明值 —— 那是我第一版写错的判据，被这条断言自己抓出来了。
+	 */
+	const lastLineEnd = Number.parseFloat(clip.last.top) + Number.parseFloat(clip.last.height);
+	assert.ok(
+		lastLineEnd > 0 && lastLineEnd <= 12,
+		`末节点的线下端应停在圆点中心（≈9px）：top=${clip.last.top} height=${clip.last.height} → 停在 ${lastLineEnd}px`
+	);
+	assert.ok(
+		Number.parseFloat(clip.last.height) < clip.last.markHeight,
+		`末节点的线不该贯穿整个刻度槽：height=${clip.last.height} markHeight=${clip.last.markHeight}`
+	);
 
 	/*
 	 * 预览的是**这一版存下来的内容**，不是磁盘上的当前内容：第三版是「当前」，
@@ -352,7 +494,7 @@ await h.check("④ 删掉最旧一版的正文文件 → 该节点标 broken、�
 		btn.click();
 	});
 	const s = await waitView((v) => v.nodes.length === 2 && v.nodes[0].broken === true, "最旧一版被标成 broken");
-	await h.shoot("file-history-broken-light");
+	const brokenShot = await h.shoot("file-history-broken-light");
 
 	const broken = s.nodes[0];
 	/*
@@ -361,57 +503,84 @@ await h.check("④ 删掉最旧一版的正文文件 → 该节点标 broken、�
 	 * 「哪几条真的相关」，被连带打红的那些会把现场搅浑）。复位本身失败不覆盖原始断言。
 	 */
 	try {
-	assert.equal(broken.broken, true, "最旧一版应是 broken");
-	assert.equal(broken.disabledAttr, false, "broken 的节点不能用 disabled 属性（那会把键盘入口整个吃掉）");
-	assert.equal(broken.ariaDisabled, "true", "broken 的节点应以 aria-disabled 告知不可激活");
-	assert.ok(broken.opacity < 1, `broken 节点应淡出（只改透明度），实际 opacity=${broken.opacity}`);
-	assert.equal(broken.cursor, "default", `broken 节点不该有可点暗示，实际 cursor=${broken.cursor}`);
-	assert.equal(broken.change, "内容已不在，这一版不能还原", "broken 节点自身要说清不可还原（不静默）");
-	assert.ok(
-		s.notes.some((n) => n.includes("不能还原") && n.includes("1 版")),
-		`时间轴上方应有 broken 说明行：${JSON.stringify(s.notes)}`
-	);
+		assert.equal(broken.broken, true, "最旧一版应是 broken");
+		assert.equal(broken.disabledAttr, false, "broken 的节点不能用 disabled 属性（那会把键盘入口整个吃掉）");
+		assert.equal(broken.ariaDisabled, "true", "broken 的节点应以 aria-disabled 告知不可激活");
+		assert.ok(broken.opacity < 1, `broken 节点应淡出（只改透明度），实际 opacity=${broken.opacity}`);
+		assert.equal(broken.cursor, "default", `broken 节点不该有可点暗示，实际 cursor=${broken.cursor}`);
+		assert.equal(broken.change, "内容已不在，这一版不能还原", "broken 节点自身要说清不可还原（不静默）");
+		assert.ok(
+			s.notes.some((n) => n.includes("不能还原") && n.includes("1 版")),
+			`时间轴上方应有 broken 说明行：${JSON.stringify(s.notes)}`
+		);
 
-	/*
-	 * 不可激活：点它不换选中、也不换预览。
-	 *
-	 * 判据取**选中节点的下标**而不是它的时间文案：本用例里两个节点是同一分钟写下的，
-	 * 时间串相等会让「时间没变」这条假过（第一版就是这么写的，反向验证时才发现）。
-	 */
-	const selectedProbe = () =>
-		win.evaluate(() => {
-			const nodes = [...document.querySelectorAll(".fh-timeline .fh-node")];
-			return {
-				selectedIndex: nodes.findIndex((n) => n.classList.contains("selected")),
-				selectedChange: (nodes.find((n) => n.classList.contains("selected"))?.querySelector(".fh-node-change")?.textContent ?? "").trim(),
-				preview: document.querySelector(".fh-preview-body")?.textContent ?? ""
-			};
+		/*
+		 * P0-1 的**像素级**判据（独立评审就是这么测的）：broken 行整行 opacity 0.55，
+		 * 它那句「为什么不能还原」如果还走 --text-secondary，两次降档相乘会把亮色对比度
+		 * 压到 1.96:1 —— 读不出来等于没写。沿变化行的字带取最深像素：走 --text 约 115，
+		 * 走 --text-secondary 约 185，阈值 150 落在两者中间，且与「画面有没有渲染」无关。
+		 */
+		const changeBox = await win.evaluate(() => {
+			const el = document.querySelector(".fh-timeline .fh-node.broken .fh-node-change");
+			if (el === null) return null;
+			const r = el.getBoundingClientRect();
+			return { viewportWidth: window.innerWidth, left: r.left, right: r.right, top: r.top, bottom: r.bottom };
 		});
-	const before = await selectedProbe();
-	/*
-	 * 用页内 .click()（不经过 Playwright 的 actionability 检查）：Playwright 把
-	 * `aria-disabled="true"` 当作「不可点」而拒绝点击 —— 那正是这里刻意选的语义
-	 * （要保留键盘可达，就不能用 disabled 属性）。所以这里要验的是「真实点击事件
-	 * 打上去也不换选中」，而不是「Playwright 允不允许点」。
-	 */
-	await win.evaluate(() => {
-		const node = document.querySelector(".fh-timeline .fh-node.broken");
-		if (node === null) throw new Error("找不到 .fh-node.broken");
-		node.click();
-	});
-	const after = await selectedProbe();
-	assert.equal(after.selectedIndex, before.selectedIndex, "点 broken 节点不该改变选中（它不可激活）");
-	assert.equal(after.selectedChange, before.selectedChange, "点 broken 节点不该改变选中的那一版");
-	assert.equal(after.preview, before.preview, "点 broken 节点不该改变预览内容");
+		assert.ok(changeBox !== null, "找不到 broken 节点的变化行");
+		const brokenScale = brokenShot.img.width / changeBox.viewportWidth;
+		let changeDarkest = 255;
+		for (let y = Math.round(changeBox.top * brokenScale); y < Math.round(changeBox.bottom * brokenScale); y += 1) {
+			for (let x = Math.round(changeBox.left * brokenScale); x < Math.round(changeBox.right * brokenScale); x += 1) {
+				const value = brokenShot.img.data[(y * brokenShot.img.width + x) * brokenShot.img.channels];
+				if (value < changeDarkest) changeDarkest = value;
+			}
+		}
+		assert.ok(
+			changeDarkest <= 150,
+			`broken 节点变化行的文字太淡（0.55 的行级 opacity 叠在 --text-secondary 上）：最深像素 ${changeDarkest}（走 --text 约 115，走 --text-secondary 约 185）`
+		);
 
-	// 但它必须还在键盘序列里：能聚焦 = 键盘用户看得见「这个文件丢了一版」。
-	const focused = await win.evaluate(() => {
-		const node = document.querySelector(".fh-timeline .fh-node.broken");
-		if (node === null) return { focusable: false, reason: "没有 .fh-node.broken" };
-		node.focus();
-		return { focusable: document.activeElement === node, reason: `activeElement=${document.activeElement?.className ?? "null"}` };
-	});
-	assert.ok(focused.focusable, `broken 节点必须可聚焦（键盘用户得看得见它丢了）：${focused.reason}`);
+		/*
+		 * 不可激活：点它不换选中、也不换预览。
+		 *
+		 * 判据取**选中节点的下标 + 它的变化行文案**，而不是时间文案：时间在两条路径上
+		 * 都可能撞车（带秒之前是同一分钟；带秒之后也只是概率小），下标与文案是这一屏里
+		 * 唯一不会重合的两个量（第一版拿时间比，反向验证时就发现它会假过）。
+		 */
+		const selectedProbe = () =>
+			win.evaluate(() => {
+				const nodes = [...document.querySelectorAll(".fh-timeline .fh-node")];
+				return {
+					selectedIndex: nodes.findIndex((n) => n.classList.contains("selected")),
+					selectedChange: (nodes.find((n) => n.classList.contains("selected"))?.querySelector(".fh-node-change")?.textContent ?? "").trim(),
+					preview: document.querySelector(".fh-preview-body")?.textContent ?? ""
+				};
+			});
+		const before = await selectedProbe();
+		/*
+		 * 用页内 .click()（不经过 Playwright 的 actionability 检查）：Playwright 把
+		 * `aria-disabled="true"` 当作「不可点」而拒绝点击 —— 那正是这里刻意选的语义
+		 * （要保留键盘可达，就不能用 disabled 属性）。所以这里要验的是「真实点击事件
+		 * 打上去也不换选中」，而不是「Playwright 允不允许点」。
+		 */
+		await win.evaluate(() => {
+			const node = document.querySelector(".fh-timeline .fh-node.broken");
+			if (node === null) throw new Error("找不到 .fh-node.broken");
+			node.click();
+		});
+		const after = await selectedProbe();
+		assert.equal(after.selectedIndex, before.selectedIndex, "点 broken 节点不该改变选中（它不可激活）");
+		assert.equal(after.selectedChange, before.selectedChange, "点 broken 节点不该改变选中的那一版");
+		assert.equal(after.preview, before.preview, "点 broken 节点不该改变预览内容");
+
+		// 但它必须还在键盘序列里：能聚焦 = 键盘用户看得见「这个文件丢了一版」。
+		const focused = await win.evaluate(() => {
+			const node = document.querySelector(".fh-timeline .fh-node.broken");
+			if (node === null) return { focusable: false, reason: "没有 .fh-node.broken" };
+			node.focus();
+			return { focusable: document.activeElement === node, reason: `activeElement=${document.activeElement?.className ?? "null"}` };
+		});
+		assert.ok(focused.focusable, `broken 节点必须可聚焦（键盘用户得看得见它丢了）：${focused.reason}`);
 	} finally {
 		/* 把选中重新落回最新一版，让这一条 check 结束时状态确定。 */
 		try {
@@ -429,7 +598,14 @@ await h.check("④ 删掉最旧一版的正文文件 → 该节点标 broken、�
 });
 
 // ══ ⑤ 还原：就地确认条（不是模态）说全三件事 ═════════════════════
+/** 用户在确认条里锁定的那一版（⑤ 记下、⑥ 用它守「还原理应停在它身上」）。 */
+let restoreTargetTime = "";
 await h.check("⑤ 点「还原到此版本」→ 就地确认条（无模态）说清文件、时间点与「先存成一条新版本」", async () => {
+	const beforeConfirm = await readView();
+	const targetNode = beforeConfirm.nodes.find((n) => n.selected);
+	assert.ok(targetNode !== undefined, "确认前应有选中的节点");
+	restoreTargetTime = targetNode.time;
+
 	const clicked = await win.evaluate(() => {
 		const btn = [...document.querySelectorAll(".fh-preview-actions button")].find(
 			(b) => (b.textContent ?? "").trim() === "还原到此版本"
@@ -444,7 +620,16 @@ await h.check("⑤ 点「还原到此版本」→ 就地确认条（无模态）
 	await h.shoot("file-history-confirm-light");
 	assert.equal(s.hasDialog, false, "确认必须是就地的，不许出现 role=dialog 的模态");
 	assert.ok(s.confirmText.includes(`「${FILE_NAME}」`), `确认句要说清哪个文件：${JSON.stringify(s.confirmText)}`);
-	assert.match(s.confirmText, /\d{2}-\d{2} \d{2}:\d{2}/, `确认句要说清退到哪个时间点：${JSON.stringify(s.confirmText)}`);
+	assert.match(s.confirmText, /\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, `确认句要说清退到哪个时间点（且带秒）：${JSON.stringify(s.confirmText)}`);
+	/*
+	 * 确认句里的时间点必须**就是**选中那一版的身份行时间（P1-3 的实质）：
+	 * 同一分钟内连着改过几次时，只到分钟的那句话同时对应好几行，用户在按下确认前
+	 * 无法定位自己选的是哪一版 —— 而那正是二次确认的全部价值。
+	 */
+	assert.ok(
+		s.confirmText.includes(restoreTargetTime),
+		`确认句的时间点应逐字等于选中节点的时间：确认句 ${JSON.stringify(s.confirmText)} / 选中行 ${JSON.stringify(restoreTargetTime)}`
+	);
 	assert.ok(s.confirmText.includes("先存成一条新版本"), `确认句要说清当前内容会先留一版：${JSON.stringify(s.confirmText)}`);
 	// 「取消」必须在，且取消后磁盘不变（下一步验证落盘之前先证否一次）。
 	const cancelled = await win.evaluate(() => {
@@ -494,7 +679,11 @@ await h.check("⑥ 确认还原 → 磁盘内容退回到那一版（副作用�
 	assert.ok(disk.includes("VERSION-TWO"), "退回的应当是第二版");
 
 	// 还原本身也留一版：时间轴末尾应多出「你还原之前的内容」那一条。
-	const s = await waitView((v) => v.nodes.length === 3, "还原之后时间轴变成 3 个节点");
+	// 同时等到正文就位（刷新会把预览短暂换回加载态），否则下面的比较会拿到 null。
+	const s = await waitView(
+		(v) => v.nodes.length === 3 && v.previewBody !== null && v.nodes.some((n) => n.selected),
+		"还原之后时间轴变成 3 个节点、且预览正文就位"
+	);
 	await h.shoot("file-history-restored-light");
 	assert.equal(s.nodes.length, 3, `还原之后应有 3 个节点（2 版历史 + 还原留的那一版）：${JSON.stringify(s.nodes.map((n) => n.change))}`);
 	assert.ok(
@@ -504,6 +693,29 @@ await h.check("⑥ 确认还原 → 磁盘内容退回到那一版（副作用�
 	// 左列清单也跟着刷新（版本数从 2 变 3），不是只刷了右列。
 	const row = s.rows.find((r) => r.name === FILE_NAME);
 	assert.equal(row?.count, "3 版", `还原之后清单里的版本数也要刷新：${JSON.stringify(row?.count)}`);
+
+	/*
+	 * P0-2 的守门断言（独立评审）：还原成功后**高亮与预览都必须停在用户刚还原的那一版**上。
+	 *
+	 * 曾经的实现是「刷新后一律选末位」，而末位恰好是刚刚被覆盖掉的旧内容 ——
+	 * 于是同一屏里 toast 说「已还原到 …」、画面主体却显示旧字节，用户读到的是
+	 * 「没还原成功」或「还原到别的版本去了」。保留选中之后，预览正文**就等于磁盘内容**，
+	 * 那才是能自我证明的成功现场。
+	 */
+	const selected = s.nodes.find((n) => n.selected);
+	assert.ok(selected !== undefined, "还原之后应有选中的节点");
+	assert.equal(selected.time, restoreTargetTime, `还原之后的选中应停在用户刚还原的那一版：${JSON.stringify(selected.time)} vs ${JSON.stringify(restoreTargetTime)}`);
+	assert.equal(
+		s.nodes.findIndex((n) => n.selected),
+		1,
+		`选中不该跳到末尾那条还原快照：${JSON.stringify(s.nodes.map((n) => (n.selected ? "选中" : "-")))}`
+	);
+	assert.equal(
+		s.previewBody,
+		expectedContent,
+		"还原之后的预览正文应逐字节等于被还原的那一版（不是刚被覆盖掉的旧内容）"
+	);
+	assert.equal(s.previewBody, disk, "还原之后的预览正文应逐字节等于磁盘上的当前内容（这是「还原成功」唯一能自我证明的现场）");
 });
 
 // ══ ⑦ 命令面板也能直达（侧栏是入口之一，不是唯一入口）═══════════
