@@ -32,6 +32,7 @@ const SECTIONS = [
 	["专家·技能·连接器", "experts", true],
 	["自动化", "automation", true],
 	["资料库", "library", true],
+	["文件历史", "file-history", true],
 	["诊断", "diagnostics", true],
 	["统计", "stats", true],
 ];

@@ -12164,3 +12164,406 @@ button.agent-row {
 		transition: none;
 	}
 }
+
+/* ══ 文件时光机（侧栏「文件历史」）═════════════════════════════════════════════
+
+   版式逐条按 .trellis/tasks/10-15-file-time-machine/research/ux-proposal.md：
+   **一个页面只有一个内容卡级的主盒子**（右下那张 .fh-card），左列是**无边框索引列**
+   （它是导航，不是第二个盒子）；确认条是填色无边的次级面，预览是卡内的「内框工具」
+   （复用 .code-block 族）—— 三者都不是内容卡（docs/DESIGN.md §3.7 / §3.9）。
+
+   零新档：间距只用既有 space 档，字号只用 --text-list / --text-meta，颜色只用
+   --bg / --bg-raised / --bg-hover / --border / --text / --text-secondary / --ok /
+   --danger，时长只用 --dur-fast，缓动只用 --ease-standard。
+   刻度槽宽（20px）与圆点直径（10 / 12px）是**组件尺寸**，不是档位
+   （与 .tool-dot 的 6px 同性质，ux-proposal §9.2）。
+   零新增动画：时间轴无入场、连接线无生长、确认条无滑入 —— 因此不进
+   docs/DESIGN.md §10.3 登记，也无需加入 §10.3.1 关停清单（ux-proposal §9.2）。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* 页壳覆盖：900px 是设置页的「阅读列宽」，本屏是主从两列，套 900 会把右列压窄
+   （同 .settings-body[data-projects] / [data-compare] 的既有手法）。
+   container-type 让窄窗退让走**容器查询**而非媒体查询 —— 侧栏开合会改可用宽
+   （264px 摆动），窗口宽是另一个量（[data-compare] 的既有理由）。 */
+.settings-body[data-file-history] {
+	max-width: none;
+	container-type: inline-size;
+}
+
+.fh-layout {
+	display: grid;
+	grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+	gap: var(--space-6);
+	align-items: start;
+}
+
+/* ── 左列：文件清单（无边框索引列）─────────────────────────────── */
+.fh-index {
+	min-width: 0;
+}
+
+/* 区头：纯文本行，口径同 .home-recent-head / .proj-section-title。 */
+.fh-index-head {
+	margin: 0 0 var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.fh-file-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+/* 整行可点的**透明底行**，不是子盒子：hover 才浮底，选中复用 .timeline-row.selected
+   的既有口径（--bg-raised + --radius-sm）。 */
+.fh-file-row {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	width: 100%;
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	text-align: left;
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.fh-file-row:hover {
+	background: var(--bg-hover);
+}
+
+.fh-file-row:active {
+	transform: scale(0.98);
+}
+
+.fh-file-row.selected {
+	background: var(--bg-raised);
+}
+
+.fh-file-row-main {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+.fh-file-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-list);
+	color: var(--text);
+}
+
+/* 版本数不参与省略（flex: none），文件名再长也读得出「几版」。 */
+.fh-file-count {
+	flex: none;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.fh-file-dir,
+.fh-file-note {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* ── 窄窗的「文件选择条」（默认不出现）────────────────────────── */
+.fh-picker-wrap {
+	display: none;
+}
+
+.fh-picker {
+	max-width: 100%;
+}
+
+.fh-picker-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.fh-picker-menu {
+	top: 100%;
+	left: 0;
+	min-width: 220px;
+	padding: var(--space-2);
+	transform-origin: top left;
+}
+
+/* ── 右列：全页唯一的内容卡 ─────────────────────────────────────── */
+.fh-card {
+	min-width: 0;
+	padding: var(--space-4);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+}
+
+.fh-card-head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+.fh-card-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-list);
+	font-weight: 500;
+	color: var(--text);
+}
+
+/* 「文件已不在」是文件当前的事实，不是错误状态 —— 不借状态色（§2.4）。 */
+.fh-card-flag {
+	flex: none;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.fh-card-meta,
+.fh-card-note {
+	margin: var(--space-1) 0 0;
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+.fh-card-note-tail {
+	margin-top: var(--space-3);
+}
+
+/* ── 版本时间轴：行 + 左侧刻度槽（10px 圆点 + 1px 竖线）────────── */
+.fh-timeline {
+	margin: var(--space-3) 0 0;
+	padding: 0;
+	list-style: none;
+	/* 上限 20 版，限高滚动是必要的；scrollbar-gutter 与 .settings-body 同口径。 */
+	max-height: min(36vh, 300px);
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+.fh-node {
+	display: grid;
+	grid-template-columns: 20px minmax(0, 1fr);
+	gap: var(--space-3);
+	width: 100%;
+	padding: var(--space-2) var(--space-2) var(--space-2) 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	text-align: left;
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.fh-node:hover:not(.broken):not(:disabled) {
+	background: var(--bg-hover);
+}
+
+.fh-node:active:not(.broken):not(:disabled) {
+	transform: scale(0.98);
+}
+
+/* 选中是**双通道**：行底 + 圆点形态。即使打不出颜色，实心/空心与大小仍可辨（§7.6）。 */
+.fh-node.selected {
+	background: var(--bg-raised);
+}
+
+/* 禁用只改透明度，不置灰背景（§3.4）；broken 的版本仍可聚焦（aria-disabled）。 */
+.fh-node.broken,
+.fh-node:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.fh-node-mark {
+	position: relative;
+	display: flex;
+	justify-content: center;
+}
+
+.fh-node-mark::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--border);
+}
+
+/* 线是「时间在流动」的记号：首行上半段与末行下半段裁掉，单节点则整条不画。 */
+.fh-node.first .fh-node-mark::before {
+	top: 9px;
+}
+
+.fh-node.last .fh-node-mark::before {
+	bottom: auto;
+	height: 9px;
+}
+
+.fh-node.first.last .fh-node-mark::before {
+	display: none;
+}
+
+.fh-node-dot {
+	position: relative;
+	width: 10px;
+	height: 10px;
+	margin-top: 4px;
+	border-radius: var(--radius-full);
+	background: var(--border);
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		box-shadow var(--dur-fast) var(--ease-standard);
+}
+
+.fh-node.selected .fh-node-dot {
+	width: 12px;
+	height: 12px;
+	margin-top: 3px;
+	background: var(--text);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.fh-node.broken .fh-node-dot {
+	background: transparent;
+	border: 1px solid var(--border);
+}
+
+.fh-node-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	min-width: 0;
+}
+
+.fh-node-head {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+/* 时间戳 flex:none 永不裁；会话名一侧省略（ux-proposal §3.3）。 */
+.fh-node-time {
+	flex: none;
+	font-size: var(--text-list);
+	color: var(--text);
+}
+
+.fh-node-source {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	text-align: right;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 变化行走 .tool-change 的既有口径：等宽 + meta 档，符号自身承担语义（不看颜色也读得出）。 */
+.fh-node-change {
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.fh-node-ago {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.fh-node-skeleton {
+	align-items: center;
+}
+
+/* ── 只读预览（卡内的「内框工具」，复用 .code-block 族）──────────── */
+.fh-preview {
+	margin: var(--space-3) 0 0;
+}
+
+.fh-preview-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+/* 一律等宽正文、不做 markdown 渲染：存的是原始字节，等宽是唯一忠实的呈现
+   （ux-proposal §3.6）。行数级限高 + 滚动，不做字级截断（§3.7）。 */
+.fh-preview-body {
+	margin: 0;
+	padding: var(--space-3) var(--space-4);
+	max-height: min(50vh, 420px);
+	overflow: auto;
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	tab-size: 4;
+	color: var(--text);
+}
+
+/* ── 就地确认条（不是模态：模态背板会压住用户正要核对的目标版本正文）── */
+.fh-confirm {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	background: var(--bg-raised);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.fh-confirm-text {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+/* 失败就地呈现，复用 ErrorState 的视觉（全站唯一的就地错误语言）：1px --danger + 8% 底。 */
+.fh-confirm-error {
+	background: color-mix(in srgb, var(--danger) 8%, transparent);
+	border: 1px solid var(--danger);
+	color: var(--danger);
+}
+
+/* ── 窄容器退让（容器查询锚在可用宽度上）───────────────────────── */
+@container (max-width: 880px) {
+	.fh-layout {
+		grid-template-columns: minmax(200px, 220px) minmax(0, 1fr);
+	}
+}
+
+/* < 620px：清单收成一行「文件选择条」（点开既有 .pop-menu，不用原生 select），
+   时间轴与预览全宽在下。 */
+@container (max-width: 620px) {
+	.fh-layout {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-5);
+	}
+
+	.fh-index {
+		display: none;
+	}
+
+	.fh-picker-wrap {
+		display: block;
+	}
+}
