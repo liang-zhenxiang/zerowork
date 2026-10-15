@@ -120,3 +120,37 @@
 ### Next Steps
 
 - 有图形环境时跑 npm run test:gui:export-markdown 与全套 test:gui；并真机看一眼菜单翻转后的观感
+
+
+## Session 4: 文件时光机一轮（10-15-file-time-machine）
+<!-- trellis-session: v=2 fp=63b94e51162687ea -->
+
+**Date**: 2026-10-15
+**Task**: 文件时光机一轮（10-15-file-time-machine）
+**Branch**: `feat/file-time-machine`
+
+### Summary
+
+Agent 改过的文件留一版、可看可退；两处 P0 由独立设计师评审抓出并改掉
+
+### Main Changes
+
+- 新增 daemon 侧 version-store + 三个 IPC 通道；渲染层新增「文件历史」页（版本时间轴 + 只读预览 + 就地确认还原）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9f3ca58` | feat(file-history): 文件时光机——Agent 改过的文件留一版，可看可退 (#206) |
+
+### Testing
+
+- [OK] npm test 810 全过；test:gui:file-history 10/10（断言 84 条）；六处反向验证各自只打中相关那一条
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 发版时把 [Unreleased] 归入 v0.9.0；Roadmap 已更新
