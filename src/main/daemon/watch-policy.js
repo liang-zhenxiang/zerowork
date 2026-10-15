@@ -273,7 +273,31 @@ function evaluateWatchBoundary(intent, policy, workspaceDir) {
     };
   }
 
-  const path = typeof intent.path === "string" ? intent.path : undefined;
+  const rawPath = typeof intent.path === "string" ? intent.path : undefined;
+
+  /*
+   * 把路径先折算成**相对工作目录**的形式，再拿去做两处判定。
+   *
+   * 为什么必须先折算：`isInsideScope` 拿声明范围（相对写法，如 `reports/`）与
+   * 调用里的路径做**路径段**比较，而模型给路径的写法是随机的 ——
+   * 同一个文件可能写成 `reports/inside.txt`，也可能写成
+   * `/abs/ws/reports/inside.txt`。不折算的话后一种会被范围判定拒掉：
+   * **同一个文件，写相对路径放行、写绝对路径拒绝**。模型据此换不到正确写法
+   * （它压根没做错什么，只是写了个绝对路径），只会重试或放弃整轮。
+   *
+   * 折算**只做规范化，不做放行**：`relative()` 的产物仍在工作区内时，
+   * 第 4 步照旧拿原始绝对路径判「工作区之外」；工作区外的绝对路径折算后
+   * 会带上 `../` 前缀，在范围判定里同样匹配不上，最终仍被第 4 步拒绝。
+   * 因而这一改**只可能少拒、不会多放行** —— 少拒的恰恰是「本来就该放行」的那些。
+   */
+  let path = rawPath;
+  if (rawPath !== undefined && rawPath !== "" && workspaceDir !== undefined && isAbsolute(rawPath)) {
+    const rel = relative(resolve(workspaceDir), resolve(rawPath));
+    // 只有在折算结果确实落在工作区内时才采用它；否则保留原样交给第 4 步拒绝
+    if (!rel.startsWith(`..${sep}`) && rel !== ".." && !isAbsolute(rel)) {
+      path = normalizeForCompare(rel);
+    }
+  }
 
   // 3. 可写范围（只在确实声明了范围时才判）
   if (path !== undefined && !isInsideScope(path, policy.scoped)) {
@@ -282,19 +306,19 @@ function evaluateWatchBoundary(intent, policy, workspaceDir) {
       rule: "scope",
       reason:
         `本任务的「可写范围」只含 ${policy.scoped.join("、")}，` +
-        `${path} 不在其中。请改写路径，或让用户把这个目录加进任务的可写范围。`,
+        `${rawPath} 不在其中。请改写路径，或让用户把这个目录加进任务的可写范围。`,
     };
   }
 
   // 4. 工作区之外（即使没声明范围也不许跑出去）
-  if (path !== undefined && workspaceDir !== undefined && path !== "") {
-    const abs = isAbsolute(path) ? path : resolve(workspaceDir, path);
+  if (rawPath !== undefined && workspaceDir !== undefined && rawPath !== "") {
+    const abs = isAbsolute(rawPath) ? rawPath : resolve(workspaceDir, rawPath);
     const rel = relative(resolve(workspaceDir), resolve(abs));
     if (rel.startsWith(`..${sep}`) || rel === ".." || isAbsolute(rel)) {
       return {
         allowed: false,
         rule: "outside",
-        reason: `本任务只能在它的工作目录内改动文件，${path} 在工作目录之外。`,
+        reason: `本任务只能在它的工作目录内改动文件，${rawPath} 在工作目录之外。`,
       };
     }
   }

@@ -203,6 +203,44 @@ describe("evaluateWatchBoundary —— 四条判定顺序", () => {
 		);
 	});
 
+	/*
+	 * 同一个文件，写成相对路径与写成绝对路径必须得到同一个判定。
+	 *
+	 * 此前错在哪：范围判定在「折算成相对工作目录」之前跑，于是模型写
+	 * `/abs/ws/reports/x.md`（**明明落在声明范围内**）会被拒。模型没有做错任何事，
+	 * 只是选了另一种同样合法的路径写法，却收到「不在可写范围内」的拒绝 ——
+	 * 它换不到正确写法（相对写法才是对的，但它无从知道），只会重试或放弃整轮。
+	 * 真实事故形态是**同一个任务时好时坏**：模型随机选写法，于是验收用例抖动。
+	 */
+	it("③ 落在范围内的绝对路径与相对路径判定相同", () => {
+		const ws = "/tmp/zw-scope-probe";
+		expect(evaluateWatchBoundary({ kind: "write", path: "reports/x.md" }, scoped, ws).allowed).toBe(
+			true,
+		);
+		expect(
+			evaluateWatchBoundary({ kind: "write", path: `${ws}/reports/x.md` }, scoped, ws).allowed,
+		).toBe(true);
+	});
+
+	it("③ 折算路径不会放过真正越界的绝对路径", () => {
+		const ws = "/tmp/zw-scope-probe";
+		// 范围内声明的字面量之外 —— 折算后仍匹配不上范围
+		expect(
+			evaluateWatchBoundary({ kind: "write", path: `${ws}/data/x.csv` }, scoped, ws).allowed,
+		).toBe(false);
+		// 工作区之外的绝对路径照旧被拒（且 no-scope 时也拒）
+		expect(evaluateWatchBoundary({ kind: "write", path: "/etc/passwd" }, scoped, ws).allowed).toBe(
+			false,
+		);
+		expect(
+			evaluateWatchBoundary({ kind: "write", path: `${ws}/../elsewhere/x.md` }, scoped, ws).allowed,
+		).toBe(false);
+		// 前缀相同但不是子目录，折算后仍要拒（`isInsideScope` 的路径段纪律不被绕过）
+		expect(
+			evaluateWatchBoundary({ kind: "write", path: `${ws}/reports-old/x.md` }, scoped, ws).allowed,
+		).toBe(false);
+	});
+
 	it("④ 没声明范围时，工作区之外的写操作仍然被拒，rule = outside", () => {
 		const plain = effectivePolicy(undefined, "workspace-write");
 		const verdict = evaluateWatchBoundary(
