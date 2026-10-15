@@ -51,6 +51,7 @@ import {
 	getSessionsDir,
 	getSpillsDir,
 	getTempTasksDir,
+	versionsDir,
 } from "./config-paths.js";
 import { AutomationStore } from "./automation.js";
 import { SessionArchive } from "./archive.js";
@@ -58,6 +59,12 @@ import { readLibraryArtifacts } from "./library.js";
 import { SessionPinStore } from "./pin.js";
 import { ProjectsStore } from "./projects.js";
 import { DIGEST_LARGE_FILE_BYTES, summarizeLastActivity } from "./session-digest.js";
+import {
+	listVersionFiles,
+	readVersionContent,
+	readVersionFile,
+	restoreVersion,
+} from "./version-store.js";
 import { hasExportableContent, renderSessionMarkdown } from "./session-markdown.js";
 import {
 	loadMemorySystemPrompt,
@@ -4435,6 +4442,47 @@ const handlers = {
     return readLibraryArtifacts({
       sessionsDir: getSessionsDir(),
       isInternalSessionFile: (filePath) => isInternalSessionFile(filePath, builtinTaskIds),
+    });
+  },
+  /*
+   * 文件时光机（design.md §3.1）：清单 / 读一版 / 还原。三个都是**拉式**调用
+   *（用户打开「文件历史」页面时才走），不进 run 边界热路径。失败一律用返回值
+   * 表达（`{ ok:false, reason, message }`），**不 reject** —— 与 forkSession 的
+   * branchFail 同族。存储逻辑在 version-store.js（可单测），这里只做入参整形、
+   * 目录注入与「会话在跑就拒绝」的判据注入。
+   */
+  [INVOKE.fileHistoryList]: async () => listVersionFiles({ dir: versionsDir() }),
+  [INVOKE.fileHistoryRead]: async ([input]) => {
+    const key = typeof input?.key === "string" ? input.key : "";
+    const id = typeof input?.id === "string" && input.id !== "" ? input.id : void 0;
+    const file = readVersionFile(key, { dir: versionsDir() });
+    if (file === void 0) {
+      return { ok: false, reason: "unknown", message: "这个文件的版本记录不在（可能已被清理，或它还没被改过）。" };
+    }
+    const result = { ok: true, path: file.path, versions: file.versions };
+    if (id !== void 0) {
+      const got = readVersionContent(key, id, { dir: versionsDir() });
+      if (!got.ok) {
+        const message = got.reason === "missing"
+          ? "这一版的内容文件已经不在磁盘上了，无法读取。可以挑别的版本试试。"
+          : "这一版不在历史里（可能已被 20 版上限裁掉）。";
+        return { ok: false, reason: got.reason, message };
+      }
+      result.content = got.content;
+      result.contentAt = got.at;
+    }
+    return result;
+  },
+  [INVOKE.fileHistoryRestore]: async ([input]) => {
+    const key = typeof input?.key === "string" ? input.key : "";
+    const id = typeof input?.id === "string" ? input.id : "";
+    return restoreVersion(key, id, {
+      dir: versionsDir(),
+      // 会话桶在这一层（version-store 不碰）：文件最近一版所属会话正在跑就拒绝，
+      // 避免与正在进行的写入打架。bucketsById 的键就是 host.state.sessionId。
+      isSessionRunning: (sessionId) => bucketsById.get(sessionId)?.running === true,
+      // 还原成功写一条 file/restored 审计（沿用 onAudit 注入 writeAuditRecord 的既有模式）。
+      onAudit: writeAuditRecord,
     });
   },
   // 归档 / 取消归档（L28）：只动 archive.json 索引，会话文件与宿主不动 ——

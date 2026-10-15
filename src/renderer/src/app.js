@@ -13017,6 +13017,13 @@ const IconStats = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, chi
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "3", y: "13.5", width: "7.5", height: "7.5", rx: "1.5" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "13.5", y: "13.5", width: "7.5", height: "7.5", rx: "1.5" })
 ] });
+// 文件时光机：表盘 + 回溯箭头（时钟指向过去）。与 IconChart / IconStats 同为
+// 一行式本地定义 —— 图标不是 token，不进档位表（ux-proposal §1.1、§9.3）。
+const IconHistory = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M3.05 11a9 9 0 1 1 .5 4" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M3 4v5h5" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 7v5l3 2" })
+] });
 const IconSlide = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "3", y: "4", width: "18", height: "12", rx: "2" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 16v4M8 20h8" })
@@ -13300,6 +13307,7 @@ function Sidebar({
   onOpenSettings,
   onOpenDiagnostics,
   onOpenStats,
+  onOpenFileHistory,
   onOpenSkills,
   onOpenAutomations,
   onOpenLibrary,
@@ -13910,6 +13918,12 @@ function Sidebar({
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "sidebar-nav", children: [
       NAV_ITEMS$1.filter((item) => item.ready).map(renderNavItem),
+      // 「文件历史」排在「资料库」之后（资料库是 NAV_ITEMS$1 里最后一项已就绪项）。
+      // 它与「诊断」「统计」同款：独立页面、独立 .nav-item，不进 NAV_ITEMS$1 数组。
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenFileHistory, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconHistory, { size: 16 }),
+        "文件历史"
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenDiagnostics, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconChart, { size: 16 }),
         "诊断"
@@ -30062,6 +30076,30 @@ import {
 // tooltip 生成都在 trace-core.js，单测直接 import 它 —— 轨迹错不错在界面上
 // 只表现为「段数对不对」，那是 GUI 断言最说不清的一类。
 import { buildTurnTrace, TRACE_KIND_ICON_TOOL } from "./trace-core.js";
+// 文件时光机（侧栏「文件历史」）的纯逻辑：清单排序 / 节点三行文案 / truncated、
+// skipped、exists:false、broken 的措辞 / 还原确认句都在 file-history-core.js，
+// 单测直测 —— 视图只负责摆位置，e2e 只验「IPC 通了、DOM 挂上了、还原真的落盘了」。
+import {
+	FILE_HISTORY_DIRECTION_NOTE,
+	FILE_HISTORY_EMPTY_DESC,
+	FILE_HISTORY_EMPTY_TITLE,
+	countBroken,
+	defaultVersionIndex,
+	fileRowNote,
+	formatDirLabel,
+	formatRelativeTime,
+	formatTruncatedNote,
+	formatVersionTime,
+	restoreConfirmText,
+	restoreFailureRetryable,
+	restoreFailureText,
+	restoreSuccessText,
+	sortFileEntries,
+	timelineNotes,
+	versionChangeText,
+	versionCountLabel,
+	versionSourceText
+} from "./file-history-core.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -65199,16 +65237,18 @@ const AUDIT_CATEGORY_LABELS = {
   command: "命令安全",
   sandbox: "沙箱",
   runtime: "运行时",
-  audit: "审计管理"
+  audit: "审计管理",
+  file: "文件改动"
 };
 const AUDIT_OUTCOME_LABELS = {
   blocked: "已拦截",
   allowed: "已放行",
   failed: "失败",
   disabled: "已禁用",
-  cleared: "已清空"
+  cleared: "已清空",
+  restored: "已还原"
 };
-const AUDIT_CATEGORIES = ["command", "sandbox", "runtime", "audit"];
+const AUDIT_CATEGORIES = ["command", "sandbox", "runtime", "audit", "file"];
 function pad2(n) {
   return n < 10 ? `0${n}` : `${n}`;
 }
@@ -67930,6 +67970,430 @@ function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArt
   ] });
 }
 /*
+ * 文件时光机（侧栏「文件历史」）：左列是 Agent 用 write / edit **覆盖过**的文件清单
+ * —— 它是导航，所以是一块**无边框索引列**，不是第二个盒子；右列是全页唯一的内容卡：
+ * 版本时间轴 + 只读预览 + 就地确认条。版式逐条按任务的设计方案
+ * （.trellis/tasks/10-15-file-time-machine/research/ux-proposal.md），排序与全部文案
+ * 在 file-history-core.js（单测直测）。
+ *
+ * 数据面（design.md §3.1）：
+ *   listFileHistory()            → { files: FileEntry[], truncated }
+ *   readFileHistory({key,id?})   → { ok:true, path, versions, content?, contentAt? }
+ *                                | { ok:false, reason, message }
+ *   restoreFileHistory({key,id}) → { ok:true, at, versions } | { ok:false, reason, message }
+ * **失败一律用返回值表达、不 reject**（与 forkSession 的 branchFail 同族）——所以
+ * 这里判的是 `res.ok === false`，而不是靠 catch 猜「是不是失败」；catch 只兜
+ * 「IPC 本身断了」。会话标题解析不到时如实说「来源会话已不在」，不显示裸 sessionId。
+ *
+ * 三态互斥（docs/DESIGN.md §4）：list === undefined 是加载（左骨架 + 右 LoadingState）、
+ * listError 是错误（就地 + 重试）、files 为空才是空态。数据到达前绝不显示「没有历史」。
+ */
+function FileHistoryView({ onClose, sessions, onToast }) {
+  const [list, setList] = reactExports.useState(void 0);
+  const [listError, setListError] = reactExports.useState(void 0);
+  const [selectedKey, setSelectedKey] = reactExports.useState(void 0);
+  const [detail, setDetail] = reactExports.useState(void 0);
+  const [detailError, setDetailError] = reactExports.useState(void 0);
+  const [selectedId, setSelectedId] = reactExports.useState(void 0);
+  const [content, setContent] = reactExports.useState(void 0);
+  const [contentError, setContentError] = reactExports.useState(void 0);
+  const [confirming, setConfirming] = reactExports.useState(false);
+  const [restoreError, setRestoreError] = reactExports.useState(void 0);
+  const [restoring, setRestoring] = reactExports.useState(false);
+  const [reloadToken, setReloadToken] = reactExports.useState(0);
+  const [pickerOpen, setPickerOpen] = reactExports.useState(false);
+  const pickerRef = reactExports.useRef(null);
+  const { copied, copy } = useCopyWithTick();
+  /*
+   * 重拉详情时要知道「用户此刻选的是哪一版 / 选的是哪个文件」，但这两个值不能进
+   * effect 的依赖数组（那会让每次点选都重新拉一次 IPC，甚至自激）。所以在 effect
+   * 之外用 ref 留一份镜像：effect 自己 setSelectedId 写回的值也会在下一提交同步进来。
+   */
+  const selectedFileKeyRef = reactExports.useRef(void 0);
+  const selectedIdRef = reactExports.useRef(void 0);
+  reactExports.useEffect(() => {
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+  /*
+   * 版本条目只带 sessionId；标题从 App 层的会话列表里翻（不另拉一份快照）。
+   * 翻不到就是「来源会话已不在」——对用户来说裸 id 没有意义（ux-proposal §2.2）。
+   */
+  const titleBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.title])), [sessions]);
+  const loadList = reactExports.useCallback(async () => {
+    try {
+      setList(await window.kami.listFileHistory());
+      setListError(void 0);
+    } catch (e) {
+      setListError(errorText(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void loadList();
+  }, [loadList, reloadToken]);
+  const files = reactExports.useMemo(() => sortFileEntries(list?.files ?? []), [list]);
+  /* 清单到了但还没选中文件 → 默认选第一个（daemon 已按最后改动时间倒序）。 */
+  reactExports.useEffect(() => {
+    if (list === void 0) return;
+    if (files.length === 0) {
+      setSelectedKey(void 0);
+      return;
+    }
+    if (selectedKey === void 0 || !files.some((f) => f.key === selectedKey)) setSelectedKey(files[0].key);
+  }, [list, files, selectedKey]);
+  /*
+   * 选中的文件换了（或整页刷新）→ 重拉它的版本元数据。
+   *
+   * **重拉**与**重选**是两件事（独立评审 P0-2）：
+   *   · `selectedKey` 变了（用户换了文件）→ 重置选中，载入后落在最新一版
+   *     （「打开这一页十有八九是为了退回最近那一次改动」，是好默认）；
+   *   · 只是 `reloadToken` 变了（刷新 / 还原后重拉）→ **保留用户当前选中的那一版**，
+   *     只要它还在新的 versions 里（20 版裁剪可能把它挤掉，那时才回落末位）。
+   * 后者不这么做的话，还原成功后画面会跳到末尾那条「还原快照」——那恰好是**刚被
+   * 覆盖掉的旧内容**，与同一屏的 toast「已还原到 …」互相打架，用户读到的是
+   * 「没还原成功」或「还原到别的版本去了」。保留之后，预览正文此刻**就等于磁盘内容**，
+   * 那才是最好的成功证据；末尾那条快照仍在列表里，信息一点没少。
+   */
+  reactExports.useEffect(() => {
+    if (selectedKey === void 0) {
+      setDetail(void 0);
+      setDetailError(void 0);
+      setSelectedId(void 0);
+      setContent(void 0);
+      setContentError(void 0);
+      selectedFileKeyRef.current = void 0;
+      return;
+    }
+    let cancelled = false;
+    const keyChanged = selectedFileKeyRef.current !== selectedKey;
+    selectedFileKeyRef.current = selectedKey;
+    const keepId = keyChanged ? void 0 : selectedIdRef.current;
+    setDetail(void 0);
+    setDetailError(void 0);
+    if (keyChanged) setSelectedId(void 0);
+    setContent(void 0);
+    setContentError(void 0);
+    setConfirming(false);
+    setRestoreError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.readFileHistory({ key: selectedKey });
+        if (cancelled) return;
+        if (res?.ok === false) {
+          setDetailError(res.message ?? "读取版本历史失败");
+          return;
+        }
+        setDetail(res);
+        const versions = res.versions ?? [];
+        const index =
+          keepId !== void 0 && versions.some((v) => v.id === keepId)
+            ? versions.findIndex((v) => v.id === keepId)
+            : defaultVersionIndex(versions);
+        if (index >= 0) setSelectedId(versions[index].id);
+      } catch (e) {
+        if (!cancelled) setDetailError(errorText(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey, reloadToken]);
+  /* 选中的那一版 → 拉正文（只读预览；失败只换右列，左列保留，用户还能切别的文件）。 */
+  reactExports.useEffect(() => {
+    if (selectedKey === void 0 || selectedId === void 0) return;
+    let cancelled = false;
+    setContent(void 0);
+    setContentError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.readFileHistory({ key: selectedKey, id: selectedId });
+        if (cancelled) return;
+        if (res?.ok === false) {
+          setContentError(res.message ?? "读取这一版失败");
+          return;
+        }
+        setContent(typeof res.content === "string" ? res.content : "");
+      } catch (e) {
+        if (!cancelled) setContentError(errorText(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedKey, selectedId, reloadToken]);
+  /*
+   * 窄窗的「文件选择条」用外点即关，**不用 .ws-backdrop**：.settings-body 是容器
+   * 查询锚点（container-type: inline-size）带 layout containment，固定定位的背板
+   * 会被裁在那个容器里 —— 那正是「点了没关掉」的来源。指针事件判外点没有这个前提。
+   */
+  reactExports.useEffect(() => {
+    if (!pickerOpen) return;
+    const onDown = (event) => {
+      if (pickerRef.current !== null && !pickerRef.current.contains(event.target)) setPickerOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
+  }, [pickerOpen]);
+  const refresh = reactExports.useCallback(() => setReloadToken((n) => n + 1), []);
+  const selectedEntry = files.find((f) => f.key === selectedKey);
+  const versions = detail?.versions ?? [];
+  const selectedIndex = versions.findIndex((v) => v.id === selectedId);
+  const selectedVersion = selectedIndex >= 0 ? versions[selectedIndex] : void 0;
+  const now = Date.now();
+  const notes = timelineNotes({
+    skipped: selectedEntry?.skipped ?? 0,
+    brokenCount: countBroken(versions)
+  });
+  const restore = () => {
+    if (selectedKey === void 0 || selectedId === void 0) return;
+    setRestoring(true);
+    setRestoreError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.restoreFileHistory({ key: selectedKey, id: selectedId });
+        if (res?.ok === false) {
+          setRestoreError({ text: restoreFailureText(res.reason, res.message), reason: res.reason });
+          /* 「这一版已经不在了」不是错误现场，是时间轴过期了 —— 当场刷新对齐。 */
+          if (res.reason === "no-such-version") refresh();
+          return;
+        }
+        setConfirming(false);
+        onToast(restoreSuccessText(res.at ?? selectedVersion?.at ?? Date.now()), "ok");
+        /*
+         * 还原本身也留一版（design.md §3.4），所以**清单与时间轴都要就地刷新**：
+         * 时间轴末尾会多出「你还原之前的内容」那一版 —— 那正是「还能退回来」的
+         * 可见证据，必须当场出现在屏幕上。
+         */
+        refresh();
+      } catch (e) {
+        setRestoreError({ text: restoreFailureText("unknown", errorText(e)), reason: "unknown" });
+      } finally {
+        setRestoring(false);
+      }
+    })();
+  };
+  /* ── 左列：文件清单（无边框索引列）── */
+  const fileRow = (entry) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      type: "button",
+      className: `fh-file-row${entry.key === selectedKey ? " selected" : ""}`,
+      onClick: () => setSelectedKey(entry.key),
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "fh-file-row-main", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(FileTypeIcon, { name: entry.name, size: 14 }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-file-name", title: entry.path, children: entry.name }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-file-count", children: versionCountLabel(entry.count) })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-file-dir", title: entry.dir, children: formatDirLabel(entry.dir) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+          className: "fh-file-note",
+          children: fileRowNote(entry, { now, sessionTitle: titleBySessionId.get(entry.lastSessionId) })
+        })
+      ]
+    },
+    entry.key
+  );
+  const indexColumn = /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fh-index", children:
+    list === void 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fh-file-list", role: "status", "aria-label": "正在读取文件历史", children: FILE_HISTORY_SKELETON_ROWS.map((row, i) =>
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-file-row", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "fh-file-row-main", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 120, height: 12 }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: { flex: "1 1 auto" } }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 26, height: 12 })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: row.dir, height: 10 }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: row.note, height: 10 })
+          ] }, i)
+        ) })
+      : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "fh-index-head", children: ["文件历史 · ", files.length, " 个文件"] }),
+          list.truncated === true && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: formatTruncatedNote() }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fh-file-list", children: files.map(fileRow) })
+        ] })
+  });
+  /* ── 窄窗的「文件选择条」：默认 display:none，容器 <620px 才出现 ── */
+  const picker = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "menu-zone fh-picker-wrap", ref: pickerRef, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+      type: "button",
+      className: "mini-btn fh-picker",
+      "aria-haspopup": "menu",
+      "aria-expanded": pickerOpen,
+      onClick: () => setPickerOpen((v) => !v),
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(FileTypeIcon, { name: selectedEntry?.name ?? "", size: 13 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "fh-picker-name", children: [
+          selectedEntry?.name ?? "",
+          " · ",
+          versionCountLabel(selectedEntry?.count ?? 0)
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 13 })
+      ]
+    }),
+    pickerOpen && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "pop-menu fh-picker-menu", role: "menu", children: files.map((entry) =>
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: `space-menu-item${entry.key === selectedKey ? " active" : ""}`,
+        onClick: () => {
+          setSelectedKey(entry.key);
+          setPickerOpen(false);
+        },
+        children: entry.name
+      }, entry.key)
+    ) })
+  ] });
+  /* ── 右列：全页唯一的内容卡 ── */
+  const timelineNode = (version, index) => {
+    const isLatest = index === versions.length - 1;
+    const isSelected = version.id === selectedId;
+    const isBroken = version.broken === true;
+    const classes = [
+      "fh-node",
+      index === 0 ? "first" : void 0,
+      isLatest ? "last" : void 0,
+      isSelected ? "selected" : void 0,
+      isBroken ? "broken" : void 0
+    ].filter((part) => part !== void 0).join(" ");
+    /*
+     * broken 的版本**保持可聚焦**（用 aria-disabled，不用 disabled 属性）：
+     * 把它移出 Tab 序 = 键盘用户看不见「这个文件丢了一版」（docs/DESIGN.md §7.9
+     * 的反面教训正是「够不着就进不去焦点」）。它只是点了没反应 —— 不可激活。
+     */
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("li", { role: "listitem", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+      type: "button",
+      className: classes,
+      "aria-pressed": isSelected,
+      "aria-disabled": isBroken,
+      disabled: restoring,
+      onClick: () => {
+        if (isBroken) return;
+        setSelectedId(version.id);
+      },
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-node-mark", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-node-dot" }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "fh-node-body", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "fh-node-head", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-node-time", children: formatVersionTime(version.at) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+              className: "fh-node-source",
+              title: versionSourceText(version, titleBySessionId.get(version.sessionId)),
+              children: versionSourceText(version, titleBySessionId.get(version.sessionId))
+            })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+            className: "fh-node-change",
+            children: versionChangeText(version, { isLatest })
+          }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-node-ago", children: formatRelativeTime(version.at, now) })
+        ] })
+      ]
+    }) }, version.id);
+  };
+  const timeline = detail === void 0
+    ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fh-timeline", role: "status", "aria-label": "正在读取版本历史", children: [0, 1, 2].map((i) =>
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fh-node fh-node-skeleton", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "100%", height: 46 }) }, i)
+      ) })
+    : /* @__PURE__ */ jsxRuntimeExports.jsx("ol", { className: "fh-timeline", role: "list", "aria-label": "版本时间轴", children: versions.map(timelineNode) });
+  const previewLabel = selectedVersion === void 0
+    ? ""
+    : `${formatVersionTime(selectedVersion.at)} · ${formatSize(selectedVersion.size)} · 只读`;
+  const restoreDisabled = selectedVersion === void 0 || selectedVersion.broken === true || restoring;
+  const card = /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "fh-card", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "fh-card-head", children: [
+      selectedEntry !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(FileTypeIcon, { name: selectedEntry.name, size: 14 }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-card-name", title: selectedEntry?.path, children: selectedEntry?.name ?? "" }),
+      /* 文件已不在不是错误状态，是文件当前的事实 —— 不借状态色（ux-proposal §2.3）。 */
+      selectedEntry?.exists === false && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-card-flag", children: "文件已不在" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", {
+      className: "fh-card-meta",
+      title: selectedEntry?.dir,
+      children: selectedEntry === void 0 ? "" : `${formatDirLabel(selectedEntry.dir)} · ${versionCountLabel(versions.length > 0 ? versions.length : selectedEntry.count)}`
+    }),
+    notes.map((line, i) => /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", children: line }, `note-${i}`)),
+    detailError !== void 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: detailError, onRetry: refresh })
+      : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          timeline,
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block fh-preview", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-head fh-preview-head", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lang", children: previewLabel }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-preview-actions", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+                  type: "button",
+                  className: "code-block-copy",
+                  "aria-label": copied ? "已复制" : "复制这一版",
+                  title: copied ? "已复制" : "复制这一版",
+                  disabled: content === void 0,
+                  onClick: () => void copy(content ?? ""),
+                  children: copied ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 13 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 13 })
+                }),
+                /* 还原是**可逆**动作（当前内容先留一版），所以不用 danger 色、用 mini-btn。 */
+                !confirming && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+                  type: "button",
+                  className: "mini-btn",
+                  disabled: restoreDisabled,
+                  onClick: () => setConfirming(true),
+                  children: "还原到此版本"
+                })
+              ] })
+            ] }),
+            confirming && selectedVersion !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: restoreConfirmText({
+                name: selectedEntry?.name ?? "",
+                at: selectedVersion.at,
+                exists: selectedEntry?.exists !== false
+              }) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: () => {
+                setConfirming(false);
+                setRestoreError(void 0);
+              }, children: "取消" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: restore, children: restoring ? "还原中…" : "确认还原" })
+            ] }),
+            restoreError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm fh-confirm-error", role: "alert", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: restoreError.text }),
+              restoreFailureRetryable(restoreError.reason) && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: restore, children: "重试" })
+            ] }),
+            contentError !== void 0
+              ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: contentError, onRetry: refresh })
+              : content === void 0
+                ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取这一版…" })
+                : /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "fh-preview-body", children: content })
+          ] }),
+          /* §3.1 的方向说明：没有它，「3 个版本」为什么不是「文件被改了 3 次」说不通。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note fh-card-note-tail", children: FILE_HISTORY_DIRECTION_NOTE })
+        ] })
+  ] });
+  const body = listError !== void 0
+    ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: listError, onRetry: refresh })
+    : list !== void 0 && files.length === 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+          icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconHistory, { size: 22 }),
+          title: FILE_HISTORY_EMPTY_TITLE,
+          description: FILE_HISTORY_EMPTY_DESC
+        })
+      : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-layout", children: [picker, indexColumn, card] });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "文件历史" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取文件历史", onClick: refresh, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
+        "刷新"
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-file-history": true, children: body })
+  ] });
+}
+/* 骨架行的宽度（与真行的三段结构同形，到达时是「同一片区域被填上」——§4）。 */
+const FILE_HISTORY_SKELETON_ROWS = [
+  { dir: "58%", note: "72%" },
+  { dir: "44%", note: "63%" },
+  { dir: "66%", note: "84%" },
+  { dir: "38%", note: "56%" }
+];
+/*
  * 项目视图（L1 卡片墙 / L2 详情）：骨架照 LibraryView（.settings 壳 + 三态一行表达式）。
  * 纯逻辑（卡片排序 / 会话行 / 产物过滤 / 字数）在 projects-core.js，单测直测。
  * 数据两类：项目列表拉式（打开时读，归属变化靠 taskListChanged 跟随 sessions prop），
@@ -68669,6 +69133,7 @@ function paletteActionEntries(ctx) {
     { id: "action:check-updates", title: "检查更新", keywords: ["更新", "版本", "升级", "update"], run: ctx.checkForUpdates },
     { id: "action:diagnostics", title: "打开诊断", keywords: ["诊断", "排错", "日志", "diagnostics"], run: ctx.openDiagnostics },
     { id: "action:stats", title: "打开统计", keywords: ["统计", "用量", "token", "stats"], run: ctx.openStats },
+    { id: "action:file-history", title: "打开文件历史", keywords: ["文件", "历史", "版本", "还原", "时光机", "file", "history", "version"], run: ctx.openFileHistory },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
     { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
     { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare }
@@ -70290,6 +70755,14 @@ function App() {
     setReturnView(view === "chat" ? "chat" : "home");
     setView("stats");
   }, [view]);
+  /*
+   * 「文件历史」与「诊断」「统计」同款独立页面：入口（侧栏 + 命令面板）与视图
+   * 分支共用这一个动作，两处入口不会各走各的路（命令面板只是「换一个入口」）。
+   */
+  const openFileHistory = reactExports.useCallback(() => {
+    setReturnView(view === "chat" ? "chat" : "home");
+    setView("file-history");
+  }, [view]);
   const openAutomations = reactExports.useCallback(() => {
     setReturnView(view === "chat" ? "chat" : "home");
     setView("automations");
@@ -70366,6 +70839,7 @@ function App() {
       checkForUpdates,
       openDiagnostics,
       openStats,
+      openFileHistory,
       openSkills: () => openSkillsAt("skills"),
       openAutomations,
       openCompare
@@ -70424,7 +70898,7 @@ function App() {
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
     // 而是**面板搜到过期数据**——结果悄悄不对，界面上没有任何失败信号。
     // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
-  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
+  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
   const paletteIdleEntries = reactExports.useMemo(() => {
     const byId = new Map(paletteEntries.map((entry) => [entry.id, entry]));
     // 收藏的条目可能**不在**引导集里（一条更早的会话、一个技能、一个自动化）——
@@ -70565,6 +71039,7 @@ function App() {
         onOpenSettings: () => openSettings(),
         onOpenDiagnostics: openDiagnostics,
         onOpenStats: openStats,
+        onOpenFileHistory: openFileHistory,
         onOpenSkills: () => setView("skills"),
         onOpenAutomations: openAutomations,
         onOpenLibrary: openLibrary,
@@ -70704,6 +71179,16 @@ function App() {
     ),
     view === "diagnostics" && /* @__PURE__ */ jsxRuntimeExports.jsx(DiagnosticsView, { onClose: () => setView(returnView) }),
     view === "stats" && /* @__PURE__ */ jsxRuntimeExports.jsx(StatsView, { onClose: () => setView(returnView) }),
+    view === "file-history" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      FileHistoryView,
+      {
+        onClose: () => setView(returnView),
+        // 会话列表是 App 层的单一 state（侧栏与续摊卡共用），这里只读它把
+        // version.sessionId 翻成会话标题；解析不到就如实说「来源会话已不在」。
+        sessions: taskList,
+        onToast: showToast
+      }
+    ),
     view === "automations" && /* @__PURE__ */ jsxRuntimeExports.jsx(
       AutomationsView,
       {

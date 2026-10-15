@@ -93,7 +93,8 @@ macOS / Linux 上受限档直接拒绝执行 —— 这也是本项目不发 Lin
 
 ## 四、审计与可观测
 
-审计日志记录四类事件：`command`、`sandbox`、`runtime`、`audit`。
+审计日志记录五类事件：`command`、`sandbox`、`runtime`、`audit`、`file`
+（`file` 是 2026-10-15 加「文件时光机」时新增的类别，只用于「用户把文件还原到某一版」）。
 
 **反直觉但刻意的行为要保留并写进测试**：
 

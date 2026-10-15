@@ -80,6 +80,10 @@ function getRuntimesDir() {
   return join(getConfigDir(), "runtimes");
 }
 
+function versionsDir() {
+  return join(getConfigDir(), "versions");
+}
+
 function getTempTasksDir(root) {
   return join(root, "临时任务");
 }
@@ -102,4 +106,5 @@ export {
 	getSpillsDir,
 	getTempTasksDir,
 	getWorkspaceDir,
+	versionsDir,
 };
