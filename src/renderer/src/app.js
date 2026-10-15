@@ -30100,6 +30100,7 @@ import {
 	versionCountLabel,
 	versionSourceText
 } from "./file-history-core.js";
+import { onExceedAction, reportLine, runBadge, summarizeRun } from "./watch-report-core.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -67799,11 +67800,41 @@ function emptyDraft(cwd2) {
     dailyTime: "09:00",
     weeklyTime: "09:00",
     weekdays: [1, 2, 3, 4, 5],
-    cwd: cwd2
+    cwd: cwd2,
+    // 值守规矩：一律「不填」= 今天的行为（见 draftWatch）。
+    watchMinutes: "",
+    watchTier: "follow",
+    watchScope: [],
+    watchStopOnExceed: true
   };
+}
+/*
+ * 表单里的「值守规矩」→ 任务的 `watch` 字段。
+ *
+ * **不填就是不存在**：三样都空时返回 `null` 而不是 `{}`，也不是 `undefined`。
+ * 这三个值在 daemon 那边是三件事（见 `saveAutomation` 与 `parseWatchPolicy`）：
+ *   - `undefined` = 这次请求没声明 → **保留原有规矩**（编辑时清不掉）
+ *   - `{}`        = 声明了一份什么都不限制的规矩 → 会落盘成一条空规矩
+ *   - `null`      = 明确表示「没有规矩」→ 清掉
+ * 所以「把规矩全清空」必须发 `null`，否则用户会以为删掉了、其实一条没动。
+ *
+ * 界面上「跟随全局」「整个工作目录」「不设时限」都是**缺省态**，不是要落盘的取值。
+ */
+function draftWatch(draft) {
+  const watch = {};
+  const minutes = Number(draft.watchMinutes);
+  if (draft.watchMinutes !== "" && Number.isFinite(minutes) && minutes > 0) {
+    watch.minutes = minutes;
+  }
+  if (draft.watchTier !== "follow") watch.tier = draft.watchTier;
+  if (draft.watchScope.length > 0) watch.scope = [...draft.watchScope];
+  // stopOnExceed 的缺省就是 true，只有关掉时才值得写进去。
+  if (draft.watchStopOnExceed !== true) watch.stopOnExceed = false;
+  return Object.keys(watch).length === 0 ? null : watch;
 }
 function draftFromTask(task) {
   const s = task.schedule;
+  const w = task.watch ?? {};
   return {
     id: task.id,
     name: task.name,
@@ -67814,7 +67845,11 @@ function draftFromTask(task) {
     dailyTime: s.type === "daily" ? s.time : "09:00",
     weeklyTime: s.type === "weekly" ? s.time : "09:00",
     weekdays: s.type === "weekly" ? [...s.weekdays] : [1, 2, 3, 4, 5],
-    cwd: task.cwd
+    cwd: task.cwd,
+    watchMinutes: w.minutes === void 0 ? "" : String(w.minutes),
+    watchTier: w.tier ?? "follow",
+    watchScope: Array.isArray(w.scope) ? [...w.scope] : [],
+    watchStopOnExceed: w.stopOnExceed !== false
   };
 }
 function draftFromTemplate(template, cwd2) {
@@ -67828,7 +67863,11 @@ function draftFromTemplate(template, cwd2) {
     dailyTime: s.type === "daily" ? s.time : "09:00",
     weeklyTime: s.type === "weekly" ? s.time : "09:00",
     weekdays: s.type === "weekly" ? [...s.weekdays] : [1, 2, 3, 4, 5],
-    cwd: cwd2
+    cwd: cwd2,
+    watchMinutes: "",
+    watchTier: "follow",
+    watchScope: [],
+    watchStopOnExceed: true
   };
 }
 function buildSchedule(draft) {
@@ -68592,6 +68631,22 @@ function AutomationsView({
   const [tplOpen, setTplOpen] = reactExports.useState(false);
   const [formError, setFormError] = reactExports.useState(void 0);
   const [saving, setSaving] = reactExports.useState(false);
+  /*
+   * 全局权限档位 —— 表单里的「值守规矩」要拿它来**如实禁用**够不到的选项。
+   *
+   * 读不到时保持 `undefined`，控件照常可选（不假装知道），折叠说明由
+   * WatchRulesField 内部按「未知」处理；**不猜也不默认**成宽松档。
+   */
+  const [globalSandbox, setGlobalSandbox] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    let alive = true;
+    void window.kami.getPermissions().then((info2) => {
+      if (alive) setGlobalSandbox(info2?.settings?.sandbox);
+    }).catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const load = reactExports.useCallback(async () => {
     try {
       const all2 = await window.kami.listAutomations();
@@ -68668,7 +68723,12 @@ function AutomationsView({
       return;
     }
     const base = { name: name2, prompt: draft.prompt, schedule: built.schedule, cwd: taskCwd };
-    const input = draft.id === void 0 ? base : { id: draft.id, ...base };
+    /*
+     * `watch` 一律显式带上（清空时是 `null`）：不传字段的话 daemon 会保留旧规矩，
+     * 用户把规矩删干净再保存，会以为删了其实没删。
+     */
+    const watch = draftWatch(draft);
+    const input = draft.id === void 0 ? { ...base, watch } : { id: draft.id, ...base, watch };
     setSaving(true);
     setFormError(void 0);
     window.kami.saveAutomation(input).then(() => {
@@ -68720,7 +68780,8 @@ function AutomationsView({
         saving,
         onChange: setDraft,
         onSave: save,
-        onCancel: () => setDraft(void 0)
+        onCancel: () => setDraft(void 0),
+        globalTier: globalSandbox
       }
     ),
     tplOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -68865,35 +68926,234 @@ function AutomationRow({
       ] })
     ] }),
     expanded && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-runs", children: runs.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "还没有运行记录" }) : runs.map(
-      (run) => run.sessionId === "" ? (
-        // 装配失败的运行没有会话可跳，只留记录不可点击。
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-run-row auto-run-static", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-time", children: formatMessageTime(run.startedAt, now) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-badge bad", children: "失败" }),
-          run.error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-error", children: run.error })
-        ] }, run.startedAt)
-      ) : /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      (run) => /* @__PURE__ */ jsxRuntimeExports.jsx(RunRow, { run, now, onOpenRun }, run.startedAt)
+    ) })
+  ] });
+}
+/*
+ * 值守规矩在这次运行里到底做了什么 —— 读得懂的一句话 + 越界证人。
+ *
+ * ── 三种状态都要能一眼分开（这是本块的主要职责）──────────────────
+ * 「跑完了，一次都没越界」/「跑完了，但越了 2 次界」/「到 30 分钟被叫停」
+ * 是**三件不同的事**，`success` 这个布尔值把它们中的后两种都压成了 false。
+ * 所以这里读的是 `summarizeRun` 的六态而不是 `run.success`。
+ *
+ * 判定顺序与文案纪律全部在 `watch-report-core.js` 里（含「越界停必须排在
+ * 失败之前」的理由）；本组件只负责把它渲染出来。
+ *
+ * 老记录（没有 `boundary` 字段）**不渲染报告体** —— 编一个空 boundary 出来
+ * 会让用户以为「这次有边界、只是没用上」，那是凭空捏造。
+ */
+function RunReport({ run }) {
+  const summary = summarizeRun(run);
+  const line = reportLine(summary);
+  if (line === void 0) return null;
+  const exceeded = Array.isArray(run.boundary?.exceeded) ? run.boundary.exceeded : [];
+  const notes = Array.isArray(run.boundary?.notes) ? run.boundary.notes : [];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `run-report run-report-${summary.state}`, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "run-report-line", children: line }),
+    exceeded.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "run-report-list", children: exceeded.map((item, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("code", { children: item.tool }),
+      " —— ",
+      item.detail
+    ] }, `${item.at}-${index}`)) }),
+    notes.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "run-report-list", children: notes.map((note, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: note }, index)) })
+  ] });
+}
+/*
+ * 一次运行的一行。
+ *
+ * 折叠开关**移到行尾**：报告体展开后行内会出现工具名与理由，整行可点会让
+ * 用户想选中那段文字时反而跳走（复制不了）。所以「可跳到会话」和「展开报告」
+ * 拆成两个各司其职的控件，行的本体只在有会话时才是按钮。
+ */
+function RunRow({ run, now, onOpenRun }) {
+  const [open, setOpen] = reactExports.useState(false);
+  const summary = summarizeRun(run);
+  const badge = runBadge(summary, run.success);
+  const openable = run.sessionId !== "";
+  const head = /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-time", children: formatMessageTime(run.startedAt, now) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `auto-run-badge ${badge.tone}`, children: badge.text }),
+    run.error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-error", children: run.error })
+  ] });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-run-item", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: openable ? "auto-run-row" : "auto-run-row auto-run-static", children: [
+      openable ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
-          className: "auto-run-row",
+          className: "auto-run-open",
           title: "打开本次运行的会话",
           onClick: () => onOpenRun(run.sessionId),
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-time", children: formatMessageTime(run.startedAt, now) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "span",
-              {
-                className: run.success ? "auto-run-badge ok" : "auto-run-badge bad",
-                children: run.success ? "成功" : "失败"
-              }
-            ),
-            run.error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-run-error", children: run.error })
-          ]
-        },
-        run.startedAt
-      )
-    ) })
+          children: head
+        }
+      ) : head,
+      summary.known && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "auto-run-fold",
+        "aria-expanded": open,
+        onClick: () => setOpen((v) => !v),
+        children: open ? "收起" : "报告"
+      })
+    ] }),
+    open && /* @__PURE__ */ jsxRuntimeExports.jsx(RunReport, { run })
+  ] });
+}
+function IconShieldCheck({ size = 13 }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { width: size, height: size, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M8 1.75 3 3.75v4c0 3 2.1 5.6 5 6.5 2.9-.9 5-3.5 5-6.5v-4z" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m6 7.75 1.5 1.5L10.25 6.5" })
+  ] });
+}
+const WATCH_MINUTES_PRESETS = [15, 30, 60];
+/*
+ * 「值守规矩」—— 定时任务编辑面板里的可选一组约定。
+ *
+ * ── 为什么这一块的核心不是文案而是**禁用态** ──────────────────────────
+ * 本功能的模型层写死了「规矩只能更严，不能更宽」（见后端 `effectivePolicy`）。
+ * 但如果界面把「可写」照常渲染成可点、用户点了、存了，运行起来仍然是被全局
+ * 的只读档按回只读 —— 那就是**能碰到、选完却静默折算回原值**，用户白等一夜
+ * 才发现没生效。所以碰不到的选项**直接 disabled + 一句「不生效」**：
+ * 灰着的那一项，用户一眼就知道「此路不通」，而不是试过才知道。
+ * 折算说明是兜底，不是主通道。
+ *
+ * `globalTier` 读不到时（undefined）**不假装知道**：控件照常可选，
+ * 只是不给「不生效」的判断 —— 猜一个宽松档会让用户更危险。
+ */
+function WatchRulesField({ draft, patch: patch2, globalTier }) {
+  const readOnlyGlobal = globalTier === "read-only";
+  const tierLocked = draft.watchTier === "workspace-write" && readOnlyGlobal;
+  const capacity = [
+    { id: "follow", label: "跟随全局", hint: "不额外限制，用全局档位。" },
+    { id: "read-only", label: "只读", hint: "比全局更严，任何时候都生效。" },
+    {
+      id: "workspace-write",
+      label: "可写",
+      hint: readOnlyGlobal ? "当前全局是「只读」，本任务的「可写」不会放宽它。" : "工作空间内自由读写。"
+    }
+  ];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "field", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "field-label", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(IconShieldCheck, { size: 12 }),
+      "值守规矩"
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "field-hint", children: "任务独自运行时，给它划一条线。不设就是今天的行为。" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "watch-group", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-group-label", children: "时限" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "num-chips", children: [
+        WATCH_MINUTES_PRESETS.map((minutes) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: draft.watchMinutes === String(minutes) ? "num-chip active" : "num-chip",
+            "aria-pressed": draft.watchMinutes === String(minutes),
+            onClick: () => patch2({
+              watchMinutes: draft.watchMinutes === String(minutes) ? "" : String(minutes)
+            }),
+            children: `${minutes} 分钟`
+          },
+          minutes
+        )),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            className: "num-chip-input",
+            type: "number",
+            min: 1,
+            max: 120,
+            step: 1,
+            "aria-label": "自定义时限（分钟）",
+            placeholder: "自定义",
+            value: draft.watchMinutes,
+            onChange: (e) => patch2({ watchMinutes: e.currentTarget.value })
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "field-hint", children: draft.watchMinutes === "" ? "不设时限时，运行到 30 分钟会被自动叫停（产品内置保护）。" : `超过 ${draft.watchMinutes} 分钟会被叫停，这次运行标成「超时中止」。` })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "watch-group", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-group-label", children: "能力" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "preset-list", children: capacity.map((item) => {
+        const disabled = item.id === "workspace-write" && readOnlyGlobal;
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            className: draft.watchTier === item.id ? "preset-item active" : "preset-item",
+            "aria-pressed": draft.watchTier === item.id,
+            disabled,
+            title: disabled ? "全局是「只读」，这里选了也不会放宽" : void 0,
+            onClick: () => patch2({ watchTier: item.id }),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "preset-text", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "preset-label", children: [
+                  item.label,
+                  disabled && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "preset-tag", children: "不生效" })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "preset-desc", children: item.hint })
+              ] })
+            ]
+          },
+          item.id
+        );
+      }) })
+    ] }),
+    draft.watchTier !== "read-only" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "watch-group", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-group-label", children: "可写范围" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "watch-scope-chips", children: [
+        draft.watchScope.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "skill-chip", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "skill-chip-name", children: item }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "skill-chip-remove",
+              "aria-label": `移除 ${item}`,
+              onClick: () => patch2({ watchScope: draft.watchScope.filter((s) => s !== item) }),
+              children: "×"
+            }
+          )
+        ] }, item)),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            className: "watch-scope-input",
+            type: "text",
+            placeholder: draft.watchScope.length === 0 ? "如 reports/（不填 = 整个工作目录）" : "再加一条…",
+            "aria-label": "可写范围，回车添加",
+            onKeyDown: (e) => {
+              if (e.key !== "Enter") return;
+              e.preventDefault();
+              const value = e.currentTarget.value.trim();
+              if (value === "" || draft.watchScope.includes(value)) return;
+              patch2({ watchScope: [...draft.watchScope, value] });
+              e.currentTarget.value = "";
+            }
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "field-hint", children: "只允许写这些子路径，其余写入会被拒。留空表示整个工作目录都可写。" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "watch-group watch-switch-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "mcp-switch", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "checkbox",
+            checked: draft.watchStopOnExceed,
+            onChange: (e) => patch2({ watchStopOnExceed: e.currentTarget.checked })
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-track" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-thumb" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "watch-switch-text", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-switch-title", children: "越界即停" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "field-hint", children: draft.watchStopOnExceed ? "一旦碰到上面的线，这次调用被拒，并当场停下整轮。" : "只拒掉那一次调用，任务可以换个合法的路子继续做完。" })
+      ] })
+    ] }),
+    tierLocked && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-warn", children: "当前全局档位更严，本任务的「可写」不会放宽它 —— 实际仍按只读执行。" })
   ] });
 }
 function AutomationForm({
@@ -68902,9 +69162,9 @@ function AutomationForm({
   saving,
   onChange,
   onSave,
-  onCancel
-}) {
-  const patch2 = (part) => onChange({ ...draft, ...part });
+  onCancel,
+  globalTier
+}) {  const patch2 = (part) => onChange({ ...draft, ...part });
   const cardRef = useModalFocus();
   reactExports.useEffect(() => {
     const onKey = (event) => {
@@ -69042,6 +69302,7 @@ function AutomationForm({
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "field-hint", children: "任务运行时所在的工作空间目录。" })
       ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(WatchRulesField, { draft, patch: patch2, globalTier }),
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "save-space-actions", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: saving, onClick: onCancel, children: "取消" }),

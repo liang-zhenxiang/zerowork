@@ -10124,6 +10124,92 @@ textarea:focus-visible {
 	min-width: 0;
 }
 
+/* ── 一次运行：行 + 可就地展开的「值守报告」───────────────────────
+ * 报告体是**内框不是内容卡**（DESIGN.md §3.7）：无 border、走 --bg-raised，
+ * 与运行记录区同属次级面，不占内容卡的盒子预算。
+ *
+ * 折叠开关放在行尾（.auto-run-fold）：报告展开后行内会有工具名与理由，
+ * 整行可点会让用户想选中那段文字时反而跳走。行本体只在能跳会话时才可点。
+ *
+ * 动效**刻意不加**：.auto-runs 已有 fold-in，报告体长在里面，
+ * 叠第二层入场会打架（见 DESIGN.md §10.3 的登记纪律）。
+ * ──────────────────────────────────────────────────────────────── */
+
+.auto-run-item {
+	display: flex;
+	flex-direction: column;
+}
+
+/* 行本体可点时的按钮形态：去掉按钮默认外观，让它读起来仍是「一行」。 */
+.auto-run-open {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.auto-run-fold {
+	flex: 0 0 auto;
+	padding: 0 var(--space-2);
+	border: 0;
+	background: none;
+	color: var(--text-faint);
+	font: inherit;
+	font-size: var(--text-meta);
+	cursor: pointer;
+}
+
+.auto-run-fold:hover {
+	color: var(--text);
+}
+
+.run-report {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	margin: var(--space-1) 0 var(--space-2) var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+}
+
+.run-report-line {
+	color: var(--text-secondary);
+}
+
+/* 「越界」与「被叫停」两种状态说的是「碰到了线」，不是「坏了」——
+   所以文字走正文色 + 一条 2px 左轨，而不是整块变红。 */
+.run-report-stopped .run-report-line,
+.run-report-exceeded .run-report-line {
+	color: var(--text);
+}
+
+.run-report-stopped,
+.run-report-exceeded {
+	border-left: 2px solid var(--danger);
+}
+
+.run-report-list {
+	margin: 0;
+	padding-left: var(--space-4);
+	color: var(--text-secondary);
+	list-style: disc;
+}
+
+.run-report-list code {
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
 /* 表单弹层：骨架复用 modal-backdrop；卡片比 permission-card 宽（字段多），
    其余（圆角/阴影/内边距）保持同一尺寸语言。
    连接器（MCP）的添加表单与 JSON 编辑器同一卡片语言，选择器并集共用。 */
@@ -10189,6 +10275,106 @@ textarea:focus-visible {
 	min-height: 84px;
 	resize: vertical;
 	line-height: 1.6;
+}
+
+/* ── 值守规矩（定时任务编辑面板第三节）─────────────────────────────
+ * 这一节的控件**全部是既有组件**，这里只补三处缺口，不新造控件：
+ *   .watch-group     三个小节的纵向节奏（label 与控件之间的 6px）
+ *   .num-chip-input  自定义时限的输入框（.num-chip 是按钮，输入框要长成同款）
+ *   .num-chip:disabled  既有类没有禁用态（只读档下不该能点）
+ * 另加两个纯排版的容器：.watch-scope-chips / .watch-switch-row。
+ * 不引入新 token、不新增动效（见 DESIGN.md §10.3 的登记纪律）。
+ * ──────────────────────────────────────────────────────────────── */
+
+.watch-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+
+.watch-group-label {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	font-weight: 500;
+}
+
+/* 与 .num-chip 同款，否则「自定义」那个框会比旁边的预设高出一截。 */
+.num-chip-input {
+	width: 72px;
+	padding: 2px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	font: inherit;
+	font-size: var(--text-meta);
+}
+
+/* 既有 .num-chip 没有禁用态 —— 补上，否则只读档下预设仍可点。 */
+.num-chip:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.num-chip:disabled:hover {
+	border-color: var(--border);
+}
+
+/* 「不生效」徽标：与 provider-tag 同族，但走警示色而不是中性色 ——
+   它要说明的是「这里选了也不会发生」，不能读起来像一枚普通的分类标签。 */
+.preset-tag {
+	margin-left: var(--space-2);
+	padding: 1px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	font-weight: 400;
+}
+
+.watch-scope-chips {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.watch-scope-input {
+	flex: 1 1 160px;
+	min-width: 120px;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: inherit;
+	font: inherit;
+	font-size: var(--text-meta);
+}
+
+.watch-switch-row {
+	flex-direction: row;
+	align-items: flex-start;
+	gap: var(--space-3);
+}
+
+.watch-switch-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.watch-switch-title {
+	font-size: var(--text-list);
+}
+
+/* 折算说明：与 field-hint 同档但走警示色，位置在这一节的最后一行。 */
+.watch-warn {
+	margin-top: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--danger);
 }
 
 /* ── 连接器页（技能页「连接器」页签，MCP 服务器管理）─────────────
