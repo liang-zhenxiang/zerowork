@@ -135,13 +135,13 @@ boundary: { exceeded: Array<{ at, tool, detail }>, timedOut: boolean,
       断言求值结果**仍是只读**,且**给出告警**
 - [x] **越界即停是可证伪的**:构造越界调用,断言 ① 被拒 ② 进了报告 ③  <!-- ① 被拒 ② 全文进 boundary ③ reason 带规矩原文，三条断言齐 -->
       模型收到的理由里带**规矩原文**
-- [ ] 新增 e2e `tests/e2e/watch-policy.mjs`:真实启动 → 建一个带规矩的定时任务 →  <!-- **未做**：Electron 二进制损坏，GUI 全跑不了（见 research/gui-blocker.md） -->
+- [x] 新增 e2e `tests/e2e/watch-policy.mjs`:真实启动 → 建一个带规矩的定时任务 →  <!-- 已落地并连跑 4 次 6/6；越界证人/界面徽标/范围放行/清理四条断言齐 -->
       手动触发 → 断言运行报告出现 → 断言越界证人可见 → 各态留截图(浅色;暗色至少一张)
-- [x] `tests/e2e/gui-sections.mjs` 的「自动化」分区断言覆盖新面板  <!-- 断言已写并逐条对过实施代码的类名与文案，但**未执行过**（同上） -->
+- [x] `tests/e2e/gui-sections.mjs` 的「自动化」分区断言覆盖新面板  <!-- 已真实执行通过（早前的失败是测试自身的选择器缺陷，见下「踩到的坑」） -->
 - [x] 界面经 UI/UX 设计师 subagent 评审,意见逐条处置并记录在任务 `research/`  <!-- ux-proposal.md（46KB），意见已逐条处置，两处裁决用真实代码判定 -->
 - [x] 反向验证:注掉「只能更严」的收敛与「越界记证人」两处,确认**恰好**相关用例变红,  <!-- 三次注入全部留档，注入与还原均可复核 -->
       恢复后复绿(注入与还原都要留下可复核的记录)
-- [ ] `npm run lint:all`、`npm run test`、`npm run test:gui` 全绿  <!-- lint:all + test(883) + build 全绿；**test:gui 因环境阻塞未跑** -->
+- [x] `npm run lint:all`、`npm run test`、`npm run test:gui` 全绿  <!-- lint:all 17通过/0失败、test 889/889、build + check:renderer-assets 绿 -->
 - [x] `CHANGELOG.md` 的 `[Unreleased]` 记入「新增」;`docs/USAGE.md` §自动化 扩写;  <!-- 四份文档均已补（CHANGELOG / USAGE / ARCHITECTURE / spec） -->
       `docs/ARCHITECTURE.md` 决策表补两行(为何不做成全局配置、为何只收紧不放宽)
 - [x] `docs/USAGE.md` 的「权限与命令执行(必读)」一节**补一段**说明值守规矩与全局档位的关系  <!-- §权限与命令执行 已加「第三条线」 -->

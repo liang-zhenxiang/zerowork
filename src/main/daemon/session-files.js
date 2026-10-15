@@ -2084,17 +2084,27 @@ function saveAutomation(input) {
   const nextRunAt = nextRunAfter(input.schedule, now);
   const status = existing?.status === "paused" ? "paused" : nextRunAt === void 0 ? "missed" : "active";
   /*
-   * 值守规矩：**用户显式传了才校验**。
+   * 值守规矩：**三态**，缺一不可。
    *
-   * undefined 与「空规矩」是两件事：undefined = 没声明（用全局档位），
-   * `{}` = 声明了一份什么都不限制的规矩（equal 时收敛成全局档位，仍然
-   * 是一条显式声明）。二者都不报错，但用途不同，所以不做「空就抹掉」。
+   *   - `undefined` = 这次请求没声明 → **保留原有规矩**（编辑时不会被顺手抹掉）
+   *   - `null`      = 明确表示「没有规矩」→ 清掉
+   *   - 对象         = 声明一份规矩 → 校验后落盘
    *
-   * 声明得不合法时**报错**而不是静默丢弃 —— 静默丢弃等于「参数被接受
-   * 却不生效」，那是比报错更危险的一类缺陷（本项目已立过这条规矩）。
-   * 编辑既有任务时不传 watch 则保留原值，不会被这次保存抹掉。
+   * `null` 这一态此前是坏的：这里对任何非 undefined 的输入都调 parseWatchPolicy，
+   * 而它把 null 与 undefined 一起收成「一份什么都不限制的默认规矩」。
+   * 于是用户在表单里清空规矩后保存，**watch 并没有被清掉**，而是留下一条
+   * 「跟随全局 / 无范围 / 越界即停」的记录 —— 界面上规矩是空的，磁盘上却有，
+   * 之后再打开表单会看到它回来。这正是本项目禁止的「参数被接受却不生效」。
+   *
+   * 空对象 `{}` 仍然**故意保留**（不当作清空）：它是一条显式声明，
+   * 与「从未声明过」在语义上不同（见 parseWatchPolicy 的注释）。
    */
-  const watch = input.watch === void 0 ? existing?.watch : parseWatchPolicy(input.watch);
+  const watch =
+    input.watch === void 0
+      ? existing?.watch
+      : input.watch === null
+        ? void 0
+        : parseWatchPolicy(input.watch);
   const task = {
     id: existing?.id ?? randomUUID(),
     name,

@@ -534,18 +534,42 @@ await h.check("自动化：值守规矩存得下、读得回、清得掉", async
 				watch: { minutes: 15, tier: "read-only", scope: ["reports/", "notes/"], stopOnExceed: false },
 			});
 			const readBack = asArray(await k.listAutomations()).find((t) => t.id === saved.id)?.watch;
+			// 同一份范围、不带尾斜杠的写法：必须收敛到与上面**完全相同**的值。
+			const plain = await k.saveAutomation({
+				...base,
+				name: `${name}-plain`,
+				watch: { minutes: 15, tier: "read-only", scope: ["reports", "notes"], stopOnExceed: false },
+			});
+			const readBackFromPlain = asArray(await k.listAutomations()).find(
+				(t) => t.id === plain.id,
+			)?.watch;
+			await k.deleteAutomation(plain.id);
 			// 清空：显式传 null（表单里取消勾选走的就是这条）。
 			const cleared = await k.saveAutomation({ ...base, id: saved.id, watch: null });
 			const readCleared = asArray(await k.listAutomations()).find((t) => t.id === cleared.id);
 			await k.deleteAutomation(cleared.id);
 			const left = asArray(await k.listAutomations()).some((t) => t.id === cleared.id);
-			return { readBack, clearedWatch: readCleared?.watch, stillListed: left };
+			return { readBack, readBackFromPlain, clearedWatch: readCleared?.watch, stillListed: left };
 		},
 		{ ws: h.WORKSPACE_DIR, name: "zw-watch-roundtrip" },
 	);
 	assert.equal(r.readBack?.minutes, 15, "minutes 没存住或没读回");
 	assert.equal(r.readBack?.tier, "read-only", "tier 没存住或没读回");
-	assert.deepEqual(r.readBack?.scope, ["reports/", "notes/"], "scope 数组没原样回来");
+	/*
+	 * 范围条目按**归一化后**的形式读回，不是逐字原文。
+	 *
+	 * `parseWatchPolicy` 会把 `reports/`、`./reports`、`reports//x` 这类写法收敛
+	 * （那条归一化是安全必需的 —— 它同时负责查出 `..` 逃逸）。所以这里断言的是
+	 * 归一化契约本身：写进去 `reports/` 读回来必须是 `reports`，
+	 * 且两种写法必须收敛到**同一个值**（否则同一份范围会有两种表达，
+	 * 判定与展示都可能对不上）。
+	 */
+	assert.deepEqual(r.readBack?.scope, ["reports", "notes"], "scope 数组没按归一化契约读回");
+	assert.deepEqual(
+		r.readBackFromPlain?.scope,
+		r.readBack?.scope,
+		"`reports/` 与 `reports` 两种写法没能收敛到同一个值 —— 同一份范围会有两种表达",
+	);
 	assert.equal(r.readBack?.stopOnExceed, false, "stopOnExceed:false 没能存住（它必须与缺省可区分）");
 	assert.ok(
 		r.clearedWatch === undefined || r.clearedWatch === null || Object.keys(r.clearedWatch).length === 0,

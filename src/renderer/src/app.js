@@ -67809,6 +67809,30 @@ function emptyDraft(cwd2) {
   };
 }
 /*
+ * 可写范围的一条输入 → 与 daemon 落盘时同形的写法。
+ *
+ * 与 `parseWatchPolicy` 的归一化**同一条规则**（去空段与 `.`、`..` 弹栈、去尾斜杠），
+ * 但**只做规范化、不在这里判合法性**：`..` 跑到工作区之外的那种写法故意不弹成空，
+ * 让它原样留在列表里 —— save() 的预校验与 daemon 的拒绝路径会用同一条理由报错，
+ * 在这里悄悄吞掉反而会让用户以为自己输入成功了。
+ *
+ * 存在的理由（见 chip 输入的注释）：让**界面上显示的就是存下去的那个值**。
+ */
+function normalizeWatchScopeEntry(value) {
+  const segments = [];
+  for (const segment of value.replace(/\\/gu, "/").split("/")) {
+    if (segment === "" || segment === ".") continue;
+    if (segment === "..") {
+      if (segments.length === 0) return value; // 会往上跑出工作区：原样留给出错路径
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  return segments.length === 0 ? value : segments.join("/");
+}
+
+/*
  * 表单里的「值守规矩」→ 任务的 `watch` 字段。
  *
  * **不填就是不存在**：三样都空时返回 `null` 而不是 `{}`，也不是 `undefined`。
@@ -69126,8 +69150,23 @@ function WatchRulesField({ draft, patch: patch2, globalTier }) {
               if (e.key !== "Enter") return;
               e.preventDefault();
               const value = e.currentTarget.value.trim();
-              if (value === "" || draft.watchScope.includes(value)) return;
-              patch2({ watchScope: [...draft.watchScope, value] });
+              if (value === "") return;
+              /*
+               * 归一化后再入列表，让**显示的就是存下去的**。
+               *
+               * daemon 的 parseWatchPolicy 会把 `reports/`、`./reports`、
+               * `reports//x` 这类写法收敛成 `reports`（那条归一化是安全必需的：
+               * 它同时负责查出 `..` 逃逸）。但表单此前把原文塞进 chip，
+               * 于是「输入 reports/ → 保存 → 重开表单」会变成 reports ——
+               * 用户看到自己的输入被悄悄改写了，却没有任何提示。
+               *
+               * 这里做的是**同一套规则的前半段**（去空段与 `.`、`..` 弹栈、去尾斜杠），
+               * 不重复 daemon 的校验：非法条目仍原样放进去，由 save() 的
+               * 预校验与 daemon 的拒绝路径给出一致的报错文案。
+               */
+              const normalized = normalizeWatchScopeEntry(value);
+              if (normalized === "" || draft.watchScope.includes(normalized)) return;
+              patch2({ watchScope: [...draft.watchScope, normalized] });
               e.currentTarget.value = "";
             }
           }

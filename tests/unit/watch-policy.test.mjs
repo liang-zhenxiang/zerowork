@@ -517,3 +517,47 @@ describe("调用点契约：全局档位取自 getPermissions().sandbox", () => 
 		expect(line).not.toContain("getPermissions().tier");
 	});
 });
+
+describe("saveAutomation 的 watch 三态契约（undefined / null / 对象）", () => {
+	/*
+	 * 三态各有明确语义，混掉任何两态都会变成「参数被接受却不生效」：
+	 *   - undefined = 这次不声明 → **保留原值**（编辑别的字段不会顺手抹掉规矩）
+	 *   - null      = 明确清空 → watch 必须从任务上消失
+	 *   - 对象       = 声明一份规矩 → 校验后落盘
+	 *
+	 * 此前 null 这一态是坏的：调用点对任何非 undefined 的输入都调 parseWatchPolicy，
+	 * 而它把 null 与 undefined 一起收成「一份什么都不限制的默认规矩」。
+	 * 用户在表单里清空规矩后保存，watch 没被清掉，反而留下一条
+	 * 「跟随全局 / 无范围 / 越界即停」的记录 —— 界面看着是空的，磁盘上却有。
+	 *
+	 * 这条契约只有读**调用点源码**才守得住：纯函数层面 parseWatchPolicy(null)
+	 * 返回默认规矩是它自己的既有行为（另有它用），错的是调用点没把 null 分出来。
+	 * 与上一组的「daemon 调用点读源码」同一姿态。
+	 */
+	const src = readFileSync(SESSION_FILES, "utf8");
+
+	it("调用点把 null 与 undefined 分开处理（null 清空、undefined 保留）", () => {
+		// 定位 saveAutomation 里那一段 watch 赋值
+		const start = src.indexOf("const watch =");
+		expect(start, "找不到 saveAutomation 里的 watch 赋值").toBeGreaterThan(-1);
+		const segment = src.slice(start, start + 400);
+
+		// undefined → 保留既有值
+		expect(segment).toContain("input.watch === void 0");
+		expect(segment).toContain("existing?.watch");
+		// null → 收敛成 undefined（也就是「任务上没有 watch」）
+		expect(segment).toContain("input.watch === null");
+		// 对象 → 走校验
+		expect(segment).toContain("parseWatchPolicy(input.watch)");
+	});
+
+	it("null 分支收敛成 undefined 而不是一份空规矩", () => {
+		const start = src.indexOf("const watch =");
+		const segment = src.slice(start, start + 400);
+		// 清空态的产物必须是 void 0（= 任务上没有 watch），不能是 parseWatchPolicy 的默认产物
+		const nullBranch = segment.slice(segment.indexOf("input.watch === null"));
+		expect(nullBranch).toContain("void 0");
+		// 空对象仍然要落盘成一条规矩（不当作清空）
+		expect(src).not.toContain("Object.keys(input.watch).length === 0");
+	});
+});
