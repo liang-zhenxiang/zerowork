@@ -48,3 +48,29 @@
 ## 还原
 
 两次注入后都从 `/tmp/watch-policy.bak*.js` 整份还原，`36 passed (36)` 复绿。
+
+---
+
+## 注入 3：`check-daemon-graph` 的③自由变量检查（本轮新增的那条性质）
+
+这条检查是**补一次真实事故**加的：给 `session-files.js` 加值守边界时，
+`boundaryFor` 与 `evaluateWatchBoundary` 两个被调用的函数忘了写进 `import`。
+它能漏过三道关口不是偶然 —— 单元测试不 import daemon 模块、ESM 具名绑定在构建期不检查、
+而 `src/main/daemon/**` 在 ESLint 配置里是**整目录排除**的（`no-undef` 从不检查它）。
+
+改动：删掉 `src/main/daemon/session-files.js` 里的 `boundaryFor,` 这一行 import
+（它在该文件里被真实引用）。
+
+结果：**精确报出那一条**，退出码 1
+
+```
+daemon 模块：50 个（其中 3 条 import 指向 daemon 目录之外）
+  ✗ session-files.js 引用了 boundaryFor，但模块里既没导入也没声明它
+
+模块图不闭合：1 处问题
+```
+
+还原：从 `/tmp/sf.bak` 整份还原，两条性质**双双复绿**（exit 0），
+`git diff --stat src/main/daemon/session-files.js` 无输出（确认没有残留）。
+
+结论：这条检查**不是恒真的** —— 它确实能抓住当初漏掉的那一类错误。
