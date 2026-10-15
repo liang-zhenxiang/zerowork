@@ -515,6 +515,83 @@ await h.check("自动化：保存 → 列表含之 → 启停 → 删除 → 列
 	console.log(`      保存时 ${r.savedStatus} → 启停后 ${r.statusAfterToggle}`);
 });
 
+await h.check("自动化：值守规矩存得下、读得回、清得掉", async () => {
+	/*
+	 * 值守规矩是可选的 `watch` 字段。这条用例守三件事：
+	 *   ① 存下去之后能原样读回来（含可写范围这种数组）；
+	 *   ② 显式传 null（= 表单里清空）时字段真的消失 —— 留个空壳
+	 *      `{}` 会让界面上显示「有规矩」而实际一条都没划；
+	 *   ③ `stopOnExceed:false` 与「字段缺失」必须可区分：前者是
+	 *      「越界只拒这一次调用」，后者是「越界就停整轮」，两者行为不同。
+	 */
+	const r = await win.evaluate(
+		async ({ ws, name }) => {
+			const k = globalThis.kami;
+			const asArray = (v) => (Array.isArray(v) ? v : (v?.tasks ?? []));
+			const base = { name, prompt: "只回复 OK", cwd: ws, schedule: { type: "interval", everyMinutes: 30 } };
+			const saved = await k.saveAutomation({
+				...base,
+				watch: { minutes: 15, tier: "read-only", scope: ["reports/", "notes/"], stopOnExceed: false },
+			});
+			const readBack = asArray(await k.listAutomations()).find((t) => t.id === saved.id)?.watch;
+			// 清空：显式传 null（表单里取消勾选走的就是这条）。
+			const cleared = await k.saveAutomation({ ...base, id: saved.id, watch: null });
+			const readCleared = asArray(await k.listAutomations()).find((t) => t.id === cleared.id);
+			await k.deleteAutomation(cleared.id);
+			const left = asArray(await k.listAutomations()).some((t) => t.id === cleared.id);
+			return { readBack, clearedWatch: readCleared?.watch, stillListed: left };
+		},
+		{ ws: h.WORKSPACE_DIR, name: "zw-watch-roundtrip" },
+	);
+	assert.equal(r.readBack?.minutes, 15, "minutes 没存住或没读回");
+	assert.equal(r.readBack?.tier, "read-only", "tier 没存住或没读回");
+	assert.deepEqual(r.readBack?.scope, ["reports/", "notes/"], "scope 数组没原样回来");
+	assert.equal(r.readBack?.stopOnExceed, false, "stopOnExceed:false 没能存住（它必须与缺省可区分）");
+	assert.ok(
+		r.clearedWatch === undefined || r.clearedWatch === null || Object.keys(r.clearedWatch).length === 0,
+		`清空后 watch 应消失，实际是 ${JSON.stringify(r.clearedWatch)}`,
+	);
+	assert.equal(r.stillListed, false, "清理不彻底：探针任务还在列表里");
+});
+
+await h.check("自动化：非法的值守规矩被拒绝", async () => {
+	/*
+	 * 一条非法的规矩不能静默存下去 —— 用户会以为划了界，实际那条规矩
+	 * 永远不会生效。这里从两个方向各试一次：写入时，和直接改盘上文件后读取时。
+	 */
+	const r = await win.evaluate(
+		async ({ ws, name }) => {
+			const k = globalThis.kami;
+			const base = { name, prompt: "只回复 OK", cwd: ws, schedule: { type: "interval", everyMinutes: 30 } };
+			const bad = [
+				{ label: "时限为负", watch: { minutes: -5 } },
+				{ label: "能力档非法", watch: { tier: "root" } },
+				{ label: "可写范围不是数组", watch: { scope: "reports/" } },
+			];
+			const accepted = [];
+			for (const b of bad) {
+				try {
+					const t = await k.saveAutomation({ ...base, watch: b.watch });
+					accepted.push(b.label);
+					await k.deleteAutomation(t.id).catch(() => {});
+				} catch {
+					/* 期望路径 */
+				}
+			}
+			// 干净收尾：确认没有把探针留在列表里。
+			const asArray = (v) => (Array.isArray(v) ? v : (v?.tasks ?? []));
+			for (const t of asArray(await k.listAutomations())) {
+				if (t.name === name) await k.deleteAutomation(t.id).catch(() => {});
+			}
+			const left = asArray(await k.listAutomations()).filter((t) => t.name === name).length;
+			return { accepted, left };
+		},
+		{ ws: h.WORKSPACE_DIR, name: "zw-watch-invalid" },
+	);
+	assert.deepEqual(r.accepted, [], `这些非法规矩被接受了：${r.accepted.join(" / ")}`);
+	assert.equal(r.left, 0, "探针任务没清干净");
+});
+
 await h.check("自动化：非法入参被拒绝（空名称 / 空内容 / 非法周期）", async () => {
 	const r = await win.evaluate(async (ws) => {
 		const k = globalThis.kami;
