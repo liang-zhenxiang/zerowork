@@ -15,7 +15,14 @@
  * 2) 把 `summarizeRun` 里 `boundary` 缺失时改成返回 `{known:true, state:"ok"}` →
  *    「老记录」那两条用例变红。
  */
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_PERMISSIONS } from "../../src/main/daemon/permissions.js";
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const SESSION_FILES = join(ROOT, "src", "main", "daemon", "session-files.js");
 import {
 	DEFAULT_GLOBAL_TIER,
 	WATCH_MAX_EXCEEDED,
@@ -404,5 +411,71 @@ describe("summarizeRun —— 「越界停在失败之前」", () => {
 			},
 		});
 		expect(summary.state).toBe("exceeded");
+	});
+});
+
+// ── 调用点契约：全局档位必须从 getPermissions() 的**真实字段**读出来 ──
+
+describe("调用点契约：全局档位取自 getPermissions().sandbox", () => {
+	/*
+	 * 这一组守的是一个**已发生过的静默失效**（2026-10-16）。
+	 *
+	 * daemon 里原先写的是 `deps.getPermissions().tier`，但 getPermissions() 返回的是
+	 * `{ sandbox, approval, presetId }` —— 没有 tier。于是实参恒为 undefined，
+	 * effectivePolicy 回落 DEFAULT_GLOBAL_TIER，「只能更严」的基准**永远是 workspace-write**：
+	 * 用户把全局设成只读、任务里声明可写，仍会被放行成可写。
+	 *
+	 * 上面那一组测不出它，因为那些用例直接喂 tier 字符串，**绕过了取值这一层**。
+	 * 纯函数测得再全，也拦不住「调用点读错字段名」—— 所以这里盯住形状本身：
+	 * 只要权限对象的字段名再改，这里立刻红。
+	 */
+	it("权限对象的字段名就是 sandbox（不是 tier）", () => {
+		// DEFAULT_PERMISSIONS 是 getPermissions() 的初值，形状与它一致。
+		const shape = Object.keys(DEFAULT_PERMISSIONS).sort();
+		expect(shape).toEqual(["approval", "presetId", "sandbox"]);
+		expect(shape).not.toContain("tier");
+	});
+
+	it("读 .sandbox 才能把全局档位真正喂进收敛", () => {
+		const permissions = { sandbox: "read-only", approval: "ask", presetId: "default" };
+
+		// 正确取值：全局只读 → 任务声明可写被收敛回只读，并留下告警。
+		const correct = effectivePolicy({ tier: "workspace-write" }, permissions.sandbox);
+		expect(correct.tier).toBe("read-only");
+		expect(correct.warnings.join()).toContain("不会放宽");
+
+		// 错误取值（曾经的写法）：undefined → 回落 workspace-write → 可写被放行。
+		// 这条断言是**回归锁**：它描述了当时的错误行为，提醒后来者别再退回这个形状。
+		const wrong = effectivePolicy({ tier: "workspace-write" }, permissions.tier);
+		expect(wrong.tier).toBe("workspace-write");
+		expect(wrong.warnings).toHaveLength(0);
+	});
+
+	it("三种全局档位下，声明可写都不得宽于全局", () => {
+		for (const global of ["read-only", "workspace-write", "danger-full-access"]) {
+			const p = effectivePolicy({ tier: "workspace-write" }, global);
+			expect(p.tier, `全局 ${global}`).toBe(
+				global === "read-only" ? "read-only" : "workspace-write",
+			);
+		}
+	});
+
+	it("daemon 的调用点确实把 .sandbox 喂了进去（不是 .tier）", () => {
+		/*
+		 * 上面两条测的是「形状」与「纯函数」，都拦不住调用点写错字段名 ——
+		 * 实测：把 daemon 改回 .tier，它们依然全绿。
+		 * 所以这一条直接读**调用点那一行源码**：只要实参不是 .sandbox，立刻红。
+		 *
+		 * 读源码做断言在这个仓库里有先例（tests/unit/daemon-graph.test.mjs 读
+		 * session-files.js 备份改写再调检查脚本），先例同样是「只能靠源码形态
+		 * 才能守住的契约」。这里比它更简单：不改写，只读。
+		 */
+		const src = readFileSync(SESSION_FILES, "utf8");
+		const line = src
+			.split("\n")
+			.find((l) => l.includes("effectivePolicy(task.watch"));
+		expect(line, "daemon 里找不到 effectivePolicy(task.watch 的调用点").toBeDefined();
+		expect(line).toContain("getPermissions().sandbox");
+		expect(line).not.toContain("getPermissions().tier");
 	});
 });

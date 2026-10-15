@@ -1005,8 +1005,20 @@ function createAutomationRunExecutor(deps) {
      *
      * 全局档位**现读**（不是启动时快照）：用户在两次运行之间改了全局档位，
      * 下一次运行就按新的来。
+     *
+     * 【2026-10-16 修一个读错字段名的静默失效】这里原先写的是
+     * `deps.getPermissions().tier`，但 `getPermissions()`（即 activePermissions /
+     * DEFAULT_PERMISSIONS）返回的是 `{ sandbox, approval, presetId }` —— **没有
+     * `tier` 这个字段**。于是 `globalTier` 恒为 `undefined`，`effectivePolicy`
+     * 每次都回落到 `DEFAULT_GLOBAL_TIER`（workspace-write），全局档位**从来没被读过**。
+     *
+     * 后果正是本功能最不该出的那种：用户把全局设成「只读」，任务里声明「可写」，
+     * 判定却按 workspace-write 收敛 —— 结果是**可写**，界面上那句「不会放宽它」
+     * 与运行记录里的告警都不会出现。它一路绿着过了单测（单测直接喂 tier 字符串，
+     * 绕过了取值这一层），只在真实运行里错。取值改成 `.sandbox` 后，
+     * 收敛才真正以全局档位为基准。
      */
-    const policy = effectivePolicy(task.watch, deps.getPermissions().tier);
+    const policy = effectivePolicy(task.watch, deps.getPermissions().sandbox);
     const boundary = boundaryFor(policy);
     /*
      * 越界证人：工具层每次拒绝都往这份可变对象里追加。

@@ -133,9 +133,20 @@ for (const [label, slug, expectsOwnPage] of SECTIONS) {
 await h.check("自动化：新建任务表单里有值守规矩，且与全局档位的关系如实呈现", async () => {
 	await navigateTo("自动化");
 
+	/*
+	 * 入口必须限定在**内容区**里找。
+	 *
+	 * 侧边栏顶部也有一个「新建任务」（它的作用是开一段**新对话**，不是开定时任务表单），
+	 * 而且在 DOM 里排在前面。先前用「第一个含『新建』的 button」去点，
+	 * 点到的是侧边栏那个 —— 页面停在新对话，表单压根没打开，
+	 * 断言于是报「没有值守规矩这一组」，把测试自身的缺陷说成了产品缺陷。
+	 * 所以这里按容器取：`main.settings` 是整个自动化页。
+	 */
 	const opened = await win.evaluate(() => {
-		const btn = [...document.querySelectorAll("button")].find((n) =>
-			/新建|创建|添加/.test((n.textContent || "").trim()),
+		const page = document.querySelector("main.settings");
+		if (!page) return false;
+		const btn = [...page.querySelectorAll("button")].find((n) =>
+			(n.textContent || "").trim() === "新建任务",
 		);
 		if (!btn) return false;
 		btn.click();
@@ -143,6 +154,13 @@ await h.check("自动化：新建任务表单里有值守规矩，且与全局�
 	});
 	assert.ok(opened, "自动化页里没找到新建任务的入口");
 	await h.waitForSettled();
+
+	// 表单是一个 modal；它没开就说明上一步没点到正确的入口，
+	// 这时报「缺控件」会掩盖真实原因（拿测试缺陷去指控产品）。
+	const formOpen = await win.evaluate(
+		() => document.querySelector(".auto-form-card") !== null,
+	);
+	assert.ok(formOpen, "新建任务表单没有打开 —— 先查入口是否点错，而不是查控件");
 
 	const info = await win.evaluate(() => {
 		const text = document.body.innerText || "";
