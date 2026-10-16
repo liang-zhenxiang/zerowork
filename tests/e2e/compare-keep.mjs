@@ -143,6 +143,24 @@ async function openModelMenu() {
 		timeout: 15_000,
 		desc: "对比屏的模型多选菜单挂上（.pop-menu.model-menu）",
 	});
+	/*
+	 * 还要等**模型清单真的渲染出来**，不能只等容器挂上。
+	 *
+	 * 菜单的 `menuBody` 有四个分支（读失败 / 正在读取 / 空 / 有模型），而清单是**挂载后
+	 * 才拉的**（`reloadModels` → `settingsSnapshot`）。快照没回来时菜单停在
+	 * 「正在读取模型…」那一支，此时 `readMenuState()` 读到的是**空名单**、`pickModel()`
+	 * 找不到任何模型 —— 报出来的是「菜单里没有「Mock Alpha」」这种**不指向真因**的失败。
+	 * 2026-10-16 在 CI 上实测过一次（#211）：那次 `main` 已连续 25 次全绿、本地也跑不出，
+	 * 只在机器负载高时把这条窗口撞开。
+	 *
+	 * 这一条同时堵住一处**假等待**：只等容器时 `waitUntil(picked.length === 0)` 是恒真的
+	 * （「一个模型项都没有」当然也等于「没选中任何模型」），于是「去掉预选」那一步会**空过**，
+	 * 把问题推迟到下一句断言才暴露 —— 与 `.trellis/spec/testing/index.md` §三.4 记的同族。
+	 */
+	await waitUntil(() => win.evaluate(() => document.querySelectorAll(".pop-menu.model-menu .model-menu-item").length > 0), {
+		timeout: 15_000,
+		desc: "对比屏的模型多选菜单里渲染出模型项（快照已到达）",
+	});
 }
 
 async function closeModelMenu() {

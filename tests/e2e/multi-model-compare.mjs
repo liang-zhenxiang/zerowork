@@ -221,6 +221,16 @@ async function openModelMenu() {
 		timeout: 15_000,
 		desc: "对比屏的模型多选菜单挂上（.pop-menu.model-menu）",
 	});
+	/*
+	 * 与 compare-keep 同款：还要等**模型清单真的渲染出来**。
+	 * 只等容器时，快照没回来就会停在「正在读取模型…」分支，`readMenuState()` 读到空名单、
+	 * `pickModel()` 找不到模型（失败信息不指向真因），而且 `waitUntil(picked.length === 0)`
+	 * 会因「一个模型项都没有」而恒真 —— 那是一处假等待。根因与实测经过见 #211。
+	 */
+	await waitUntil(() => win.evaluate(() => document.querySelectorAll(".pop-menu.model-menu .model-menu-item").length > 0), {
+		timeout: 15_000,
+		desc: "对比屏的模型多选菜单里渲染出模型项（快照已到达）",
+	});
 }
 
 /** 关掉菜单（`.ws-backdrop` 是它自带的遮罩，与既有 ModelMenu 同一条退路）。 */
