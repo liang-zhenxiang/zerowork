@@ -451,6 +451,80 @@ async function runWithModel(endpoint) {
 		assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")),
 	);
 
+	/*
+	 * ── ⑤ 规矩编辑区本身（浅色 + 深色各一张）──────────────────────
+	 *
+	 * 前面几条断的都是「跑起来之后」的行为：越界被拒、报告怎么读。
+	 * 但用户**声明**规矩的地方是表单里那一组字段，它此前从未被截图看过 ——
+	 * 而设计评审的第一条意见正是「四条声明必须是一个整体、不能被读成四个无关字段」，
+	 * 那是一件**只能靠看图判断**的事。所以这里把它拍下来，两种主题各一张。
+	 *
+	 * 只截图不断言画面（像素断言由 shoot 自带），文案与结构由前面的断言负责。
+	 */
+	await h.check("值守规矩：编辑区浅色 / 深色各留一张现场图", async () => {
+		await openAutomations();
+		/*
+		 * 点「新建任务」时要**限定在自动化页内**：
+		 * 侧边栏顶部也有一个同名的「新建任务」（那是新建会话），
+		 * 按文字全局取第一个会点到它，于是截出来的是首页 —— 表单永远不会打开。
+		 *
+		 * 自动化页的容器是 `main.settings`（它复用了设置页的外壳），
+		 * 空态那个按钮额外带 `primary-btn`；头部那个是 `mini-btn`。
+		 * 两个都能开表单，这里取 `.settings-body` 里的那个，并把范围卡死在页内。
+		 */
+		const opened = await win.evaluate(() => {
+			const page = document.querySelector("main.settings");
+			if (page === null) return false;
+			const hit = [...page.querySelectorAll("button")].find(
+				(n) => (n.textContent || "").trim() === "新建任务",
+			);
+			if (hit === undefined) return false;
+			hit.click();
+			return true;
+		});
+		assert.ok(opened, "没找到自动化页里的「新建任务」按钮");
+
+		// 等表单出现：判据是「值守规矩」这组字段真的渲染出来了
+		await waitUntil(
+			async () =>
+				win.evaluate(() => {
+					const text = document.body.textContent || "";
+					return text.includes("值守规矩") && document.querySelector(".auto-form-card") !== null;
+				}),
+			{ timeout: 30_000, interval: 500, desc: "新建任务表单里的「值守规矩」渲染出来" },
+		);
+
+		/*
+		 * 等入场动画真的走完再截图。
+		 *
+		 * `.auto-form-card` 挂着 `animation: pop-layer-in var(--dur-base)`，
+		 * 表单是「挂载即终态」的动画 —— 元素一出现就在，但**画面还在动**。
+		 * `waitForSettled()` 等的是没有计时器的空闲帧，抓不住 CSS 动画的中间帧：
+		 * 上一版截图就是这么拍到了半透明的表单叠在空态上，
+		 * 看起来像个渲染 bug，其实是**拍早了**。
+		 * 主动等动画结束，截图才是稳定的终态。
+		 */
+		await win.evaluate(
+			() =>
+				new Promise((done) => {
+					const card = document.querySelector(".auto-form-card");
+					if (card === null) return done(false);
+					const running = card.getAnimations({ subtree: true });
+					if (running.length === 0) return done(true);
+					void Promise.all(running.map((a) => a.finished)).then(() => done(true));
+				}),
+		);
+
+		await h.shoot("watch-rules-form-light");
+
+		// 深色对照：同一屏换主题再拍一张（token 用法在暗色下最容易露馅）
+		await win.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+		await h.waitForSettled();
+		await h.shoot("watch-rules-form-dark");
+		await win.evaluate(() => document.documentElement.setAttribute("data-theme", "light"));
+		await h.waitForSettled();
+	});
+
 	/**
 	 * 打开侧边栏的「自动化」区域。
 	 *
