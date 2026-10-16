@@ -10377,11 +10377,20 @@ textarea:focus-visible {
 	font-size: var(--text-list);
 }
 
-/* 折算说明：与 field-hint 同档但走警示色，位置在这一节的最后一行。 */
+/* 折算说明：位置在这一节的最后一行。
+ *
+ * 它说的是「你所选 ≠ 实际」这个**正常结论**，不是错误 —— 所以不取 --danger
+ * （红色会把一个正常结论渲染成故障，而上面「可写」项的 hint 已经讲过一次
+ * 「不会放宽它」了，红色没带来新信息）。用 --text 的正文色 + accent 的左轨：
+ * 左轨的意义是「这一行是个补充说明」，与 .watch-effective-narrowed 同族。 */
 .watch-warn {
+	display: flex;
+	gap: var(--space-2);
 	margin-top: var(--space-2);
+	padding-left: var(--space-3);
+	border-left: 2px solid var(--accent);
 	font-size: var(--text-meta);
-	color: var(--danger);
+	color: var(--text);
 }
 
 /* ── 连接器页（技能页「连接器」页签，MCP 服务器管理）─────────────

@@ -69042,6 +69042,19 @@ const WATCH_MINUTES_PRESETS = [15, 30, 60];
  * 灰着的那一项，用户一眼就知道「此路不通」，而不是试过才知道。
  * 折算说明是兜底，不是主通道。
  *
+ * ── 本层（第二层：就地折算说明）**未实现** ────────────────────────────
+ * 原提案在「禁用态」之下还设计了第二层：`.watch-effective` 一行，在
+ * 「所选 ≠ 实际」时说出折算结果（`effectiveLineText({picked, effective, globalTier})`
+ * 逐字翻译 daemon 的 `notes[]`）。**这一层本轮没做**，所以：
+ *   · 新建流程：碰不到被折算的组合（选项已禁用），所以不影响；
+ *   · 编辑流程：一条存过「可写」的任务遇上全局改成只读 —— 由下面 `.watch-warn` 兜。
+ * 没做的理由：渲染层今天**拿不到** `notes[]`/`warnings[]`（`effectivePolicy` 只在
+ * daemon 侧调，`warnings[]` 唯一去向是 `boundaryFor` 合进跑完才有的报告）。
+ * 补它只有两条路 —— 渲染层自己再算一遍（= 造第二份判定，正是 design.md §3.2 要防的），
+ * 或新增跨进程契约每次选点过一趟 IPC。两条都远贵于收益。
+ * **别照注释以为它做完了**；将来真要补，先把 `effectiveLineText` 放在本函数上方，
+ * 等出现第二个消费者再抽文件（单测才是抽文件的正当理由）。
+ *
  * `globalTier` 读不到时（undefined）**不假装知道**：控件照常可选，
  * 只是不给「不生效」的判断 —— 猜一个宽松档会让用户更危险。
  */
@@ -69192,7 +69205,7 @@ function WatchRulesField({ draft, patch: patch2, globalTier }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "field-hint", children: draft.watchStopOnExceed ? "一旦碰到上面的线，这次调用被拒，并当场停下整轮。" : "只拒掉那一次调用，任务可以换个合法的路子继续做完。" })
       ] })
     ] }),
-    tierLocked && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-warn", children: "当前全局档位更严，本任务的「可写」不会放宽它 —— 实际仍按只读执行。" })
+    tierLocked && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "watch-warn", children: "这个任务存的是「可写」，但当前全局是「只读」—— 运行时会按只读执行。要让它真的可写，请先到「设置 → 权限」把全局档位改掉。" })
   ] });
 }
 function AutomationForm({
