@@ -12,7 +12,7 @@
   "assignee": "liangyuxiang",
   "createdAt": "2026-10-16",
   "completedAt": null,
-  "branch": null,
+  "branch": "feat/watch-policy",
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,

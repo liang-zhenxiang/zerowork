@@ -267,9 +267,18 @@ function evaluateWatchBoundary(intent, policy, workspaceDir) {
     return {
       allowed: false,
       rule: "tier",
+      /*
+       * reason 与 witness 是**两个读者**，此前共用一份字符串 —— 那是错的：
+       *   · reason 回给**模型**，所以可以带「请改写路径」这类指令；
+       *   · witness 进**运行报告**给用户看，它不该出现「请把……改成……」这种
+       *     只有人能执行、且方向是**放宽安全档位**的建议 —— 那恰好是本功能
+       *     「只能更严」立场的反面。
+       * 两份文案内容是同一件事，但语气与落点不同，所以分开写、不互相拼装。
+       */
       reason:
         "本任务设置了「只读」值守规矩：不允许修改任何文件。如果这次运行确实需要写入，" +
         "请把这个定时任务的「能力」改成「可写」，或把全局权限档位放宽到「只能改工作区」。",
+      witness: "这次调用想改文件，撞上了本任务的「只读」值守规矩。",
     };
   }
 
@@ -307,6 +316,8 @@ function evaluateWatchBoundary(intent, policy, workspaceDir) {
       reason:
         `本任务的「可写范围」只含 ${policy.scoped.join("、")}，` +
         `${rawPath} 不在其中。请改写路径，或让用户把这个目录加进任务的可写范围。`,
+      witness:
+        `想写 ${rawPath}，但它不在本任务的可写范围（${policy.scoped.join("、")}）里。`,
     };
   }
 
@@ -319,6 +330,7 @@ function evaluateWatchBoundary(intent, policy, workspaceDir) {
         allowed: false,
         rule: "outside",
         reason: `本任务只能在它的工作目录内改动文件，${rawPath} 在工作目录之外。`,
+        witness: `想写 ${rawPath}，但它在工作目录之外 —— 任务只能在它的工作目录里改动文件。`,
       };
     }
   }

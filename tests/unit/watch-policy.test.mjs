@@ -561,3 +561,68 @@ describe("saveAutomation 的 watch 三态契约（undefined / null / 对象）",
 		expect(src).not.toContain("Object.keys(input.watch).length === 0");
 	});
 });
+
+describe("reason 与 witness 是两个读者，不能合并", () => {
+	/*
+	 * 越界判定返回的文案有**两个消费者**，此前共用一份字符串：
+	 *   · reason  → 回给**模型**（工具调用的错误），可以带「请改写路径」这类指令
+	 *   · witness → 进**运行报告**给用户看
+	 *
+	 * 共用会同时坏两头。实测的坏法是后者：报告里原样出现了
+	 * 「请把全局权限档位放宽到『只能改工作区』」——
+	 * 一份**安全功能的失败报告在教用户放宽自己的安全设置**，
+	 * 而这恰是本功能「只能更严」立场的反面。
+	 *
+	 * 这两条断言故意只查「用户可见的那份里没有指令语」——
+	 * 不查具体措辞，措辞会改，性质不会。
+	 */
+	const INSTRUCTION_WORDS = ["请", "建议", "你可以", "试试", "改成"];
+
+	const cases = [
+		["只读档", { tier: "read-only" }, { tool: "write", kind: "write", path: "a.txt" }, undefined],
+		[
+			"范围外",
+			{ tier: "workspace-write", scope: ["reports"] },
+			{ tool: "write", kind: "write", path: "outside.txt" },
+			"/ws",
+		],
+		[
+			"工作目录之外",
+			{ tier: "workspace-write" },
+			{ tool: "write", kind: "write", path: "/elsewhere/a.txt" },
+			"/ws",
+		],
+	];
+
+	for (const [label, policy, intent, ws] of cases) {
+		it(`${label}：witness 是陈述句，不带给模型的指令`, () => {
+			const v = evaluateWatchBoundary(intent, effectivePolicy(policy, "danger-full-access"), ws);
+			expect(v.allowed, `${label} 应当被拒`).toBe(false);
+			expect(typeof v.witness, `${label} 缺少 witness`).toBe("string");
+			for (const word of INSTRUCTION_WORDS) {
+				expect(v.witness, `${label} 的 witness 里出现了指令语「${word}」`).not.toContain(word);
+			}
+		});
+
+		it(`${label}：reason 仍然保留给模型的指路（两份不是同一句话）`, () => {
+			const v = evaluateWatchBoundary(intent, effectivePolicy(policy, "danger-full-access"), ws);
+			expect(v.reason).not.toBe(v.witness);
+		});
+	}
+
+	it("daemon 落进报告的是 witness，不是 reason", () => {
+		/*
+		 * 同「调用点契约」一组：纯函数层面的用例拦不住调用点取错字段
+		 * （实测：把 detail 改回 verdict.reason，上面 6 条全绿）。
+		 * 所以读调用点那一行源码。
+		 */
+		const src = readFileSync(SESSION_FILES, "utf8");
+		const idx = src.indexOf("const onExceed =");
+		expect(idx, "找不到 onExceed 的定义").toBeGreaterThan(-1);
+		const segment = src.slice(idx, idx + 500);
+		expect(segment).toContain("verdict.witness");
+		expect(segment, "报告里的 detail 又取回了给模型的 reason").not.toMatch(
+			/detail:\s*verdict\.reason\b/,
+		);
+	});
+});

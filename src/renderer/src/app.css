@@ -8074,9 +8074,16 @@ textarea:focus-visible {
 	background: var(--bg);
 	/* 【2026-09-18 修】原写 `var(--text-muted)` —— 本 token **不存在**（:root 只有
 	   --text-secondary(.5) / --text-faint(.3)），`var()` 解析失败会静默回退到**继承色**，
-	   于是这颗 chip 显示的是父级正文色而不是想要的浅灰。按相邻语义（同组 chip 走
-	   --text-secondary，这颗更轻）取 --text-faint。 */
-	color: var(--text-faint);
+	   于是这颗 chip 显示的是父级正文色而不是想要的浅灰。
+	   【2026-10-16 再修】当时取的是 --text-faint，**取错了一档**：按 §2.3「降一档是
+	   字面意思」，--text-faint 是降**两档**，只在「文字本身是唯一的状态信号」时才用；
+	   而这是一颗**可点的 chip**，可点这件事由边框、cursor 与 :hover 承担，
+	   不靠字色压深来表达。更糟的是它和 `.num-chip:disabled`（本文件 10315 行的
+	   opacity 0.55）叠在一起后，「能点」与「不能点」在灰度上只差一点点 ——
+	   禁用态这个信号本身就变得不可靠了。
+	   回到降一档的 --text-secondary：静态色与 `.preset-item`（本文件 7874 行一带）
+	   同族，选中态仍靠 .active 的边框与字色拉开。 */
+	color: var(--text-secondary);
 	font: inherit;
 	font-size: var(--text-meta);
 	cursor: pointer;

@@ -1030,8 +1030,14 @@ function createAutomationRunExecutor(deps) {
         appendExceed(boundary, {
           at,
           tool: intent.tool ?? "unknown",
-          detail: verdict.reason
-        })
+          /*
+           * 落进报告的是 **witness**（给用户读的），不是 reason（回给模型的）。
+           * reason 里带「请改写路径」这类指令 —— 模型读了有用，用户读了莫名其妙，
+           * 而且「请把全局档位放宽到……」这种建议方向恰好与本功能相反。
+           * witness 缺省时回退到 reason，保证老判据不至于让报告空一格。
+           */
+          detail: verdict.witness ?? verdict.reason,
+        }),
       );
     };
     /*
