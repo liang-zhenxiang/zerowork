@@ -40,6 +40,9 @@ squash 合并。**不要经由 fork** —— 那会让 CI 需要逐次人工 app
 
 ```bash
 gh issue list --state open --json number,title
+# 有没有人已经在做同一个 Issue —— 开着的 PR 与远端分支都要看
+gh pr list --state open --json number,title,headRefName
+git ls-remote --heads origin | grep -i '<关键词>' || true
 gh api repos/liang-zhenxiang/zerowork/milestones --jq '.[] | "\(.title): 完成 \(.closed_issues) / 待办 \(.open_issues)"'
 gh release list
 gh run list --branch main --workflow=ci.yml --limit 3
@@ -48,6 +51,11 @@ git status --short && git log --oneline -3
 
 检查点：本地与远端是否一致、main 的 `CI 总览` 是否绿、`CHANGELOG.md` 的 `[Unreleased]`
 是否积压了未发布的改动（**积压即说明「发布」这一步欠着，优先补上**）。
+
+**⛔ 开工之前先确认没有人在做这个 Issue。** ⚠️ 真实事故（2026-10-17）：
+「值守」（#208）另一个会话先做完并开了 PR #209，本会话在**同一基线上又实现了一套** ——
+两套各自独立、无法合并，只能整套弃用，白做一轮。检查成本只是一条 `gh pr list`。
+`gh issue list` **不会**告诉你已经有人开了分支。配套动作：开工时在 Issue 里留一行「我开始了」。
 
 ---
 
@@ -69,6 +77,11 @@ git status --short && git log --oneline -3
 ## 三、实现
 
 - **一个 Issue 对应一个分支、一个 PR**。分支名 `feat/*`、`fix/*`、`docs/*`、`chore/*`。
+- **开工前在 Issue 里留一行「我开始了」**，并确认没人已经在做（见上一节的 ⛔）。
+- **接手别人的 PR 时**：先 rebase 到最新 `main`（squash 合并的历史会与旧基线冲突，
+  `CHANGELOG` 与 `package.json` 是最常见的两处），再逐条核对他们修过的坑是否也存在于
+  自己的判断里 —— 那比自己重写一套有价值。别用 `--admin` 绕过门禁：
+  `required_conversation_resolution` 开着时，先读清楚未解决的会话是什么、**写下判断**再解决。
 - **动手前先核实 Issue 的前提**。前提不成立时，在 Issue 里留言说明并改写范围，
   而不是硬着头皮实现一个错误的目标。
 - 实现中偏离 Issue 计划（如发现了更严重的相关缺陷），**先起一个独立 Issue 记录**，再决定顺序。

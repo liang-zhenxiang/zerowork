@@ -47,6 +47,9 @@ Agent 内核基于 `@earendil-works/pi-coding-agent`）。仓库 `liang-zhenxian
 
 ```bash
 gh issue list --state open --json number,title
+# 有没有人已经在做同一个 Issue —— 开着的 PR 与远端分支都要看（教训见下）
+gh pr list --state open --json number,title,headRefName
+git ls-remote --heads origin | grep -i '<关键词>' || true
 gh api repos/liang-zhenxiang/zerowork/milestones --jq '.[] | "\(.title): 完成 \(.closed_issues) / 待办 \(.open_issues)"'
 gh release list
 gh run list --branch main --workflow=ci.yml --limit 3
@@ -55,6 +58,21 @@ git status --short && git log --oneline -3
 
 检查点：本地与远端是否一致、`main` 的 CI 是否绿、`CHANGELOG.md` 的 `[Unreleased]`
 **是否积压**（积压即说明「发布」这一步欠着，优先补上）。
+
+**⛔ 开始一个 Issue 之前，先确认没有人在做它。** 检出 PR 与远端分支两条都要看，
+别只看 `gh issue list` —— 它不会告诉你已经有人开了分支。
+
+> **这是踩过的坑（2026-10-17）：** 「值守」（#208）另一个会话先做完并开出了 PR #209，
+> 而这个会话在**同一基线上又独立实现了一套**（5 个提交、同样的文件）。两套实现
+> 各自独立、无法合并，只能整套弃用 —— 代价是白做一轮，而检查成本只是开工前
+> 一条 `gh pr list`。**同一件事故意做两遍，比做错一次更浪费**：它不产生可复用的东西。
+>
+> 顺带两条判别经验：
+> - **推送被拒可能是「有人先到了」，不一定是自己的问题。** 见到 `non-fast-forward`
+>   先 `git ls-remote --heads origin` 看一眼那个分支是谁的、有几个提交，再决定合流还是放弃。
+> - **接手别人的 PR 时，先核对他们踩过的坑是否也存在于自己的判断里。** 那次对方修掉的
+>   「全局档位读错字段名导致『只能更严』从不生效」是纯函数测试全绿的形态 ——
+>   对着它复核一遍，比自己重写一套更有价值。
 
 ### 二、规划
 
@@ -67,6 +85,8 @@ git status --short && git log --oneline -3
 ### 三、实现
 
 - **一个 Issue 对应一个分支、一个 PR**。分支名 `feat/*` `fix/*` `docs/*` `chore/*`
+- **开工前在 Issue 里说一声「我开始了」**（一行评论即可），并在上面那条盘点里确认
+  没人已经在做 —— 这是**避免两个人同时做同一件事**的唯一机制（见「一、盘点现状」的教训）
 - **动手前先核实 Issue 的前提**。前提不成立时在 Issue 里留言说明并改写范围，
   而不是硬着头皮实现一个错误的目标
 - 实现中发现更严重的相关缺陷 → **先起一个独立 Issue 记录**，再决定顺序
