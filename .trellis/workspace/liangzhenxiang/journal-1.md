@@ -154,3 +154,37 @@ Agent 改过的文件留一版、可看可退；两处 P0 由独立设计师评�
 ### Next Steps
 
 - 发版时把 [Unreleased] 归入 v0.9.0；Roadmap 已更新
+
+
+## Session 5: 值守一轮：接手另一会话已完成的实现（10-16-watch-policy）
+<!-- trellis-session: v=2 fp=2055d6692bb2a62f -->
+
+**Date**: 2026-10-17
+**Task**: 值守一轮：接手另一会话已完成的实现（10-16-watch-policy）
+**Branch**: `feat/watch-policy`
+
+### Summary
+
+值守合入 main：任务级边界只收紧、越界留证人、交差报告；本轮最值得记的是「开始前先确认有没有人在做同一件事」
+
+### Main Changes
+
+- 接手另一会话的实现：rebase 到最新 main（解 CHANGELOG 冲突，把他们的条目逐字移进 [Unreleased]）、独立复核、判 CodeQL 告警、squash 合并
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0463e7c` | feat(automation): 值守——给无人值守的任务一套可声明的边界与交差报告 (#209) |
+
+### Testing
+
+- [OK] build ✓；单测 40 文件 / 898 条；sections 25/25；local-state 33/33；check:daemon-graph 两条性质；CI 总览全绿（GUI 链 8m23s）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- squash 合并后：[Unreleased] 已积压（文件时光机已发 v0.9.0，值守待 v0.10.0）；#213 待做
