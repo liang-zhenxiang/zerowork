@@ -115,4 +115,95 @@ for (const [label, slug, expectsOwnPage] of SECTIONS) {
 	await goHome();
 }
 
+/*
+ * 「自动化」分区还要覆盖**新建任务表单里的值守规矩**。
+ *
+ * 上面那轮只证明「页面能打开、能渲染」；值守规矩是这一轮新增的一组控件，
+ * 它坏掉的形态恰恰是「页面照样打开」—— 字段没渲染出来、标签写错、
+ * 全局只读时该禁用的选项没禁用，上面那轮断言全都照样通过。
+ *
+ * 断言三件事，都对应真实的失效形态：
+ *   ① 四组控件真的在（时限 / 能力 / 可写范围 / 越界即停）；
+ *   ② 「不填」的说明**不能**写成「不限时」—— 真实行为是产品内置的
+ *      30 分钟保护会把它叫停，写成「不限时」是一句错话；
+ *   ③ 全局档位是只读时，「可写」必须是 `disabled` 且带「不生效」徽标 ——
+ *      这是本案的核心立场：碰不到的选项不会让人误会，能碰到却静默折算的才会。
+ *      全局档位可读时这条不成立，所以按实际档位分支断言。
+ */
+await h.check("自动化：新建任务表单里有值守规矩，且与全局档位的关系如实呈现", async () => {
+	await navigateTo("自动化");
+
+	/*
+	 * 入口必须限定在**内容区**里找。
+	 *
+	 * 侧边栏顶部也有一个「新建任务」（它的作用是开一段**新对话**，不是开定时任务表单），
+	 * 而且在 DOM 里排在前面。先前用「第一个含『新建』的 button」去点，
+	 * 点到的是侧边栏那个 —— 页面停在新对话，表单压根没打开，
+	 * 断言于是报「没有值守规矩这一组」，把测试自身的缺陷说成了产品缺陷。
+	 * 所以这里按容器取：`main.settings` 是整个自动化页。
+	 */
+	const opened = await win.evaluate(() => {
+		const page = document.querySelector("main.settings");
+		if (!page) return false;
+		const btn = [...page.querySelectorAll("button")].find((n) =>
+			(n.textContent || "").trim() === "新建任务",
+		);
+		if (!btn) return false;
+		btn.click();
+		return true;
+	});
+	assert.ok(opened, "自动化页里没找到新建任务的入口");
+	await h.waitForSettled();
+
+	// 表单是一个 modal；它没开就说明上一步没点到正确的入口，
+	// 这时报「缺控件」会掩盖真实原因（拿测试缺陷去指控产品）。
+	const formOpen = await win.evaluate(
+		() => document.querySelector(".auto-form-card") !== null,
+	);
+	assert.ok(formOpen, "新建任务表单没有打开 —— 先查入口是否点错，而不是查控件");
+
+	const info = await win.evaluate(() => {
+		const text = document.body.innerText || "";
+		const labels = [...document.querySelectorAll(".watch-group-label")].map((n) =>
+			(n.textContent || "").trim(),
+		);
+		const writable = [...document.querySelectorAll(".preset-item")].find((n) =>
+			(n.textContent || "").includes("可写"),
+		);
+		return {
+			labels,
+			text,
+			hasWritable: writable !== undefined,
+			writableDisabled: writable ? writable.disabled === true : false,
+			writableTag: writable
+				? (writable.querySelector(".preset-tag")?.textContent || "").trim()
+				: "",
+		};
+	});
+
+	assert.ok(info.text.includes("值守规矩"), "表单里没有「值守规矩」这一组");
+	assert.ok(info.labels.includes("时限"), `缺少「时限」组，实际有：${info.labels.join(" / ")}`);
+	assert.ok(info.labels.includes("能力"), `缺少「能力」组，实际有：${info.labels.join(" / ")}`);
+	assert.ok(
+		info.text.includes("越界即停"),
+		"缺少「越界即停」开关 —— 它正是这次修好的那个从未生效的字段",
+	);
+	assert.ok(
+		info.text.includes("30 分钟") && !info.text.includes("不限时"),
+		"不设时限的说明不对：真实行为是 30 分钟保护会叫停，不能写成「不限时」",
+	);
+	assert.ok(info.hasWritable, "「能力」组里没有「可写」选项");
+
+	if (info.writableDisabled) {
+		assert.equal(
+			info.writableTag,
+			"不生效",
+			"禁用了「可写」却没标「不生效」，用户不知道为什么点不动",
+		);
+	}
+	console.log(
+		`      值守规矩四组齐备；「可写」${info.writableDisabled ? "已禁用 + 不生效徽标" : "可用（全局非只读）"}`,
+	);
+});
+
 await h.finish();

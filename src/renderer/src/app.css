@@ -8074,9 +8074,16 @@ textarea:focus-visible {
 	background: var(--bg);
 	/* 【2026-09-18 修】原写 `var(--text-muted)` —— 本 token **不存在**（:root 只有
 	   --text-secondary(.5) / --text-faint(.3)），`var()` 解析失败会静默回退到**继承色**，
-	   于是这颗 chip 显示的是父级正文色而不是想要的浅灰。按相邻语义（同组 chip 走
-	   --text-secondary，这颗更轻）取 --text-faint。 */
-	color: var(--text-faint);
+	   于是这颗 chip 显示的是父级正文色而不是想要的浅灰。
+	   【2026-10-16 再修】当时取的是 --text-faint，**取错了一档**：按 §2.3「降一档是
+	   字面意思」，--text-faint 是降**两档**，只在「文字本身是唯一的状态信号」时才用；
+	   而这是一颗**可点的 chip**，可点这件事由边框、cursor 与 :hover 承担，
+	   不靠字色压深来表达。更糟的是它和 `.num-chip:disabled`（本文件 10315 行的
+	   opacity 0.55）叠在一起后，「能点」与「不能点」在灰度上只差一点点 ——
+	   禁用态这个信号本身就变得不可靠了。
+	   回到降一档的 --text-secondary：静态色与 `.preset-item`（本文件 7874 行一带）
+	   同族，选中态仍靠 .active 的边框与字色拉开。 */
+	color: var(--text-secondary);
 	font: inherit;
 	font-size: var(--text-meta);
 	cursor: pointer;
@@ -10124,6 +10131,92 @@ textarea:focus-visible {
 	min-width: 0;
 }
 
+/* ── 一次运行：行 + 可就地展开的「值守报告」───────────────────────
+ * 报告体是**内框不是内容卡**（DESIGN.md §3.7）：无 border、走 --bg-raised，
+ * 与运行记录区同属次级面，不占内容卡的盒子预算。
+ *
+ * 折叠开关放在行尾（.auto-run-fold）：报告展开后行内会有工具名与理由，
+ * 整行可点会让用户想选中那段文字时反而跳走。行本体只在能跳会话时才可点。
+ *
+ * 动效**刻意不加**：.auto-runs 已有 fold-in，报告体长在里面，
+ * 叠第二层入场会打架（见 DESIGN.md §10.3 的登记纪律）。
+ * ──────────────────────────────────────────────────────────────── */
+
+.auto-run-item {
+	display: flex;
+	flex-direction: column;
+}
+
+/* 行本体可点时的按钮形态：去掉按钮默认外观，让它读起来仍是「一行」。 */
+.auto-run-open {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	flex: 1 1 auto;
+	min-width: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+
+.auto-run-fold {
+	flex: 0 0 auto;
+	padding: 0 var(--space-2);
+	border: 0;
+	background: none;
+	color: var(--text-faint);
+	font: inherit;
+	font-size: var(--text-meta);
+	cursor: pointer;
+}
+
+.auto-run-fold:hover {
+	color: var(--text);
+}
+
+.run-report {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	margin: var(--space-1) 0 var(--space-2) var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+}
+
+.run-report-line {
+	color: var(--text-secondary);
+}
+
+/* 「越界」与「被叫停」两种状态说的是「碰到了线」，不是「坏了」——
+   所以文字走正文色 + 一条 2px 左轨，而不是整块变红。 */
+.run-report-stopped .run-report-line,
+.run-report-exceeded .run-report-line {
+	color: var(--text);
+}
+
+.run-report-stopped,
+.run-report-exceeded {
+	border-left: 2px solid var(--danger);
+}
+
+.run-report-list {
+	margin: 0;
+	padding-left: var(--space-4);
+	color: var(--text-secondary);
+	list-style: disc;
+}
+
+.run-report-list code {
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
 /* 表单弹层：骨架复用 modal-backdrop；卡片比 permission-card 宽（字段多），
    其余（圆角/阴影/内边距）保持同一尺寸语言。
    连接器（MCP）的添加表单与 JSON 编辑器同一卡片语言，选择器并集共用。 */
@@ -10189,6 +10282,115 @@ textarea:focus-visible {
 	min-height: 84px;
 	resize: vertical;
 	line-height: 1.6;
+}
+
+/* ── 值守规矩（定时任务编辑面板第三节）─────────────────────────────
+ * 这一节的控件**全部是既有组件**，这里只补三处缺口，不新造控件：
+ *   .watch-group     三个小节的纵向节奏（label 与控件之间的 6px）
+ *   .num-chip-input  自定义时限的输入框（.num-chip 是按钮，输入框要长成同款）
+ *   .num-chip:disabled  既有类没有禁用态（只读档下不该能点）
+ * 另加两个纯排版的容器：.watch-scope-chips / .watch-switch-row。
+ * 不引入新 token、不新增动效（见 DESIGN.md §10.3 的登记纪律）。
+ * ──────────────────────────────────────────────────────────────── */
+
+.watch-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+
+.watch-group-label {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	font-weight: 500;
+}
+
+/* 与 .num-chip 同款，否则「自定义」那个框会比旁边的预设高出一截。 */
+.num-chip-input {
+	width: 72px;
+	padding: 2px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	font: inherit;
+	font-size: var(--text-meta);
+}
+
+/* 既有 .num-chip 没有禁用态 —— 补上，否则只读档下预设仍可点。 */
+.num-chip:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+
+.num-chip:disabled:hover {
+	border-color: var(--border);
+}
+
+/* 「不生效」徽标：与 provider-tag 同族，但走警示色而不是中性色 ——
+   它要说明的是「这里选了也不会发生」，不能读起来像一枚普通的分类标签。 */
+.preset-tag {
+	margin-left: var(--space-2);
+	padding: 1px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	font-weight: 400;
+}
+
+.watch-scope-chips {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.watch-scope-input {
+	flex: 1 1 160px;
+	min-width: 120px;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: inherit;
+	font: inherit;
+	font-size: var(--text-meta);
+}
+
+.watch-switch-row {
+	flex-direction: row;
+	align-items: flex-start;
+	gap: var(--space-3);
+}
+
+.watch-switch-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.watch-switch-title {
+	font-size: var(--text-list);
+}
+
+/* 折算说明：位置在这一节的最后一行。
+ *
+ * 它说的是「你所选 ≠ 实际」这个**正常结论**，不是错误 —— 所以不取 --danger
+ * （红色会把一个正常结论渲染成故障，而上面「可写」项的 hint 已经讲过一次
+ * 「不会放宽它」了，红色没带来新信息）。用 --text 的正文色 + accent 的左轨：
+ * 左轨的意义是「这一行是个补充说明」，与 .watch-effective-narrowed 同族。 */
+.watch-warn {
+	display: flex;
+	gap: var(--space-2);
+	margin-top: var(--space-2);
+	padding-left: var(--space-3);
+	border-left: 2px solid var(--accent);
+	font-size: var(--text-meta);
+	color: var(--text);
 }
 
 /* ── 连接器页（技能页「连接器」页签，MCP 服务器管理）─────────────

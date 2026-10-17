@@ -147,6 +147,14 @@ import {
 	savePermissionRules,
 } from "./permissions.js";
 import {
+	appendExceed,
+	boundaryFor,
+	effectivePolicy,
+	evaluateWatchBoundary,
+	onExceedAction,
+	parseWatchPolicy,
+} from "./watch-policy.js";
+import {
 	SKILL_NAME_PATTERN,
 	filterEnabledSkills,
 	getEffectiveWorkspaceRoot,
@@ -987,9 +995,59 @@ async function readUsageStats(sessionsDir, report, options = {}) {
 const RUN_TIMEOUT_MS = 30 * 6e4;
 
 function createAutomationRunExecutor(deps) {
-  return async (task) => {
+  return async (task, runContext) => {
     let host;
     let sessionId = "";
+    /*
+     * 值守规矩的收敛在这里做**一次**：把任务声明的 watch 与当前全局档位
+     * 合成一份 effectivePolicy，工具层与运行记账都读它 —— 不各算各的
+     * （两份判定的漂移正是「参数被接受却不生效」的温床）。
+     *
+     * 全局档位**现读**（不是启动时快照）：用户在两次运行之间改了全局档位，
+     * 下一次运行就按新的来。
+     *
+     * 【2026-10-16 修一个读错字段名的静默失效】这里原先写的是
+     * `deps.getPermissions().tier`，但 `getPermissions()`（即 activePermissions /
+     * DEFAULT_PERMISSIONS）返回的是 `{ sandbox, approval, presetId }` —— **没有
+     * `tier` 这个字段**。于是 `globalTier` 恒为 `undefined`，`effectivePolicy`
+     * 每次都回落到 `DEFAULT_GLOBAL_TIER`（workspace-write），全局档位**从来没被读过**。
+     *
+     * 后果正是本功能最不该出的那种：用户把全局设成「只读」，任务里声明「可写」，
+     * 判定却按 workspace-write 收敛 —— 结果是**可写**，界面上那句「不会放宽它」
+     * 与运行记录里的告警都不会出现。它一路绿着过了单测（单测直接喂 tier 字符串，
+     * 绕过了取值这一层），只在真实运行里错。取值改成 `.sandbox` 后，
+     * 收敛才真正以全局档位为基准。
+     */
+    const policy = effectivePolicy(task.watch, deps.getPermissions().sandbox);
+    const boundary = boundaryFor(policy);
+    /*
+     * 越界证人：工具层每次拒绝都往这份可变对象里追加。
+     * 用同一个引用贯穿整个 run —— 运行结束时它就是这次运行的边界记录。
+     */
+    const onExceed = (verdict, intent, at) => {
+      Object.assign(
+        boundary,
+        appendExceed(boundary, {
+          at,
+          tool: intent.tool ?? "unknown",
+          /*
+           * 落进报告的是 **witness**（给用户读的），不是 reason（回给模型的）。
+           * reason 里带「请改写路径」这类指令 —— 模型读了有用，用户读了莫名其妙，
+           * 而且「请把全局档位放宽到……」这种建议方向恰好与本功能相反。
+           * witness 缺省时回退到 reason，保证老判据不至于让报告空一格。
+           */
+          detail: verdict.witness ?? verdict.reason,
+        }),
+      );
+    };
+    /*
+     * 「越界即停」把整轮叫停时，reason 要能说清是**哪条规矩**停的 ——
+     * 与时限的「超过 N 分钟被叫停」在报告里是两种不同的状态。
+     */
+    let stoppedByBoundary = false;
+    const onAbort = () => {
+      stoppedByBoundary = true;
+    };
     try {
       const catalog = await deps.getCatalog();
       const modelKey = deps.getModelKey();
@@ -1025,30 +1083,57 @@ function createAutomationRunExecutor(deps) {
         // 初始档 = 全局默认；未配置时为 undefined，SessionHost 只把非
         // undefined 传给 pi（pi 走自己的 medium 默认链）。
         thinkingLevel: deps.getThinkingLevel(),
-        extensions: buildRunExtensions(deps, cwd, () => host)
+        extensions: buildRunExtensions(deps, cwd, () => host, { policy, onExceed, onAbort })
       });
       host.markAutomationRun(task.id);
       sessionId = host.state.sessionId;
       let timedOut = false;
+      /*
+       * 时限 = 任务声明的 minutes（若有）；没声明则退回内置的 30 分钟兜底。
+       *
+       * **两者的语义不同，报告里要分得清**：任务声明的是用户的意思
+       * （「这个活儿最多跑 30 分钟」），兜底是产品自己的护栏。
+       * 都走既有的 abort 通道，不新开。
+       */
+      const limitMs =
+        policy.minutes === void 0 ? RUN_TIMEOUT_MS : policy.minutes * 6e4;
       const timeout = setTimeout(() => {
         timedOut = true;
         void host?.abort();
-      }, RUN_TIMEOUT_MS);
+      }, limitMs);
       timeout.unref?.();
       try {
         await host.prompt(task.prompt);
       } finally {
         clearTimeout(timeout);
       }
-      if (timedOut) return { sessionId, success: false, error: "timeout" };
-      if (runError !== void 0) return { sessionId, success: false, error: runError };
-      if (cancelled) return { sessionId, success: false, error: "运行被中断" };
-      return { sessionId, success: true };
+      boundary.timedOut = timedOut;
+      boundary.stoppedByBoundary = stoppedByBoundary;
+      if (timedOut) {
+        return {
+          sessionId,
+          success: false,
+          error: `运行超过 ${Math.round(limitMs / 6e4)} 分钟被叫停`,
+          boundary
+        };
+      }
+      if (stoppedByBoundary) {
+        return {
+          sessionId,
+          success: false,
+          error: "越界即停：这次运行碰到了值守规矩，已当场停下",
+          boundary
+        };
+      }
+      if (runError !== void 0) return { sessionId, success: false, error: runError, boundary };
+      if (cancelled) return { sessionId, success: false, error: "运行被中断", boundary };
+      return { sessionId, success: true, boundary };
     } catch (error) {
       return {
         sessionId,
         success: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
+        boundary
       };
     } finally {
       host?.dispose();
@@ -1056,8 +1141,124 @@ function createAutomationRunExecutor(deps) {
   };
 }
 
-function buildRunExtensions(deps, cwd, getHost2) {
-  return [
+/*
+ * 值守边界的工具层闸门 —— **本任务声明的边界**在既有权限判定之前先跑一遍。
+ *
+ * 三条设计纪律，与 PRD 的三条硬约束一一对应：
+ *
+ * 1. **只做额外拒绝。** 返回 `{block:true}` 或 `undefined`，从不「放行」——
+ *    它不接管既有权限门的任何判定，只是多一个合取项。权限门该拒的照样拒。
+ * 2. **拒绝的理由带规矩原文并回给模型。** 模型据此换路子，而不是原样重试
+ *    （与 unattended 既有的「拒绝并把原因回给模型」同一条纪律）。
+ * 3. **越界留证人。** 每次拒绝往这次运行的 boundary 里追加一条，
+ *    并在审计中心落一条 `command` / `blocked`（复用既有类别，不新开）。
+ *
+ * **越界之后停不停整轮，由 stopOnExceed 决定**（onExceedAction 是唯一的判据）：
+ *   - `true`（缺省）→ 第一次越界就把整轮叫停。定时任务没人看着，
+ *     放它继续跑下去只会产出更多越界动作，不如当场收工并把原因说清。
+ *   - `false` → 只拒这一次调用，模型收到理由后可以换个路子继续把活干完。
+ *
+ * 「叫停整轮」走的是**既有**的 abort 通道（与时限同一个），不新开机制。
+ */
+function createWatchBoundary(options) {
+  return (pi) => {
+    pi.on("tool_call", async (event) => {
+      const intent = watchIntentOf(event.toolName, event.input);
+      const verdict = evaluateWatchBoundary(intent, options.policy, options.workspaceDir);
+      if (verdict.allowed) return void 0;
+      const at = Date.now();
+      options.onExceed?.(verdict, intent, at);
+      options.onAudit?.({
+        category: "command",
+        outcome: "blocked",
+        detail: clipAuditDetail(`值守规矩拦下 ${event.toolName}：${verdict.reason}`)
+      });
+      if (onExceedAction(options.policy) === "abort") {
+        /*
+         * 先回 block 再把整轮叫停：顺序不能反 —— 反过来的话 abort 可能先
+         * 让这一轮结束，模型的最后一次工具回执就丢了，它看不到「为什么」。
+         */
+        queueMicrotask(() => {
+          void options.onAbort?.();
+        });
+      }
+      return { block: true, reason: verdict.reason };
+    });
+  };
+}
+
+/*
+ * 写侧工具名 —— 与权限门用的那一套同源（permission-rules.js 的 WRITE_VERBS
+ * 覆盖 write / edit / create / rename / move / copy / delete 等）。
+ * 这里只需要回答「这次调用会不会改盘上的东西」：
+ *
+ *   - 落盘类工具 → write（要过边界）
+ *   - 其余（read / grep / find / ls / web_* / 检索 / 问卷 / 可视化 / 待办）→ read
+ *
+ * 判不准时**算 write**：宁可多拦一次（用户看得见、模型收到理由），
+ * 也不要漏拦一次（静默越界）。这是与「宁可拒绝，也不静默降级」同源的取舍。
+ */
+const WATCH_READ_TOOLS = /* @__PURE__ */ new Set([
+  "read",
+  "read_document",
+  "read_me",
+  "find",
+  "grep",
+  "ls",
+  "conversation_search",
+  "web_search",
+  "web_fetch",
+  "questionnaire",
+  "todo_write",
+  "show_widget",
+  "use_skill",
+  "switch_prompt",
+  "list_automations",
+  "list_skills"
+]);
+
+function watchIntentOf(toolName, input) {
+  const pick = (key) => {
+    const value = input?.[key];
+    return typeof value === "string" && value !== "" ? value : void 0;
+  };
+  const path =
+    pick("path") ?? pick("file_path") ?? pick("filePath") ?? pick("outputPath") ?? pick("target");
+  if (WATCH_READ_TOOLS.has(toolName)) {
+    return { tool: toolName, kind: "read" };
+  }
+  return { tool: toolName, kind: "write", ...(path === void 0 ? {} : { path }) };
+}
+
+function buildRunExtensions(deps, cwd, getHost2, watch) {
+  /*
+   * 值守边界（本任务自己声明的规矩）。**必须包在权限门之前** ——
+   * pi 按注册顺序跑 tool_call 监听器，第一条 block 即终止。
+   *
+   * 这一层**只会拒绝得更多**：它在既有权限门之外多一个合取项，
+   * 没有任何一条路径能把本该被拒的调用变成放行（红线 4 在代码上的形状）。
+   * watch 缺省时 evaluateWatchBoundary 对一切 write 都放行 ——
+   * 于是老任务的行为与今天逐字段相同。
+   */
+  const boundary = watch === void 0 ? void 0 : boundaryFor(watch.policy);
+  const extensions = [];
+  if (watch !== void 0) {
+    extensions.push(
+      createWatchBoundary({
+        policy: watch.policy,
+        workspaceDir: cwd,
+        boundary,
+        onExceed: watch.onExceed,
+        // 叫停整轮走既有的 abort 通道（与时限同一个出口），不新开机制。
+        onAbort: () => {
+          watch.onAbort?.();
+          void getHost2()?.abort();
+        },
+        onAudit: writeAuditRecord
+      })
+    );
+  }
+  extensions.push(
     createPermissionGate({
       paths: {
         workspaceDir: cwd,
@@ -1076,7 +1277,10 @@ function buildRunExtensions(deps, cwd, getHost2) {
       requestApproval: () => {
         throw new Error("无人值守会话不应发起审批");
       }
-    }),
+    })
+  );
+  return [
+    ...extensions,
     createProjectTrust({ isOwnWorkspace: deps.isOwnWorkspace }),
     createPresentFiles({
       getWorkspaceDir: () => cwd,
@@ -1339,7 +1543,13 @@ class AutomationScheduler {
       startedAt,
       finishedAt,
       success: outcome.success,
-      ...outcome.error === void 0 ? {} : { error: outcome.error }
+      ...outcome.error === void 0 ? {} : { error: outcome.error },
+      /*
+       * 值守边界（本次运行的实际口径）。**只增字段**：老运行记录没有它，
+       * 渲染层的 summarizeRun 对它返回「这条运行早于『值守』功能」，
+       * 不编一个空的出来 —— 编出来会让用户以为「有边界、只是没用上」。
+       */
+      ...outcome.boundary === void 0 ? {} : { boundary: outcome.boundary }
     });
     if (!entry.manual) {
       this.options.store.upsert({
@@ -1879,6 +2089,28 @@ function saveAutomation(input) {
   }
   const nextRunAt = nextRunAfter(input.schedule, now);
   const status = existing?.status === "paused" ? "paused" : nextRunAt === void 0 ? "missed" : "active";
+  /*
+   * 值守规矩：**三态**，缺一不可。
+   *
+   *   - `undefined` = 这次请求没声明 → **保留原有规矩**（编辑时不会被顺手抹掉）
+   *   - `null`      = 明确表示「没有规矩」→ 清掉
+   *   - 对象         = 声明一份规矩 → 校验后落盘
+   *
+   * `null` 这一态此前是坏的：这里对任何非 undefined 的输入都调 parseWatchPolicy，
+   * 而它把 null 与 undefined 一起收成「一份什么都不限制的默认规矩」。
+   * 于是用户在表单里清空规矩后保存，**watch 并没有被清掉**，而是留下一条
+   * 「跟随全局 / 无范围 / 越界即停」的记录 —— 界面上规矩是空的，磁盘上却有，
+   * 之后再打开表单会看到它回来。这正是本项目禁止的「参数被接受却不生效」。
+   *
+   * 空对象 `{}` 仍然**故意保留**（不当作清空）：它是一条显式声明，
+   * 与「从未声明过」在语义上不同（见 parseWatchPolicy 的注释）。
+   */
+  const watch =
+    input.watch === void 0
+      ? existing?.watch
+      : input.watch === null
+        ? void 0
+        : parseWatchPolicy(input.watch);
   const task = {
     id: existing?.id ?? randomUUID(),
     name,
@@ -1890,7 +2122,8 @@ function saveAutomation(input) {
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
     nextRunAt,
-    lastRunAt: existing?.lastRunAt
+    lastRunAt: existing?.lastRunAt,
+    ...watch === void 0 ? {} : { watch }
   };
   automationStore.upsert(task);
   pushAutomationChanged();

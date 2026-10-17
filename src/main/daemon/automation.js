@@ -28,6 +28,7 @@ import { sep } from "node:path";
 import { statSync } from "node:fs";
 import { writeFileSync } from "node:fs";
 import { getAutomationsFile } from "./config-paths.js";
+import { parseWatchPolicy } from "./watch-policy.js";
 
 const TASK_STATUSES = /* @__PURE__ */ new Set(["active", "paused", "missed"]);
 
@@ -156,6 +157,20 @@ function parseTask(value, index, filePath) {
   const type = schedule["type"];
   if (typeof type !== "string" || !SCHEDULE_TYPES.has(type)) {
     throw bad(`的 schedule.type 非法：${String(type)}`);
+  }
+  /*
+   * 值守规矩（可选字段）。**在读取时校验，不在写入时兜底** ——
+   * tasks.json 是用户可以直接编辑的，一条非法的规矩必须在 load() 阶段就响亮地炸，
+   * 而不是等到某次无人值守跑到一半才发现「这条规矩没生效」。
+   * 字段缺失 = 老任务，行为与今天完全一致（parseWatchPolicy 的缺省）。
+   */
+  const watch = record["watch"];
+  if (watch !== void 0) {
+    try {
+      parseWatchPolicy(watch);
+    } catch (error) {
+      throw bad(`的 watch 规矩非法：${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return value;
 }
