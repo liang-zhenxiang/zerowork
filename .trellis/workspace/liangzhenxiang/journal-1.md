@@ -188,3 +188,37 @@ Agent 改过的文件留一版、可看可退；两处 P0 由独立设计师评�
 ### Next Steps
 
 - squash 合并后：[Unreleased] 已积压（文件时光机已发 v0.9.0，值守待 v0.10.0）；#213 待做
+
+
+## Session 6: 交差报告 e2e 改用 mock 端点（10-18-watch-e2e-mock）
+<!-- trellis-session: v=2 fp=ec61171eb384c677 -->
+
+**Date**: 2026-10-18
+**Task**: 交差报告 e2e 改用 mock 端点（10-18-watch-e2e-mock）
+**Branch**: `test/watch-e2e-mock`
+
+### Summary
+
+交差报告的真实 DOM 渲染进 CI；顺带修好提示条与报告的矛盾（被叫停 vs 运行失败）
+
+### Main Changes
+
+- watch-policy.mjs 556→657 行改为 mock+真实 Electron；daemon 的 runFinished 带 outcome；渲染层按 outcome 措辞与选色
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `51f399a` | test(e2e): 交差报告改用 mock 端点并进 CI，顺带修好提示条与报告的矛盾 (#219) |
+
+### Testing
+
+- [OK] test:gui:watch 9/9（隔离 HOME 下同样 9/9）；单测 906；CI GUI 链 6m32s，CI 日志确认 watch-policy 真跑 9/9 未跳过
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 3 条 js/file-access-to-http 告警已自动 fixed；[Unreleased] 有两条修复待发
