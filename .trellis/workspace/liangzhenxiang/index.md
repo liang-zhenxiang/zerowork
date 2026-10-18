@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
-- **Last Active**: 2026-10-17
+- **Total Sessions**: 6
+- **Last Active**: 2026-10-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~190 | Active |
+| `journal-1.md` | ~224 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-10-18 | 交差报告 e2e 改用 mock 端点（10-18-watch-e2e-mock） | `51f399a` | `test/watch-e2e-mock` |
 | 5 | 2026-10-17 | 值守一轮：接手另一会话已完成的实现（10-16-watch-policy） | `0463e7c` | `feat/watch-policy` |
 | 4 | 2026-10-15 | 文件时光机一轮（10-15-file-time-machine） | `9f3ca58` | `feat/file-time-machine` |
 | 3 | 2026-10-03 | 导出为 Markdown（10-03-export-markdown） | - | `feat/export-markdown` |
