@@ -528,11 +528,13 @@ filter 1–4 全部对不上。round-trip 测试当场抓了出来 —— 这正
 
 - **CI 只跑 macOS 的 GUI 测试**。脚本硬编码 POSIX `/tmp` 路径；
   Linux 还需 xvfb + `--no-sandbox`；Windows 会因路径整体失败
-- **7 个脚本依赖本机 `~/.claude/settings.json` 的模型端点**（`real-model` /
+- **7 个既有脚本依赖本机 `~/.claude/settings.json` 的模型端点**（`real-model` /
   `doc-parsing` / `docx-runtime` / `skill-mcp` / `command-exec` / `automation-run` /
   `session-branch`）。端点探不到时按情形逐条 `h.skip`：其中 5 个会**整轮跳过**，
   于是以退出码 `2`（无信号）结束 —— 见第 9 条。**它们在 CI 上没有信号，这是事实**：
   这几个文件也不在 `gui-tests` 的调用链里（第 10 条），指望它们守住 CI 是错的
+- **交差报告已进 CI**：`watch-policy` 改用本地 mock 模型端点并接入 `test:gui`，
+  不再读取本机模型凭据。它覆盖真实 Electron 里的运行记录、报告徽标、结论句与证人行
 - **`resources/**` 不参与本项目的测试工具链**（见 `.trellis/spec/resources/`）
 - **渲染层是 chunk 粒度、没有组件源码**，所以不存在「组件单测」这种可能；
   界面只能通过 e2e 的 DOM 断言 + 像素断言覆盖
