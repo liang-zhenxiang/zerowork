@@ -30100,7 +30100,14 @@ import {
 	versionCountLabel,
 	versionSourceText
 } from "./file-history-core.js";
-import { onExceedAction, reportLine, runBadge, summarizeRun } from "./watch-report-core.js";
+import {
+	automationToastText,
+	automationToastTone,
+	onExceedAction,
+	reportLine,
+	runBadge,
+	summarizeRun,
+} from "./watch-report-core.js";
 const emptyOptions = {};
 function remarkGfm(options) {
   const self2 = (
@@ -70320,8 +70327,8 @@ function App() {
         if (disposed || event.kind !== "runFinished") return;
         if (event.builtin === true) return;
         showToast(
-          event.success ? `任务「${event.taskName}」已完成` : `任务「${event.taskName}」运行失败`,
-          event.success ? "success" : "error"
+          automationToastText(event),
+          automationToastTone(event)
         );
         if (event.sessionId === "") return;
         if (event.sessionId === visibleSessionIdRef.current && viewRef.current === "chat") return;

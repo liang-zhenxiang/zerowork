@@ -129,3 +129,36 @@ export function runBadge(summary, success) {
 	}
 	return success === true ? BADGE.ok : BADGE.failed;
 }
+
+/**
+ * 跑完之后那条 toast 的**文案**。
+ *
+ * 为什么不直接看 `success`：越界即停与超时中止的 `success` 也是 false（那一轮确实
+ * 没跑完），但它们与「模型报错 / 环境炸了」是两件事 —— 前者是规矩**按设计生效**了。
+ * 只说「运行失败」会和报告里的「被叫停」互相打架（2026-10-18 在 mock e2e 的截图里
+ * 第一次被看见）。
+ *
+ * `outcome` 由 daemon 算好随事件推来（与报告共用同一份 summarizeRun），
+ * 这里只做**措辞**，不重新判定。老 renderer / 老 daemon 的兼容：没有 `outcome`
+ * 时退回 `success` 的旧口径。
+ */
+export function automationToastText(event) {
+	const name = typeof event?.taskName === "string" ? event.taskName : "";
+	const task = name === "" ? "任务" : `任务「${name}」`;
+	const outcome = event?.outcome;
+	if (outcome === "timedOut") return `${task}到时限被叫停`;
+	if (outcome === "stopped") return `${task}被值守规矩叫停`;
+	if (outcome === "exceeded") return `${task}已完成，但越了界`;
+	if (outcome === "failed") return `${task}运行失败`;
+	if (outcome === "ok") return `${task}已完成`;
+	return event?.success === true ? `${task}已完成` : `${task}运行失败`;
+}
+
+/** toast 的色调：只有真失败才用 error。被叫停与越界是「规矩生效」，不是错误。 */
+export function automationToastTone(event) {
+	const outcome = event?.outcome;
+	if (outcome === "timedOut" || outcome === "stopped" || outcome === "exceeded") return "info";
+	if (outcome === "failed") return "error";
+	if (outcome === "ok") return "success";
+	return event?.success === true ? "success" : "error";
+}

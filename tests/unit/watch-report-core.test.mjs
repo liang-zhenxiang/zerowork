@@ -33,6 +33,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	WATCH_STATES,
+	automationToastText,
+	automationToastTone,
 	onExceedAction,
 	reportLine,
 	runBadge,
@@ -212,5 +214,60 @@ describe("WATCH_STATES —— 状态清单与 daemon 侧一致", () => {
 			"ok",
 			"unknown"
 		]);
+	});
+});
+
+/* ══ 二、跑完的 toast：结论由 daemon 给，渲染层只措辞 ══════════════ */
+
+describe("automationToastText —— 「被叫停」不能说成「运行失败」", () => {
+	const base = { taskName: "值班日报", success: false };
+
+	it("stopped：说被规矩叫停，不是失败", () => {
+		const text = automationToastText({ ...base, outcome: "stopped" });
+		expect(text).toBe("任务「值班日报」被值守规矩叫停");
+		expect(text).not.toContain("失败");
+	});
+
+	it("timedOut：说到时限被叫停，不是失败", () => {
+		const text = automationToastText({ ...base, outcome: "timedOut" });
+		expect(text).toBe("任务「值班日报」到时限被叫停");
+		expect(text).not.toContain("失败");
+	});
+
+	it("exceeded：说已完成但越了界（这一次确实跑完了）", () => {
+		const text = automationToastText({ success: false, taskName: "值班日报", outcome: "exceeded" });
+		expect(text).toContain("已完成");
+		expect(text).toContain("越了界");
+		expect(text).not.toContain("失败");
+	});
+
+	it("failed / ok：各自的措辞", () => {
+		expect(automationToastText({ ...base, outcome: "failed" })).toBe("任务「值班日报」运行失败");
+		expect(automationToastText({ taskName: "值班日报", success: true, outcome: "ok" })).toBe(
+			"任务「值班日报」已完成"
+		);
+	});
+
+	it("老 daemon（没有 outcome）退回 success 的旧口径", () => {
+		expect(automationToastText({ taskName: "值班日报", success: true })).toBe("任务「值班日报」已完成");
+		expect(automationToastText({ taskName: "值班日报", success: false })).toBe("任务「值班日报」运行失败");
+	});
+});
+
+describe("automationToastTone —— 只有真失败才用 error", () => {
+	it("被叫停 / 越界是「规矩生效」，用 info 而不是 error", () => {
+		expect(automationToastTone({ outcome: "stopped", success: false })).toBe("info");
+		expect(automationToastTone({ outcome: "timedOut", success: false })).toBe("info");
+		expect(automationToastTone({ outcome: "exceeded", success: false })).toBe("info");
+	});
+
+	it("failed 用 error，ok 用 success", () => {
+		expect(automationToastTone({ outcome: "failed" })).toBe("error");
+		expect(automationToastTone({ outcome: "ok", success: true })).toBe("success");
+	});
+
+	it("老 daemon（没有 outcome）退回 success 的旧口径", () => {
+		expect(automationToastTone({ success: true })).toBe("success");
+		expect(automationToastTone({ success: false })).toBe("error");
 	});
 });

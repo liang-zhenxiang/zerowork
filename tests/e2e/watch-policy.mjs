@@ -341,6 +341,12 @@ let readonlyRun;
 // ── ① 只读：写入必须被拒，并留下越界证人 ──────────────────────
 await h.check("值守规矩：只读任务里的写入被拒，且运行记录留下越界证人", async () => {
 	const requestsBefore = mock.requests.length;
+	/*
+	 * toast 只活 2.2 秒 —— **不能靠轮询抓它**（等运行记录落盘时它早就消失了）。
+	 * 在触发任务**之前**装一个 MutationObserver，凡是插进来的 toast 都记进
+	 * `window.__watchToasts`。这与 export-markdown.mjs 里那条是同一手法、同一个理由。
+	 */
+	await watchToasts();
 	readonlyTaskId = await createProbe({
 		name: READONLY_TASK,
 		prompt:
@@ -485,6 +491,32 @@ await h.check("值守规矩：界面上运行报告的徽标是「被叫停」�
 		`报告里没有渲染可读的证人行：${JSON.stringify(ui.witnesses)}`,
 	);
 	console.log(`      界面徽标: ${ui.badge}｜报告: ${ui.report.slice(0, 60)}…`);
+
+	/*
+	 * 跑完的 toast 必须与报告说同一件事。
+	 *
+	 * 此前它只看 event.success：越界即停的 success 也是 false（那一轮确实没跑完），
+	 * 于是同一屏上报告说「被叫停」、toast 说「运行失败」—— 用户不知道信哪个。
+	 * 这条断言就是钉住那个矛盾的（2026-10-18 在 mock 截图里第一次被看见）。
+	 */
+	const toasts = await win.evaluate(() => window.__watchToasts ?? []);
+	const runToast = toasts.find((toast) => toast.text.includes(READONLY_TASK));
+	assert.ok(
+		runToast !== undefined,
+		`没有捕获到这次运行的完成 toast（捕获到 ${JSON.stringify(toasts.map((t) => t.text))}）`,
+	);
+	assert.ok(
+		runToast.text.includes("被值守规矩叫停"),
+		`toast 与报告互相矛盾：报告说「被叫停」，toast 说的是「${runToast.text}」`,
+	);
+	assert.ok(
+		!runToast.text.includes("运行失败"),
+		`toast 把「规矩按设计生效」说成了「运行失败」：${runToast.text}`,
+	);
+	assert.ok(
+		!runToast.cls.includes("error"),
+		`toast 用了错误色，但被叫停不是错误：${runToast.cls}`,
+	);
 });
 
 // 上一条 check 完成后才删除任务；h.check 不返回 Promise，因此清理放在单独的全局收口。
@@ -623,6 +655,28 @@ async function openAutomations() {
 	});
 	if (!clicked) throw new Error("未找到侧边栏入口「自动化」");
 	await h.waitForSettled();
+}
+
+/**
+ * 在渲染层装一个 toast 记录器。
+ *
+ * toast 只活 2.2 秒 —— 轮询抓它会在等运行记录落盘时整段错过
+ * （export-markdown.mjs 就是被这个坑红过的）。事件驱动之后，无论它活多久，
+ * 出现那一刻就被记下来了。
+ */
+async function watchToasts() {
+	await win.evaluate(() => {
+		window.__watchToasts = [];
+		const record = (node) => {
+			if (node === null || node === undefined || node.nodeType !== 1) return;
+			const el = node.matches?.(".toast") === true ? node : node.querySelector?.(".toast");
+			if (el === null || el === undefined) return;
+			window.__watchToasts.push({ text: (el.textContent ?? "").trim(), cls: el.className });
+		};
+		new MutationObserver((entries) => {
+			for (const entry of entries) for (const node of entry.addedNodes) record(node);
+		}).observe(document.body, { childList: true, subtree: true });
+	});
 }
 
 async function setTheme(theme) {
