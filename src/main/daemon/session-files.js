@@ -153,6 +153,7 @@ import {
 	evaluateWatchBoundary,
 	onExceedAction,
 	parseWatchPolicy,
+	summarizeRun,
 } from "./watch-policy.js";
 import {
 	SKILL_NAME_PATTERN,
@@ -1538,7 +1539,7 @@ class AutomationScheduler {
       };
     }
     const finishedAt = this.now();
-    const withRun = this.options.store.appendRun(task.id, {
+    const runRecord = {
       sessionId: outcome.sessionId,
       startedAt,
       finishedAt,
@@ -1550,7 +1551,8 @@ class AutomationScheduler {
        * 不编一个空的出来 —— 编出来会让用户以为「有边界、只是没用上」。
        */
       ...outcome.boundary === void 0 ? {} : { boundary: outcome.boundary }
-    });
+    };
+    const withRun = this.options.store.appendRun(task.id, runRecord);
     if (!entry.manual) {
       this.options.store.upsert({
         ...withRun,
@@ -1565,6 +1567,27 @@ class AutomationScheduler {
       taskName: withRun.name,
       sessionId: outcome.sessionId,
       success: outcome.success,
+      /*
+       * 这次运行的**结论**（ok / exceeded / stopped / timedOut / failed / unknown）。
+       *
+       * 为什么不能只给 success：越界即停与超时中止的 success 也是 false（那一轮确实
+       * 没跑完），但它们与「模型报错 / 环境炸了」是两件事 —— 前者是规矩**按设计生效**
+       * 了。跑完的 toast 只看 success 时会说「运行失败」，与报告里的「被叫停」互相打架
+       * （2026-10-18 在 mock e2e 的截图里第一次被看见）。
+       *
+       * 由 daemon 算好再推，不让渲染层各写一份判定 —— 两份判定的漂移正是
+       * 「参数被接受却不生效」的温床。判定与报告共用 watch-policy 的 summarizeRun。
+       */
+      ...(() => {
+        /*
+         * 判定对象是**刚写入的那条 run**，不是 appendRun 的返回值 ——
+         * 后者是「更新后的 task」（runs 数组），task 上没有 boundary。
+         * 这里曾经写成 summarizeRun(withRun)，于是 known 恒为 false、
+         * outcome 恒不出现，toast 照旧只看 success（2026-10-18 由 mock e2e 抓到）。
+         */
+        const summary = summarizeRun(runRecord);
+        return summary.known ? { outcome: summary.state } : {};
+      })(),
       // 内置任务带上标记：renderer 据此抑制 toast 与未读（静默后台家务，
       // spec: add-memory-system）。非内置不带键 —— 旧 renderer 按 undefined
       // 处理即原行为，事件契约向后兼容。
