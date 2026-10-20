@@ -222,3 +222,54 @@ Agent 改过的文件留一版、可看可退；两处 P0 由独立设计师评�
 ### Next Steps
 
 - 3 条 js/file-access-to-http 告警已自动 fixed；[Unreleased] 有两条修复待发
+
+---
+
+## 2026-10-20 — #225 daemon-graph 反向验证不再改写真实源码
+
+### Summary
+
+`tests/unit/daemon-graph.test.mjs` 那条「复现真实漏 import」的用例此前直接改写
+`src/main/daemon/session-files.js` 再还原。vitest 默认并行跑测试文件，至少 8 个单测
+读这个文件 —— 落在改写窗口里就会在**与自己无关的用例上**报错。改为把模块图复制到
+临时目录再动手，真实源码全程只读。PR #227 已合并，Issue #225 已关闭。
+
+### Key Decisions
+
+- 复用已有的 `ZW_DAEMON_DIR` 入口，不给检查脚本加第二个参数
+- 副本必须保持相对布局（`../sandbox/`、`../../shared/`），否则得到「模块不存在」假报错
+- 用例前置断言「未改动的副本应当通过」，把红归因到那两行 import 而不是副本缺文件
+- 用运行前后 sha256 把「真实源码只读」变成可执行断言
+
+### Pitfalls
+
+- 反向验证（把副本路径改回真实路径）暴露了原写法的**第二种坏形态**：用例中途失败时
+  还原语句执行不到，仓库会停在被改坏的状态 —— `afterEach` 未必能救
+- 全量连跑 20 次时撞到另一条计时抖动（`mock-model-server` 的 243ms < 250ms），
+  已单独开 #226，没有混进本次 PR
+- 本地 `lint:all` 的 zizmor 需要 Docker 守护进程；CI 上通过，与改动无关
+- 归档提交一度落在本地 `main` 上，未推送即改到分支走 PR #228 —— 事后确认 tree 一致后
+  用 `git reset --keep` 对齐
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8e81342` | test(unit): daemon-graph 的反向验证改用临时副本，不再改写真实源码 (#227) |
+| `d40bb1a` | chore(trellis): 归档 daemon-graph 测试竞态任务的规划产物 (#228) |
+
+### Testing
+
+- daemon-graph 单文件连跑 20 次：0 失败
+- 全量连跑 28 次：daemon-graph 从未失败（1 次是 #226 的计时抖动）
+- 单测 906/906；CI 16/16；main CI 绿
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- #226：`mock-model-server` 的 delayMs 用例按墙钟差断言，并行全量偶发假红
+- #182 触发条件已成立：`electron-vite@6.0.0` peer 已放开 vite 8
+- `[Unreleased]` 积压：稳定版 v0.11.0 尚未发布
