@@ -24,11 +24,12 @@
 ### R1 · daemon：一次扫描收集「多条命中」
 
 - 在 `session-state.js` 新增纯函数 `searchFileHits(content, terms, { limit, radius })`：
-  返回 `{ sessionId, title, hits }`，`hits` 按出现顺序、每条含 `entryId`、`role`、`text`、
-  `matchStart`、`matchEnd`、`snippetStart`、`snippetEnd`；`limit` 控制每会话最多几条。
-- `session-files.js` 新增 `searchSessionMessages(query, options)`：
-  - 与 `searchSessionFiles` 共用同一套「读目录 → 按 mtime 倒序 → 截断」逻辑（抽一个
-    `scanSessionFiles` 私有函数，两处都走它，避免两套扫描慢慢漂移）；
+  返回 `{ sessionId, title, totalHits, hits }`，`hits` 按出现顺序、每条含 `entryId`、
+  `role`、`snippet`、`matches`（`matches` 是片段内高亮区间，换行折叠后重算过）；
+  `limit` 控制每会话最多展开几条，`totalHits` 保留该会话真实命中总数。
+- 新增独立模块 `src/main/daemon/session-search.js` 提供 `searchSessionMessages(query, options)`：
+  - 与 `searchSessionFiles` 共用同一份候选清单（`listSessionCandidates`：读目录 → 按
+    mtime 倒序），避免两套扫描慢慢漂移；
   - 返回 `{ query, scanned, scannedLimit, truncated, sessions }`，
     `sessions[]` 含 `{ sessionId, title, path, modifiedAt, totalHits, hits }`；
   - 空查询/纯空白直接返回空结果（不扫盘）；坏行、非法 JSON 跳过，不抛错。
@@ -46,20 +47,20 @@ daemon `handlers` 表加 `[INVOKE.sessionSearch]`；渲染层只经 `window.kami
 - 搜索框自动聚焦；输入 250ms 防抖发起检索（用递增序号丢弃过期响应）。
 - 结果按会话分组：标题、相对时间、命中数；每条命中显示角色（「你问的」/「它答的」）
   与高亮片段（命中词用 `<mark>`，不拼 HTML）。
-- 点击命中 → 先 `resumeTask(session.path)` 打开会话，再通过新增的 `focusEntry` 请求
-  让 `ChatView` 调 `focusEntryInTurn` 定位并高亮；定位失败时提示「已打开会话，
-  但没定位到那条消息」。
+- 点击命中 → 先登记 `focusEntry` 请求（含 sessionId / entryId），再 `resumeTask(session.path)`
+  打开会话：`ChatView` 挂载后自己等快照就绪，调 `focusEntryInTurn` 定位并高亮；
+  找不到目标消息时如实提示「已打开会话，但没定位到那条消息」。
 - 四态：加载骨架（与真实行同尺寸）、空结果（示例查询可点）、错误（就地重试）、
   正常；扫描上限 `truncated` 时如实说明。
-- 键盘：`Enter` 打开第一处，`Esc` 有查询时清空、无查询时返回。
+- 键盘：`Enter` 打开选中项，`Esc` 有查询时清空、无查询时返回。
 
 ## Acceptance Criteria
 
-- [ ] `npm run test` 中新增单测通过：多条命中、AND 词序、大小写、空查询、坏行、每会话上限、扫描上限
-- [ ] `npm run test:gui` 中新增 e2e 通过：写入已知会话 → 检索 → 点结果 → 会话打开且目标消息带 `entry-flash`；亮/暗色截图各一张
-- [ ] `npm run lint:all` 全绿；`npm run check:unicode` 无 U+FFFD
-- [ ] 真实启动应用手动走一遍：检索、跳转、Esc/返回、断网不影响（纯本地）
-- [ ] CHANGELOG `[Unreleased]` 记一条「新增」；USAGE.md 补一节
+- [x] `npm run test` 中新增单测通过：多条命中、AND 词序、大小写、空查询、坏行、每会话上限、扫描上限
+- [x] `npm run test:gui` 中新增 e2e 通过：写入已知会话 → 检索 → 点结果 → 会话打开且目标消息带 `entry-flash`；亮/暗色截图各一张
+- [x] `npm run lint:all` 全绿；`npm run check:unicode` 无 U+FFFD
+- [x] 真实启动应用手动走一遍：检索、跳转、Esc/返回、断网不影响（纯本地）
+- [x] CHANGELOG `[Unreleased]` 记一条「新增」；USAGE.md 补一节
 
 ## 约束
 
