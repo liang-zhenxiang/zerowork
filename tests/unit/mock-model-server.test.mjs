@@ -246,21 +246,48 @@ describe("mock 模型服务：模型对比要用的三个选项", () => {
 		expect(chunks[chunks.length - 1]).toBe(withUsage[0]);
 	});
 
-	it("delayMs 选项：第一片立刻到、后面每一片之间等这么久（总耗时可观察地变长）", async () => {
+	it("delayMs 选项：第一片立刻发、之后每两片之间真的等这么久（按服务端发送时刻断言）", async () => {
 		const reply = "一二三四五六七八九十"; // 8 字一片 ⇒ 2 片 ⇒ 片间只等 1 次
 		const fast = await start({ reply });
 		const slow = await start({ reply, delayMs: 300 });
 
-		const t0 = Date.now();
-		await chat(fast);
-		const fastMs = Date.now() - t0;
-		const t1 = Date.now();
-		await chat(slow);
-		const slowMs = Date.now() - t1;
+		const fastRaw = (await chat(fast)).raw;
+		const slowRaw = (await chat(slow)).raw;
 
-		expect(slowMs - fastMs).toBeGreaterThanOrEqual(250);
-		// 第一片不等待：读完第一片正文的时刻与快的那台同量级（不是「开头就卡 300ms」）
-		expect(fastMs).toBeLessThan(250);
+		// 为什么不再拿 `Date.now()` 相减：那个数字里混进了测试进程调度、GC、
+		// 其他 worker 抢 CPU —— 全量并行时会缩到 243ms（2026-10-20，Issue #226），
+		// 于是「慢的那台至少多 250ms」间歇性假红。负载只会让测出来的差**变小**，
+		// 把机器的负载写进断言，就是假红的来源。
+		// 服务端自己的发送时刻不受测试进程负载影响：setTimeout 只会晚不会早，
+		// 所以「间隔 >= delayMs * 0.9」是单调安全的（机器越慢，间隔只会越大）。
+		const contentSends = (mock) => mock.sendTimes.filter((s) => s.kind === "content");
+		const gaps = (sends) => sends.slice(1).map((s, i) => s.at - sends[i].at);
+
+		const slowSends = contentSends(slow);
+		// 空样本必须显式失败：否则 `every()` 对空数组恒真，这条断言就会永远绿。
+		expect(slowSends.length, "慢的那台没有正文发送记录，后面的间隔断言会变成同义反复").toBeGreaterThanOrEqual(2);
+
+		for (const gap of gaps(slowSends)) {
+			expect(gap, `正文片间隔 ${gap}ms 小于 delayMs 的 90%（300×0.9=270）`).toBeGreaterThanOrEqual(270);
+		}
+
+		// 相对比较：默认那台没有 sleep，片间间隔只受调度影响，必须显著小于开了的那台
+		const fastGaps = gaps(contentSends(fast));
+		for (const gap of fastGaps) {
+			expect(gap, `未开 delayMs 的那台出现了 ${gap}ms 的片间等待`).toBeLessThan(100);
+		}
+
+		// 第一片不等待：首条记录（role 片）到首个正文片之间应当是「立刻」，远小于 delayMs
+		const slowFirstGap = slowSends[0].at - slow.sendTimes[0].at;
+		expect(slowFirstGap, "delayMs 那台的首个正文片等了，说明 sleep 被放到了第一片之前").toBeLessThan(150);
+
+		// 端到端证据：网络层确实收到了多个非空的 delta.content（流式真的分片了）
+		const contentDeltas = (raw) =>
+			chunksOf(raw)
+				.map((chunk) => chunk.choices?.[0]?.delta?.content ?? "")
+				.filter((text) => text !== "");
+		expect(contentDeltas(fastRaw).length).toBeGreaterThanOrEqual(2);
+		expect(contentDeltas(slowRaw).length).toBeGreaterThanOrEqual(2);
 	});
 
 	it("failWith 选项：回那个状态码 + OpenAI 形状错误体，且不吐 SSE", async () => {

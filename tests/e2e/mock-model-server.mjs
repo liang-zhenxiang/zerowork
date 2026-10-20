@@ -18,6 +18,8 @@
  *   - `requests`      —— 除 `/models` 之外的全部请求（chat completions 等）。
  *                        语义与本次改动前**完全一致**，既有用例不受影响
  *   - `probeRequests` —— 只有 `GET …/models` 的探测请求
+ *   另有一本**发送时刻账本** `sendTimes`：每写一片 SSE 就记下服务端自己的
+ *   `performance.now()`，供断言「片与片之间真的等了 delayMs」时避开测试进程的墙钟抖动。
  *   为什么要分开：本文件被二十多个用例共用，其中若干条按**下标**取 `requests[1]`、
  *   或按**长度增量**等待「下一条请求」。把探测请求混进 `requests`，会让那些等待
  *   被一次探测提前满足，得到「看着在等、其实没等」的假信号（测试规范 §三.1）。
@@ -41,6 +43,7 @@
  * 它自己出问题的概率越高。
  */
 import { createServer } from "node:http";
+import { performance } from "node:perf_hooks";
 
 /**
  * 启动 mock 服务。
@@ -80,6 +83,12 @@ export function startMockModelServer({
 	const requests = [];
 	/** 只收 `GET …/models` 的探测请求。为什么单开一本：见文件头「请求账本两本」 */
 	const probeRequests = [];
+	/**
+	 * 每一片 SSE 写出时的服务端时刻（`performance.now()`），供 `delayMs` 的断言使用。
+	 * 为什么由服务端记：测试进程量到的时间差里混进了调度、GC、其他 worker 抢 CPU，
+	 * 负载一高就会假红；而服务端「什么时候真的写了这一片」是它自己的事实。
+	 */
+	const sendTimes = [];
 
 	/** 规范化后的模型 id 清单（元素可能是字符串，也可能是 `{ id }` 形状的对象） */
 	const modelIds = models
@@ -144,30 +153,41 @@ export function startMockModelServer({
 			const created = Math.floor(Date.now() / 1000);
 			const base = { id, object: "chat.completion.chunk", created, model: "mock-model" };
 
-			/** 写一片。`usage` 只挂在收尾那一片上（OpenAI 的 include_usage 形状）。 */
-			const send = (delta, finish = null, withUsage = undefined) => {
+			/**
+			 * 写一片。`usage` 只挂在收尾那一片上（OpenAI 的 include_usage 形状）。
+			 * `kind` 只影响发送时刻账本（`role` / `content` / `tool_call` / `terminal`），
+			 * 不进 SSE 字节。
+			 */
+			const send = (delta, finish = null, withUsage = undefined, kind = "content") => {
 				const chunk = { ...base, choices: [{ index: 0, delta, finish_reason: finish }] };
 				if (withUsage !== undefined) chunk.usage = withUsage;
-				res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+				const payload = `data: ${JSON.stringify(chunk)}\n\n`;
+				sendTimes.push({ at: performance.now(), kind, text: delta.content ?? "" });
+				res.write(payload);
 			};
 			/** 断开之后就别再写了（`res.write` 会抛，那个异常没人接）。 */
 			const gone = () => res.writableEnded || res.destroyed;
 
-			send({ role: "assistant", content: "" });
+			send({ role: "assistant", content: "" }, null, undefined, "role");
 
 			if (toolCall) {
 				// 工具调用路径：模型要求执行一个工具
-				send({
-					tool_calls: [
-						{
-							index: 0,
-							id: "call_mock_1",
-							type: "function",
-							function: { name: "ls", arguments: '{"path":"."}' },
-						},
-					],
-				});
-				send({}, "tool_calls", usage ?? undefined);
+				send(
+					{
+						tool_calls: [
+							{
+								index: 0,
+								id: "call_mock_1",
+								type: "function",
+								function: { name: "ls", arguments: '{"path":"."}' },
+							},
+						],
+					},
+					null,
+					undefined,
+					"tool_call",
+				);
+				send({}, "tool_calls", usage ?? undefined, "terminal");
 			} else {
 				// 分片吐出文本，模拟真实流式行为。
 				// 【\s 不能少】`.` 不匹配换行——多行回复的 \n 会在分片时全部丢失，
@@ -181,7 +201,7 @@ export function startMockModelServer({
 					send({ content: chunks[index] });
 				}
 				if (gone()) return;
-				send({}, "stop", usage ?? undefined);
+				send({}, "stop", usage ?? undefined, "terminal");
 			}
 
 			res.write("data: [DONE]\n\n");
@@ -196,6 +216,7 @@ export function startMockModelServer({
 				baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
 				requests,
 				probeRequests,
+				sendTimes,
 				/** 这个 mock 在 `/models` 上宣称的模型 id，供断言与自检核对 */
 				modelIds,
 				close: () => new Promise((r) => server.close(r)),
