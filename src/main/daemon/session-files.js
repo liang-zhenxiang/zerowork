@@ -324,27 +324,13 @@ import {
 	probeModel,
 	searchOneFile,
 } from "./session-state.js";
+import { listSessionCandidates, searchSessionMessages } from "./session-search.js";
+
 
 async function searchSessionFiles(query, limit, options) {
   const terms = query.toLowerCase().split(/\s+/).filter((t) => t !== "");
   if (terms.length === 0 || limit <= 0) return [];
-  let fileNames;
-  try {
-    fileNames = await readdir(options.sessionsDir);
-  } catch (error) {
-    if (error.code === "ENOENT") return [];
-    throw error;
-  }
-  const candidates = [];
-  for (const name of fileNames) {
-    if (!name.toLowerCase().endsWith(".jsonl")) continue;
-    const path = join(options.sessionsDir, name);
-    try {
-      candidates.push({ path, mtimeMs: (await stat(path)).mtimeMs });
-    } catch {
-    }
-  }
-  candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  const candidates = await listSessionCandidates(options.sessionsDir);
   const hits = [];
   for (const candidate of candidates.slice(0, SCAN_LIMIT)) {
     if (hits.length >= limit) break;
@@ -368,6 +354,7 @@ async function searchSessionFiles(query, limit, options) {
   }
   return hits;
 }
+
 
 function assertInsideSessionsDir(path) {
   const reason = validateSessionFilePath(path, getSessionsDir());
@@ -4375,6 +4362,19 @@ const handlers = {
   [INVOKE.usageStats]: async () => readUsageStats(getSessionsDir(), (message) => {
     eventLog.append({ kind: "usage_stats_error", message });
   }),
+  /*
+   * 会话全文检索（检索页）。与 Agent 的 conversation_search 同一套语义：
+   * 空格分词、所有词都要命中、只扫最近 SCAN_LIMIT 个会话。区别在于给人看：
+   * 一个会话最多列 hitsPerSession 条命中，并带回 entryId 与 path 供「跳回原消息」。
+   * 空查询直接返回空结果，不扫盘。
+   */
+  [INVOKE.sessionSearch]: async ([query, options]) => {
+    return searchSessionMessages(query, {
+      sessionsDir: getSessionsDir(),
+      limit: typeof options?.limit === "number" ? options.limit : void 0,
+      hitsPerSession: typeof options?.hitsPerSession === "number" ? options.hitsPerSession : void 0
+    });
+  },
   /*
    * 台账条目级读取（诊断页会话时间线）。sessionId 缺省 = 当前活动会话；
    * pristine 桶（sessionId 还是 ""，宿主未建）或活动会话没记过台账时
