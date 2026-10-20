@@ -221,6 +221,13 @@ gh pr merge <N> --squash --delete-branch
 gh api repos/{owner}/{repo}/actions/jobs/<job-id>/logs   # 运行未结束时取 job 日志
 ```
 
+**网络类失败**（`gh` / `git fetch` / `git push` / npm 安装 / Playwright 下载报
+`Failed to connect … port 443`、`EOF`、`TLS handshake timeout`）：**先查本机有没有代理，
+有就用它临时重跑那一条命令**。代理地址与端口**每台机器不同、也会随客户端重启而变**，
+所以它只出现在当次命令的 `https_proxy` / `http_proxy` / `all_proxy` 环境变量里，
+**不要写进仓库的任何文件、脚本或 CI 配置**；查法与后续诊断见
+`.trellis/spec/workflow/index.md` 的「四·补」。
+
 ---
 
 ## 其他文档与 skill 的分工
