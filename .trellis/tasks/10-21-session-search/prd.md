@@ -59,7 +59,7 @@ daemon `handlers` 表加 `[INVOKE.sessionSearch]`；渲染层只经 `window.kami
 - [x] `npm run test` 中新增单测通过：多条命中、AND 词序、大小写、空查询、坏行、每会话上限、扫描上限
 - [x] `npm run test:gui` 中新增 e2e 通过：写入已知会话 → 检索 → 点结果 → 会话打开且目标消息带 `entry-flash`；亮/暗色截图各一张
 - [x] `npm run lint:all` 全绿；`npm run check:unicode` 无 U+FFFD
-- [x] 真实启动应用手动走一遍：检索、跳转、Esc/返回、断网不影响（纯本地）
+- [x] 真实启动 Electron 走一遍：检索、跳转、Esc/返回都通（`tests/e2e/session-search.mjs` 真实启动应用，截图在 `artifacts/session-search/`；检索为纯本地，不依赖网络）
 - [x] CHANGELOG `[Unreleased]` 记一条「新增」；USAGE.md 补一节
 
 ## 约束
