@@ -523,6 +523,33 @@ filter 1–4 全部对不上。round-trip 测试当场抓了出来 —— 这正
 
 [#225]: https://github.com/liang-zhenxiang/zerowork/issues/225
 
+### 7. 不要用测试进程的墙钟差断言**服务端行为**
+
+`mock-model-server` 的 `delayMs` 用例原来断言「慢的那台比快的那台至少多 250ms」，
+量的是 `fetch` 两端的 `Date.now()` 差。这个数字里混进了**测试进程调度、GC、其他 worker
+抢 CPU**，全量并行时只会往一个方向坏（测出来更接近 0）：
+
+```
+expected 243 to be greater than or equal to 250
+```
+
+2026-10-20 两个独立会话各撞到一次，而单独跑 15 次全绿（[#226]）。它属于
+「**真等待但预算不够**」—— `check:wait-predicates` 按设计覆盖不到。
+
+**做法**：让 mock 自己记下每片 `res.write` 的服务端时刻（`sendTimes`），
+断言建立在**服务端时间轴**上。`setTimeout` 只会晚不会早，所以
+「相邻片间隔 `>= delayMs * 0.9`」是**单调安全**的：机器越慢，间隔只会越大。
+同时用相对比较（未开 `delayMs` 的那台间隔显著更小）与「首片不等待」覆盖另外两侧。
+
+两条必须一起守住的细节：
+
+- **样本为空要显式失败**。`array.every(...)` 对空数组恒真 —— 不先断言片数，
+  「发送时刻没记上」会表现为一条**永远绿**的假断言（§四「反向验证」同族）。
+- **放宽容差不是修法**。调低阈值、加大 `delayMs`、改测 span 仍然是墙钟，
+  负载再高一次就再红一次；那等于让它在 `delayMs` 真失效时也绿。
+
+[#226]: https://github.com/liang-zhenxiang/zerowork/issues/226
+
 ---
 
 ## 六、新增一个用例的完整步骤
