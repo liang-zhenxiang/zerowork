@@ -62,6 +62,7 @@ async function searchSessionMessages(query, options) {
 		scanned: 0,
 		scannedLimit: SCAN_LIMIT,
 		truncated: false,
+		capped: false,
 		sessions: [],
 	};
 	if (terms.length === 0) return empty;
@@ -103,6 +104,9 @@ async function searchSessionMessages(query, options) {
 		// 「还有会话没扫到 / 没展示全」都要说出来：界面据此如实说明上限，
 		// 而不是让使用者以为搜遍了全库
 		truncated: candidates.length > scanned,
+		// 与 truncated 不同的截断：命中会话数到了 limit 就停，后面的文件**根本没读**。
+		// 这两种「没搜全」在界面上要分开说，否则会把「显示上限」误报成「扫描上限」。
+		capped: sessions.length >= sessionLimit && scanned < Math.min(candidates.length, SCAN_LIMIT),
 		sessions,
 	};
 }

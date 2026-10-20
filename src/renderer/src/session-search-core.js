@@ -103,6 +103,7 @@ export function summarizeSearch(result) {
 		scanned,
 		scannedLimit,
 		truncated: result?.truncated === true,
+		capped: result?.capped === true,
 	};
 }
 
@@ -111,10 +112,18 @@ export function summarizeSearch(result) {
  * 是两种承诺，界面不该混用。
  */
 export function describeSearchSummary(result) {
-	const { sessionCount, hitCount, scanned, scannedLimit, truncated } = summarizeSearch(result);
-	if (sessionCount === 0) return `在最近 ${scanned} 个会话里没有找到匹配`;
-	const head = `在最近 ${scanned} 个会话里找到 ${sessionCount} 个会话、${hitCount} 处命中`;
-	if (!truncated) return head;
-	const window = scannedLimit > 0 ? scannedLimit : scanned;
-	return `${head}；更早的会话没有扫（每次最多看最近 ${window} 个），换个更具体的词试试`;
+	const { sessionCount, hitCount, scanned, scannedLimit, truncated, capped } = summarizeSearch(result);
+	if (sessionCount === 0) {
+		const miss = `已检索最近 ${scanned} 个会话，没有匹配`;
+		return truncated && !capped ? `${miss}；更早的会话未查` : miss;
+	}
+	const head = `已检索 ${scanned} 个会话 · ${sessionCount} 个会话命中 ${hitCount} 处`;
+	// 两种「没搜全」要分开说：capped 是「命中太多、只列前几条会话」，文件还有没读的；
+	// truncated 是「扫到 200 个上限就停」。混成一句会把显示上限误报成扫描上限。
+	if (capped) return `${head}；命中较多，只列出前 ${sessionCount} 个会话`;
+	if (truncated) {
+		const window = scannedLimit > 0 ? scannedLimit : scanned;
+		return `${head}；更早的会话未查（单次最多扫最近 ${window} 个）`;
+	}
+	return head;
 }

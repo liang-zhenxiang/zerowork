@@ -179,6 +179,8 @@ describe("searchSessionMessages：跨会话扫描", () => {
 		writeSession(dir, "b", [message("e1", "user", "合同 b")], 2_000);
 		const result = await searchSessionMessages("合同", { sessionsDir: dir, limit: 1 });
 		expect(result.sessions.map((session) => session.sessionId)).toEqual(["b"]);
+		// 还有没读到的会话：这是「显示上限」，不是「扫描上限」，界面要分开说
+		expect(result.capped).toBe(true);
 	});
 
 	it("还有会话没扫到时 truncated 为 true，且返回的会话数不超过 limit", async () => {
@@ -191,6 +193,7 @@ describe("searchSessionMessages：跨会话扫描", () => {
 		expect(result.scanned).toBe(50);
 		expect(result.sessions).toHaveLength(50);
 		expect(result.truncated).toBe(true);
+		expect(result.capped).toBe(true);
 	});
 
 	it("排除指定会话（与 Agent 工具同一语义）", async () => {
@@ -210,6 +213,7 @@ describe("searchSessionMessages：跨会话扫描", () => {
 			scanned: 0,
 			scannedLimit: SCAN_LIMIT,
 			truncated: false,
+			capped: false,
 			sessions: [],
 		});
 	});

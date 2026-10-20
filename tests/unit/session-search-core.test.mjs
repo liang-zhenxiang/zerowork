@@ -117,13 +117,14 @@ describe("summarizeSearch / describeSearchSummary", () => {
 			scanned: 12,
 			scannedLimit: 200,
 			truncated: false,
+			capped: false,
 		});
-		expect(describeSearchSummary(result)).toBe("在最近 12 个会话里找到 2 个会话、9 处命中");
+		expect(describeSearchSummary(result)).toBe("已检索 12 个会话 · 2 个会话命中 9 处");
 	});
 
 	it("没有命中时说明扫了多少，而不是一句「无结果」", () => {
 		expect(describeSearchSummary({ scanned: 0, scannedLimit: 200, sessions: [] })).toBe(
-			"在最近 0 个会话里没有找到匹配"
+			"已检索最近 0 个会话，没有匹配"
 		);
 	});
 
@@ -134,7 +135,23 @@ describe("summarizeSearch / describeSearchSummary", () => {
 			truncated: true,
 			sessions: [{ sessionId: "s1", totalHits: 1, hits: [{ entryId: "e1" }] }],
 		});
-		expect(text).toContain("更早的会话没有扫");
+		expect(text).toContain("更早的会话未查");
 		expect(text).toContain("200");
+	});
+
+	it("命中会话数到了 limit 时，说的是「只列前 N 个」而不是扫描上限", () => {
+		const text = describeSearchSummary({
+			scanned: 23,
+			scannedLimit: 200,
+			truncated: true,
+			capped: true,
+			sessions: [
+				{ sessionId: "s1", totalHits: 4, hits: [{ entryId: "e1" }] },
+				{ sessionId: "s2", totalHits: 1, hits: [{ entryId: "e2" }] },
+			],
+		});
+		expect(text).toContain("已检索 23 个会话");
+		expect(text).toContain("只列出前 2 个会话");
+		expect(text).not.toContain("200");
 	});
 });
