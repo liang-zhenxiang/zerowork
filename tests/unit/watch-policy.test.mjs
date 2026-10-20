@@ -504,8 +504,8 @@ describe("调用点契约：全局档位取自 getPermissions().sandbox", () => 
 		 * 实测：把 daemon 改回 .tier，它们依然全绿。
 		 * 所以这一条直接读**调用点那一行源码**：只要实参不是 .sandbox，立刻红。
 		 *
-		 * 读源码做断言在这个仓库里有先例（tests/unit/daemon-graph.test.mjs 读
-		 * session-files.js 备份改写再调检查脚本），先例同样是「只能靠源码形态
+		 * 读源码做断言在这个仓库里有先例（tests/unit/daemon-graph.test.mjs 把
+		 * 模块图复制到临时目录再调检查脚本），先例同样是「只能靠源码形态
 		 * 才能守住的契约」。这里比它更简单：不改写，只读。
 		 */
 		const src = readFileSync(SESSION_FILES, "utf8");

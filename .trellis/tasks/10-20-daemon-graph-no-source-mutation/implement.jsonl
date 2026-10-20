@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "单测分层与并行约束、写测试的既有约定"}
+{"file": ".trellis/spec/main/index.md", "reason": "daemon 模块边界与 check-daemon-graph 的职责"}
