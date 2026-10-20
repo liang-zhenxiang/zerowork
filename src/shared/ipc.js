@@ -554,6 +554,12 @@ const INVOKE = {
    */
   usageStats: "stats:usage",
   /**
+   * 会话全文检索：检索页的数据源。按会话分组返回命中（含 entryId 与会话文件 path）。
+   * 语义与 Agent 的 conversation_search 一致：空格分词、**所有词都要命中**，
+   * 只扫最近 200 个会话（scannedLimit 随结果返回，界面要如实说明上限）。
+   */
+  sessionSearch: "sessions:search",
+  /**
    * 拉取运行台账（run ledger）条目级数据：诊断页「会话时间线」的数据源。
    *
    * 与 statsSnapshot 的分工：快照是进程级聚合（算好的结果），这里是每会话

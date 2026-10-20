@@ -1001,6 +1001,130 @@ function extractSnippet(text, matchStart, matchEnd) {
   return `${start2 > 0 ? "…" : ""}${body}${end < text.length ? "…" : ""}`;
 }
 
+function collectTermMatches(text, terms) {
+  const lower = text.toLowerCase();
+  const ranges = [];
+  for (const term of terms) {
+    let from = 0;
+    while (from <= lower.length) {
+      const at = lower.indexOf(term, from);
+      if (at === -1) break;
+      ranges.push({ start: at, end: at + term.length });
+      from = at + Math.max(1, term.length);
+    }
+  }
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end);
+  const merged = [];
+  for (const range of ranges) {
+    const prev = merged[merged.length - 1];
+    if (prev !== void 0 && range.start <= prev.end) {
+      if (range.end > prev.end) prev.end = range.end;
+    } else {
+      merged.push({ start: range.start, end: range.end });
+    }
+  }
+  return merged;
+}
+
+function isLowSurrogate(ch) {
+  const code = ch.charCodeAt(0);
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+function buildHitSnippet(text, terms, radius) {
+  const lower = text.toLowerCase();
+  for (const term of terms) {
+    if (!lower.includes(term)) return null;
+  }
+  const matches = collectTermMatches(text, terms);
+  if (matches.length === 0) return null;
+  const first = matches[0];
+  let start = Math.max(0, first.start - radius);
+  let end = Math.min(text.length, first.end + radius);
+  // 不要把代理对切成两半：窗口边界落在低位代理时向外扩一格
+  if (start > 0 && isLowSurrogate(text[start])) start -= 1;
+  if (end < text.length && isLowSurrogate(text[end])) end += 1;
+  const raw = text.slice(start, end).replace(/[\r\n\t]/g, " ");
+  const lead = raw.length - raw.trimStart().length;
+  const body = raw.trim();
+  if (body === "") return null;
+  const snippetMatches = [];
+  for (const match of matches) {
+    const from = match.start - start - lead;
+    const to = match.end - start - lead;
+    if (to <= 0 || from >= body.length) continue;
+    snippetMatches.push({
+      start: Math.max(0, from),
+      end: Math.min(body.length, to)
+    });
+  }
+  const prefix = start > 0 ? "\u2026" : "";
+  const suffix = end < text.length ? "\u2026" : "";
+  const shift = prefix.length;
+  return {
+    snippet: `${prefix}${body}${suffix}`,
+    matches: snippetMatches.map((match) => ({
+      start: match.start + shift,
+      end: match.end + shift
+    }))
+  };
+}
+
+function searchFileHits(content, terms, options) {
+  const limit = options?.limit ?? 3;
+  const radius = options?.radius ?? 140;
+  const lines = content.split("\n");
+  let sessionId;
+  let sawHeader = false;
+  let name;
+  let firstUserText = "";
+  let totalHits = 0;
+  const hits = [];
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!sawHeader) {
+      if (entry.type !== "session" || typeof entry.id !== "string") return null;
+      sawHeader = true;
+      sessionId = entry.id;
+      continue;
+    }
+    if (entry.type === "session_info") {
+      if (typeof entry.name === "string" && entry.name.trim() !== "") {
+        name = entry.name.trim();
+      } else {
+        name = void 0;
+      }
+      continue;
+    }
+    const text = entryText(entry);
+    if (text === void 0) continue;
+    if (firstUserText === "" && entry.message?.role === "user") firstUserText = text;
+    const built = buildHitSnippet(text, terms, radius);
+    if (built === null) continue;
+    totalHits += 1;
+    if (hits.length >= limit || typeof entry.id !== "string") continue;
+    hits.push({
+      entryId: entry.id,
+      role: entry.message?.role ?? "assistant",
+      snippet: built.snippet,
+      matches: built.matches
+    });
+  }
+  if (!sawHeader || sessionId === void 0 || totalHits === 0) return null;
+  return {
+    sessionId,
+    title: deriveSessionTitle(name, firstUserText),
+    totalHits,
+    hits
+  };
+}
+
 function searchOneFile(content, terms) {
   const lines = content.split("\n");
   let sessionId;
@@ -1115,6 +1239,7 @@ export {
 	sameServerConfig,
 	sameStringRecord,
 	sanitizeToolName,
+	searchFileHits,
 	searchOneFile,
 	snapshotOf,
 	statusError,

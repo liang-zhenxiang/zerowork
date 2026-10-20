@@ -485,6 +485,7 @@ const INVOKE = {
    * 与 `/api/v1/stats` 同口径。
    */
   usageStats: "stats:usage",
+  sessionSearch: "sessions:search",
   /**
    * 拉取运行台账（run ledger）条目级数据：诊断页「会话时间线」的数据源。
    *
@@ -762,6 +763,7 @@ const bridge = {
   mcpServerToggle: (serverName, enabled) => ipcRenderer.invoke(INVOKE.mcpServerToggle, serverName, enabled),
   statsSnapshot: () => ipcRenderer.invoke(INVOKE.statsSnapshot),
   usageStats: () => ipcRenderer.invoke(INVOKE.usageStats),
+  searchSessions: (query, options) => ipcRenderer.invoke(INVOKE.sessionSearch, query, options),
   runLedger: (sessionId) => ipcRenderer.invoke(INVOKE.runLedger, sessionId),
   globalShortcutStatus: () => ipcRenderer.invoke(INVOKE.globalShortcutStatus),
   docxEnvStatus: () => ipcRenderer.invoke(INVOKE.docxEnvStatus),

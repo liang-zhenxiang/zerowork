@@ -12972,6 +12972,11 @@ const IconAssistant = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p,
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "4", y: "8", width: "16", height: "12", rx: "3" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 8V4M8 13h.01M16 13h.01M9 17h6" })
 ] });
+const IconChatSearch = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 4H6a3 3 0 0 0-3 3v5a3 3 0 0 0 3 3h1v3l3.6-3H10" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "16.5", cy: "16.5", r: "3.5" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m19.2 19.2 2 2" })
+] });
 const IconProject = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" }) });
 const IconSkill = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z" }),
@@ -13308,6 +13313,7 @@ function Sidebar({
   onOpenDiagnostics,
   onOpenStats,
   onOpenFileHistory,
+  onOpenSearch,
   onOpenSkills,
   onOpenAutomations,
   onOpenLibrary,
@@ -13918,6 +13924,13 @@ function Sidebar({
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "sidebar-nav", children: [
       NAV_ITEMS$1.filter((item) => item.ready).map(renderNavItem),
+      // 「会话检索」与「文件历史」「诊断」「统计」同款：独立页面、独立 .nav-item，
+      // 不进 NAV_ITEMS$1 数组。它排在文件历史之前 —— 找回旧内容的第一动作是「搜」，
+      // 不是「翻」。
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenSearch, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconChatSearch, { size: 16 }),
+        "会话检索"
+      ] }),
       // 「文件历史」排在「资料库」之后（资料库是 NAV_ITEMS$1 里最后一项已就绪项）。
       // 它与「诊断」「统计」同款：独立页面、独立 .nav-item，不进 NAV_ITEMS$1 数组。
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenFileHistory, children: [
@@ -30101,6 +30114,13 @@ import {
 	versionSourceText
 } from "./file-history-core.js";
 import {
+	buildHighlightSegments,
+	describeSearchSummary,
+	flattenSearchHits,
+	roleLabel,
+	summarizeSearch,
+} from "./session-search-core.js";
+import {
 	automationToastText,
 	automationToastTone,
 	onExceedAction,
@@ -32778,6 +32798,8 @@ function ChatView({
   onQuestionnaireSubmit,
   onQuestionnaireSkip,
   turnFoldCache,
+  focusEntry,
+  onFocusHandled,
   memberView,
   onFocusMember,
   onBackToLeader
@@ -33065,6 +33087,39 @@ function ChatView({
       });
     });
   };
+  /*
+   * 检索页「跳回原消息」的落点：条目是异步到达的（resumeTask 之后才有快照），
+   * 所以不能一挂载就找 —— turnViews 一变就重试，另加 4 秒兜底。
+   * 定位本身仍走 focusEntryInTurn：只有它知道哪些折叠组要先展开。
+   */
+  reactExports.useEffect(() => {
+    if (focusEntry === void 0) return void 0;
+    if (focusEntry.sessionId !== void 0 && focusEntry.sessionId !== sessionId) return void 0;
+    let cancelled = false;
+    let attempts = 0;
+    let timer;
+    const attempt = () => {
+      if (cancelled) return;
+      if (focusEntry.sessionId !== void 0 && focusEntry.sessionId !== sessionId) return;
+      const view = turnViews.find((candidate) => candidate.plan.items.some((item) => item.entry?.id === focusEntry.entryId || item.entries?.some((entry) => entry.id === focusEntry.entryId)));
+      if (view !== void 0) {
+        focusEntryInTurn(view, focusEntry.entryId);
+        onFocusHandled(true);
+        return;
+      }
+      attempts += 1;
+      if (attempts >= 20) {
+        onFocusHandled(false);
+        return;
+      }
+      timer = window.setTimeout(attempt, 200);
+    };
+    attempt();
+    return () => {
+      cancelled = true;
+      if (timer !== void 0) window.clearTimeout(timer);
+    };
+  }, [focusEntry, turnViews, sessionId, onFocusHandled]);
   const renderEntry = (entry) => {
     if (entry.role === "tool") {
       if (entry.toolName === "show_widget") {
@@ -68058,6 +68113,231 @@ function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArt
  * 三态互斥（docs/DESIGN.md §4）：list === undefined 是加载（左骨架 + 右 LoadingState）、
  * listError 是错误（就地 + 重试）、files 为空才是空态。数据到达前绝不显示「没有历史」。
  */
+/* ── 会话检索 ──────────────────────────────────────────────────────────
+ * 把 Agent 已有的会话全文检索（conversation_search / searchSessionMessages）
+ * 交还给人：搜词 → 按会话分组看命中 → 点一条回到那条消息。
+ * 纯展示逻辑（高亮切段、摘要口径、摊平导航）在 session-search-core.js，单测直测；
+ * 本组件只负责「把结果画出来、把键盘接上、把点击交给 App」。
+ */
+const SESSION_SEARCH_DEBOUNCE_MS = 250;
+const SESSION_SEARCH_EXAMPLES = ["会议纪要", "报价单", "上周的部署"];
+
+function SearchView({ onClose, onOpenHit }) {
+  const [query, setQuery] = reactExports.useState("");
+  const [result, setResult] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  const [busy, setBusy] = reactExports.useState(false);
+  const [activeIndex, setActiveIndex] = reactExports.useState(0);
+  const [reloadToken, setReloadToken] = reactExports.useState(0);
+  const inputRef = reactExports.useRef(null);
+  const requestRef = reactExports.useRef(0);
+  const listRef = reactExports.useRef(null);
+  reactExports.useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+  const trimmed = query.trim();
+  /*
+   * 防抖 + 序号：慢响应回来时若已经换了词，结果直接丢弃（否则界面会「跳回上一个词」）。
+   * 上一次的结果在输入过程中保留着 —— 每敲一个字就闪一次骨架，比稍慢更难受。
+   */
+  reactExports.useEffect(() => {
+    if (trimmed === "") {
+      requestRef.current += 1;
+      setResult(void 0);
+      setError(void 0);
+      setBusy(false);
+      return void 0;
+    }
+    setBusy(true);
+    // 换词 / 重试时先撤掉上一次的错误：否则「已经重新搜了」的画面里还挂着旧报错。
+    setError(void 0);
+    const seq = requestRef.current + 1;
+    requestRef.current = seq;
+    const timer = window.setTimeout(() => {
+      void window.kami.searchSessions(trimmed, { limit: 20, hitsPerSession: 3 }).then(
+        (next) => {
+          if (requestRef.current !== seq) return;
+          setResult(next);
+          setError(void 0);
+          setBusy(false);
+          setActiveIndex(0);
+        },
+        (cause) => {
+          if (requestRef.current !== seq) return;
+          setError(errorText(cause));
+          setBusy(false);
+        }
+      );
+    }, SESSION_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [trimmed, reloadToken]);
+  const rows = reactExports.useMemo(() => (result === void 0 ? [] : flattenSearchHits(result.sessions)), [result]);
+  const activeKey = rows[activeIndex]?.key;
+  reactExports.useEffect(() => {
+    if (activeKey === void 0) return;
+    const el = listRef.current?.querySelector(`[data-search-key="${CSS.escape(activeKey)}"]`);
+    el?.scrollIntoView({ block: "nearest" });
+  }, [activeKey]);
+  const openRow = (row) => {
+    if (row === void 0) return;
+    onOpenHit(row);
+  };
+  /* Enter 打开当前项、Esc 先清词再退出、方向键在命中之间移动 —— 输入框保持焦点。 */
+  const onKeyDown = (event) => {
+    if (event.key === "Enter") {
+      if (rows.length === 0) return;
+      event.preventDefault();
+      openRow(rows[activeIndex] ?? rows[0]);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (query !== "") {
+        setQuery("");
+        return;
+      }
+      onClose();
+      return;
+    }
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (rows.length === 0) return;
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      setActiveIndex((current) => (current + delta + rows.length) % rows.length);
+    }
+  };
+  const indexByKey = reactExports.useMemo(() => new Map(rows.map((row, index) => [row.key, index])), [rows]);
+  const now = Date.now();
+  let body;
+  if (trimmed === "") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-idle", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-idle-title", children: "在最近 200 个会话里，找一句话" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-idle-desc", children: "只在消息正文里匹配；空格分隔的多个词需要同时出现。检索全部在本机完成，不会把内容发到任何地方。" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ss-examples", children: SESSION_SEARCH_EXAMPLES.map((example) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-example", onClick: () => {
+        setQuery(example);
+        inputRef.current?.focus();
+      }, children: example }, example)) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-privacy", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconShieldSecured, { size: 13 }),
+        "只读会话文件，不改动、不上传"
+      ] })
+    ] });
+  } else if (error !== void 0) {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => setReloadToken((value) => value + 1) });
+  } else if (result === void 0) {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-results ss-results-skeleton", role: "status", "aria-live": "polite", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-visually-hidden", children: "正在检索会话" }),
+      [0, 1, 2].map((index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session", "aria-hidden": "true", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${46 - index * 8}%`, height: 13 }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 72, height: 11 })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hits", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hit", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-role", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 36, height: 10 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-text", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "88%", height: 12 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-arrow", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 12, height: 12, radius: 6 }) })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hit", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-role", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 36, height: 10 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-text", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "72%", height: 12 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-arrow", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 12, height: 12, radius: 6 }) })
+          ] })
+        ] })
+      ] }, index))
+    ] });
+  } else if (rows.length === 0) {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 20 }),
+      title: "没有找到匹配的会话",
+      description: "换个更具体的词试试；这一页只检索最近 200 个会话的正文，更早的没有扫。"
+    });
+  } else {
+    const summary = describeSearchSummary(result);
+    body = /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-summary", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-summary-text", role: "status", "aria-live": "polite", children: summary }),
+        busy && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ss-busy", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 10 }),
+          "检索中"
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "ss-results", ref: listRef, children: result.sessions.map((session) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "ss-session", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-session-title", title: session.title, children: session.title }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ss-session-meta", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: formatRelativeTime(session.modifiedAt, now) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ss-session-count", children: [
+              session.totalHits,
+              " 处"
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hits", children: [
+          session.hits.map((hit) => {
+            const key = `${session.sessionId}:${hit.entryId}`;
+            const index = indexByKey.get(key) ?? -1;
+            const segments = buildHighlightSegments(hit.snippet, hit.matches);
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+              type: "button",
+              className: index === activeIndex ? "ss-hit is-active" : "ss-hit",
+              "data-search-key": key,
+              "aria-label": `${roleLabel(hit.role)}：${hit.snippet}`,
+              "aria-current": index === activeIndex ? "true" : void 0,
+              onClick: () => openRow(rows[index]),
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-role", children: roleLabel(hit.role) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-text", children: segments.map((segment, segmentIndex) => segment.hit ? /* @__PURE__ */ jsxRuntimeExports.jsx("mark", { children: segment.text }, segmentIndex) : segment.text) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(IconArrowRight, { size: 13, className: "ss-hit-arrow" })
+              ]
+            }, key);
+          }),
+          session.totalHits > session.hits.length && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-more", children: [
+            "另有 ",
+            session.totalHits - session.hits.length,
+            " 处命中未展开"
+          ] })
+        ] })
+      ] }, session.sessionId)) })
+    ] });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings ss-page", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "会话检索" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", "data-session-search": true, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-search", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "ss-field", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 16, className: "ss-field-icon" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+            ref: inputRef,
+            className: "ss-input",
+            type: "search",
+            value: query,
+            placeholder: "搜你和 ZeroWork 说过的话",
+            "aria-label": "检索会话正文",
+            onChange: (event) => setQuery(event.target.value),
+            onKeyDown
+          }),
+          query !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-clear", "aria-label": "清空检索词", onClick: () => {
+            setQuery("");
+            inputRef.current?.focus();
+          }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 13 }) })
+        ] }),
+        rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-hint", children: [
+          "Enter 打开选中项",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hint-sep", "aria-hidden": "true", children: "·" }),
+          "Esc 清空或返回",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hint-sep", "aria-hidden": "true", children: "·" }),
+          "↑↓ 选择"
+        ] })
+      ] }),
+      body
+    ] })
+  ] });
+}
+
 function FileHistoryView({ onClose, sessions, onToast }) {
   const [list, setList] = reactExports.useState(void 0);
   const [listError, setListError] = reactExports.useState(void 0);
@@ -69454,6 +69734,7 @@ function paletteActionEntries(ctx) {
     { id: "action:diagnostics", title: "打开诊断", keywords: ["诊断", "排错", "日志", "diagnostics"], run: ctx.openDiagnostics },
     { id: "action:stats", title: "打开统计", keywords: ["统计", "用量", "token", "stats"], run: ctx.openStats },
     { id: "action:file-history", title: "打开文件历史", keywords: ["文件", "历史", "版本", "还原", "时光机", "file", "history", "version"], run: ctx.openFileHistory },
+    { id: "action:session-search", title: "会话检索", subtitle: "在最近 200 个会话的正文里找，可跳回原消息", keywords: ["检索", "搜索", "查找", "会话", "历史", "search", "find"], run: ctx.openSearch },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
     { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
     { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare }
@@ -70196,6 +70477,11 @@ function App() {
   conversationRef.current = conversation;
   const [view, setView] = reactExports.useState("home");
   const [returnView, setReturnView] = reactExports.useState("home");
+  /*
+   * 检索结果的「跳回原消息」请求：{ sessionId, entryId, nonce }。
+   * 不直接操作 DOM —— 交给 ChatView 在会话条目就位后自己定位（它才知道折叠状态）。
+   */
+  const [searchFocus, setSearchFocus] = reactExports.useState(void 0);
   const [settingsPage, setSettingsPage] = reactExports.useState(void 0);
   const [lastError, setLastError] = reactExports.useState(void 0);
   const [toasts, setToasts] = reactExports.useState([]);
@@ -71083,6 +71369,35 @@ function App() {
     setReturnView(view === "chat" ? "chat" : "home");
     setView("file-history");
   }, [view]);
+  /*
+   * 「会话检索」：侧栏与命令面板共用这一个动作。
+   * 命中之后要回到 chat 并定位到那条消息 —— 那条链路（resumeTask → focusEntry）
+   * 收在 openSearchHit 一处，页面本身不碰会话切换。
+   */
+  const openSearch = reactExports.useCallback(() => {
+    setReturnView(view === "chat" ? "chat" : "home");
+    setView("search");
+  }, [view]);
+  /*
+   * 命中 → 打开会话 → 定位。顺序上先登记定位请求再 await resumeTask：
+   * ChatView 切换过去时就能看到请求，不必等第二次 setState 才触发定位。
+   */
+  const openSearchHit = reactExports.useCallback((hit) => {
+    if (hit === void 0 || typeof hit.path !== "string") return;
+    setSearchFocus({
+      sessionId: hit.sessionId,
+      entryId: hit.entryId,
+      nonce: `${Date.now()}-${Math.random()}`
+    });
+    void Promise.resolve(resumeTask(hit.path)).catch((error) => {
+      setSearchFocus(void 0);
+      showToast(error instanceof Error ? error.message : String(error));
+    });
+  }, [resumeTask, showToast]);
+  const handleSearchFocusResult = reactExports.useCallback((found) => {
+    setSearchFocus(void 0);
+    if (found === false) showToast("已打开会话，但没定位到那条消息（可能已被折叠或不在当前分支）");
+  }, [showToast]);
   const openAutomations = reactExports.useCallback(() => {
     setReturnView(view === "chat" ? "chat" : "home");
     setView("automations");
@@ -71160,6 +71475,7 @@ function App() {
       openDiagnostics,
       openStats,
       openFileHistory,
+      openSearch,
       openSkills: () => openSkillsAt("skills"),
       openAutomations,
       openCompare
@@ -71218,7 +71534,7 @@ function App() {
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
     // 而是**面板搜到过期数据**——结果悄悄不对，界面上没有任何失败信号。
     // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
-  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
+  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openSearch, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
   const paletteIdleEntries = reactExports.useMemo(() => {
     const byId = new Map(paletteEntries.map((entry) => [entry.id, entry]));
     // 收藏的条目可能**不在**引导集里（一条更早的会话、一个技能、一个自动化）——
@@ -71360,6 +71676,7 @@ function App() {
         onOpenDiagnostics: openDiagnostics,
         onOpenStats: openStats,
         onOpenFileHistory: openFileHistory,
+        onOpenSearch: openSearch,
         onOpenSkills: () => setView("skills"),
         onOpenAutomations: openAutomations,
         onOpenLibrary: openLibrary,
@@ -71425,6 +71742,8 @@ function App() {
         onQueueRewrite: rewriteQueue,
         onInteractionChange: changeInteraction,
         turnFoldCache: turnFoldCacheRef,
+        focusEntry: searchFocus,
+        onFocusHandled: handleSearchFocusResult,
         memberView: memberFocus === void 0 ? void 0 : { name: memberFocus.name },
         onFocusMember: focusMember,
         onBackToLeader: backToLeader,
@@ -71499,6 +71818,13 @@ function App() {
     ),
     view === "diagnostics" && /* @__PURE__ */ jsxRuntimeExports.jsx(DiagnosticsView, { onClose: () => setView(returnView) }),
     view === "stats" && /* @__PURE__ */ jsxRuntimeExports.jsx(StatsView, { onClose: () => setView(returnView) }),
+    view === "search" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      SearchView,
+      {
+        onClose: () => setView(returnView),
+        onOpenHit: openSearchHit
+      }
+    ),
     view === "file-history" && /* @__PURE__ */ jsxRuntimeExports.jsx(
       FileHistoryView,
       {
