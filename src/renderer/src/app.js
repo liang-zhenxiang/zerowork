@@ -12972,6 +12972,11 @@ const IconAssistant = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p,
   /* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: "4", y: "8", width: "16", height: "12", rx: "3" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 8V4M8 13h.01M16 13h.01M9 17h6" })
 ] });
+const IconChatSearch = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 4H6a3 3 0 0 0-3 3v5a3 3 0 0 0 3 3h1v3l3.6-3H10" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "16.5", cy: "16.5", r: "3.5" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m19.2 19.2 2 2" })
+] });
 const IconProject = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" }) });
 const IconSkill = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 3l1.9 4.6L18.5 9l-4.6 1.4L12 15l-1.9-4.6L5.5 9l4.6-1.4z" }),
@@ -13923,7 +13928,7 @@ function Sidebar({
       // 不进 NAV_ITEMS$1 数组。它排在文件历史之前 —— 找回旧内容的第一动作是「搜」，
       // 不是「翻」。
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenSearch, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 16 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconChatSearch, { size: 16 }),
         "会话检索"
       ] }),
       // 「文件历史」排在「资料库」之后（资料库是 NAV_ITEMS$1 里最后一项已就绪项）。
@@ -68206,7 +68211,7 @@ function SearchView({ onClose, onOpenHit }) {
   let body;
   if (trimmed === "") {
     body = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-idle", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-idle-title", children: "在本机的全部会话里，找一句话" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-idle-title", children: "在最近 200 个会话里，找一句话" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-idle-desc", children: "只在消息正文里匹配；空格分隔的多个词需要同时出现。检索全部在本机完成，不会把内容发到任何地方。" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ss-examples", children: SESSION_SEARCH_EXAMPLES.map((example) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-example", onClick: () => {
         setQuery(example);
@@ -68220,27 +68225,38 @@ function SearchView({ onClose, onOpenHit }) {
   } else if (error !== void 0) {
     body = /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => setReloadToken((value) => value + 1) });
   } else if (result === void 0) {
-    body = /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ss-results ss-results-skeleton", "aria-hidden": "true", children: [0, 1, 2].map((index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session-head", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${46 - index * 8}%`, height: 13 }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 72, height: 11 })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hits", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ss-hit", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "88%", height: 12 }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ss-hit", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "72%", height: 12 }) })
-      ] })
-    ] }, index)) });
+    body = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-results ss-results-skeleton", role: "status", "aria-live": "polite", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-visually-hidden", children: "正在检索会话" }),
+      [0, 1, 2].map((index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session", "aria-hidden": "true", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${46 - index * 8}%`, height: 13 }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 72, height: 11 })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hits", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hit", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-role", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 36, height: 10 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-text", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "88%", height: 12 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-arrow", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 12, height: 12, radius: 6 }) })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hit", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-role", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 36, height: 10 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-text", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "72%", height: 12 }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-arrow", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 12, height: 12, radius: 6 }) })
+          ] })
+        ] })
+      ] }, index))
+    ] });
   } else if (rows.length === 0) {
     body = /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
       icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 20 }),
       title: "没有找到匹配的会话",
-      description: "换个更常见的词试试；检索只覆盖最近 200 个会话的正文，更早的没有扫。"
+      description: "换个更具体的词试试；这一页只检索最近 200 个会话的正文，更早的没有扫。"
     });
   } else {
     const summary = describeSearchSummary(result);
     body = /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-summary", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-summary-text", children: summary }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ss-summary-text", role: "status", "aria-live": "polite", children: summary }),
         busy && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ss-busy", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 10 }),
           "检索中"
@@ -68267,8 +68283,8 @@ function SearchView({ onClose, onOpenHit }) {
               className: index === activeIndex ? "ss-hit is-active" : "ss-hit",
               "data-search-key": key,
               "aria-label": `${roleLabel(hit.role)}：${hit.snippet}`,
+              "aria-current": index === activeIndex ? "true" : void 0,
               onClick: () => openRow(rows[index]),
-              onMouseEnter: () => setActiveIndex(index),
               children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-role", children: roleLabel(hit.role) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hit-text", children: segments.map((segment, segmentIndex) => segment.hit ? /* @__PURE__ */ jsxRuntimeExports.jsx("mark", { children: segment.text }, segmentIndex) : segment.text) }),
@@ -68279,7 +68295,7 @@ function SearchView({ onClose, onOpenHit }) {
           session.totalHits > session.hits.length && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-more", children: [
             "另有 ",
             session.totalHits - session.hits.length,
-            " 处命中没有展开 —— 点开会话后可以继续在里面找"
+            " 处命中未展开"
           ] })
         ] })
       ] }, session.sessionId)) })
@@ -68299,7 +68315,7 @@ function SearchView({ onClose, onOpenHit }) {
             className: "ss-input",
             type: "search",
             value: query,
-            placeholder: "搜你在 ZeroWork 里说过的任何一句话",
+            placeholder: "搜你和 ZeroWork 说过的话",
             "aria-label": "检索会话正文",
             onChange: (event) => setQuery(event.target.value),
             onKeyDown
@@ -68309,7 +68325,7 @@ function SearchView({ onClose, onOpenHit }) {
             inputRef.current?.focus();
           }, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 13 }) })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-hint", children: [
+        rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-hint", children: [
           "Enter 打开选中项",
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hint-sep", "aria-hidden": "true", children: "·" }),
           "Esc 清空或返回",
@@ -69718,7 +69734,7 @@ function paletteActionEntries(ctx) {
     { id: "action:diagnostics", title: "打开诊断", keywords: ["诊断", "排错", "日志", "diagnostics"], run: ctx.openDiagnostics },
     { id: "action:stats", title: "打开统计", keywords: ["统计", "用量", "token", "stats"], run: ctx.openStats },
     { id: "action:file-history", title: "打开文件历史", keywords: ["文件", "历史", "版本", "还原", "时光机", "file", "history", "version"], run: ctx.openFileHistory },
-    { id: "action:session-search", title: "检索会话", subtitle: "在全部会话正文里找一句话", keywords: ["检索", "搜索", "查找", "会话", "历史", "search", "find"], run: ctx.openSearch },
+    { id: "action:session-search", title: "会话检索", subtitle: "在最近 200 个会话的正文里找，可跳回原消息", keywords: ["检索", "搜索", "查找", "会话", "历史", "search", "find"], run: ctx.openSearch },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
     { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
     { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare }

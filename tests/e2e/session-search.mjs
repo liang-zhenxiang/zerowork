@@ -191,8 +191,8 @@ await h.check("③ 搜「报价单」：按会话分组出现一条结果卡，�
 	for (const hit of card.hits) {
 		assert.ok(hit.marks.includes("报价单"), `每行命中片段都应高亮「报价单」：${JSON.stringify(hit)}`);
 	}
-	assert.ok(state.summary.includes("找到 1 个会话"), `摘要应说明会话数：${JSON.stringify(state.summary)}`);
-	assert.ok(state.summary.includes("2 处"), `摘要应说明命中总数：${JSON.stringify(state.summary)}`);
+	assert.ok(state.summary.includes("已检索 2 个会话"), `摘要应说明检索了多少会话：${JSON.stringify(state.summary)}`);
+	assert.ok(state.summary.includes("1 个会话命中 2 处"), `摘要应说明会话数与命中总数：${JSON.stringify(state.summary)}`);
 });
 
 // ══ ④ Esc 先清词、再退出页面 ═════════════════════════════════════════
@@ -293,6 +293,15 @@ await h.check("⑦ 深色主题下检索结果可读（截图 + 像素断言）"
 		timeout: 10_000,
 		desc: "data-theme 切到 dark",
 	});
+	// 主题切换会走 --dur-fast 的背景过渡：立刻截屏会拍到「浅色选中底 + 深色文字」
+	// 的中间帧。等选中行真的落到暗色 --bg-raised(#26262a) 再拍。
+	await waitUntil(
+		() => win.evaluate(() => {
+			const el = document.querySelector(".ss-hit.is-active");
+			return el !== null && getComputedStyle(el).backgroundColor === "rgb(38, 38, 42)";
+		}),
+		{ timeout: 5_000, desc: "选中行的底色过渡到暗色 --bg-raised" },
+	);
 	const dark = await h.shoot("session-search-results-dark");
 	assert.ok(dark.stats.stdDev > 3, `深色检索截图不像渲染出来的界面（stdDev=${dark.stats.stdDev.toFixed(2)}）`);
 });

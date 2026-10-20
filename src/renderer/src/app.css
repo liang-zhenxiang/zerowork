@@ -12837,9 +12837,14 @@ button.agent-row {
 	border-color: color-mix(in srgb, var(--text) 18%, transparent);
 }
 
+/* 焦点只画一圈，且与全局 input:focus-visible 同色（DESIGN §7.1）。
+   此前外层 border 染 --primary、内层 input 又吃到全局 2px 方角 outline，
+   结果是圆角框里套一个方框 —— 不是「更明显」，是看着像渲染坏了。 */
 .ss-field:focus-within {
-	border-color: var(--primary);
-	box-shadow: var(--shadow-input-focus);
+	border-color: var(--border);
+	outline: 2px solid var(--text-secondary);
+	outline-offset: 2px;
+	box-shadow: none;
 }
 
 .ss-field-icon {
@@ -12859,6 +12864,12 @@ button.agent-row {
 	outline: none;
 }
 
+/* 全局 input:focus-visible（0,1,1）会压过 .ss-input 的 outline:none（0,1,0），
+   焦点环由外层 .ss-field 统一画，这里必须同特异性地撤掉。 */
+.ss-input:focus-visible {
+	outline: none;
+}
+
 /* 原生 search 的清除按钮在浅色下几乎不可见、且与自绘的 .ss-clear 重复。 */
 .ss-input::-webkit-search-cancel-button,
 .ss-input::-webkit-search-decoration {
@@ -12867,15 +12878,15 @@ button.agent-row {
 }
 
 .ss-input::placeholder {
-	color: var(--text-faint);
+	color: var(--text-secondary);
 }
 
 .ss-clear {
 	display: grid;
 	place-items: center;
 	flex: none;
-	width: 22px;
-	height: 22px;
+	width: 26px;
+	height: 26px;
 	border: 0;
 	border-radius: var(--radius-full);
 	background: var(--bg-chip);
@@ -12900,7 +12911,7 @@ button.agent-row {
 	margin: var(--space-2) 0 0;
 	padding-left: 2px;
 	font-size: var(--text-meta);
-	color: var(--text-faint);
+	color: var(--text-secondary);
 }
 
 .ss-hint-sep {
@@ -12908,10 +12919,10 @@ button.agent-row {
 }
 
 /* ── 初始态：说明「搜什么、在哪儿搜」，并给三条可点的示例 ─────────────── */
+/* 不加盒子：同页的「无结果」是共享 EmptyState（无边框居中），初始态也走排版
+   而不是虚线框 —— 全站虚线框只属于「虚位待建」的创建卡（DESIGN §3.9）。 */
 .ss-idle {
-	padding: var(--space-5) var(--space-4);
-	border: 1px dashed var(--border);
-	border-radius: var(--radius-lg);
+	padding: var(--space-4) 0 var(--space-2);
 }
 
 .ss-idle-title {
@@ -12964,7 +12975,7 @@ button.agent-row {
 	gap: var(--space-2);
 	margin: var(--space-4) 0 0;
 	font-size: var(--text-meta);
-	color: var(--text-faint);
+	color: var(--text-secondary);
 }
 
 /* ── 结果摘要：先给口径（扫了多少、找到多少），再给列表 ───────────────── */
@@ -13003,10 +13014,13 @@ button.agent-row {
 	list-style: none;
 }
 
+/* 内容卡口径（DESIGN §3.7）：--bg 底 + --radius-md + 边框是身份。
+   以前用 --bg-raised + --radius-lg：灰底上 hover 只差 6 个色阶，
+   深浅两套还分别靠「底」和「边」分层，同一屏两种语言。 */
 .ss-session {
 	border: 1px solid var(--border);
-	border-radius: var(--radius-lg);
-	background: var(--bg-raised);
+	border-radius: var(--radius-md);
+	background: var(--bg);
 	overflow: hidden;
 }
 
@@ -13036,7 +13050,7 @@ button.agent-row {
 	gap: var(--space-2);
 	flex: none;
 	font-size: var(--text-meta);
-	color: var(--text-faint);
+	color: var(--text-secondary);
 }
 
 .ss-session-count {
@@ -13052,8 +13066,9 @@ button.agent-row {
 	flex-direction: column;
 }
 
-/* 命中行：整行是按钮，三列固定（角色 / 片段 / 箭头），箭头只在 hover 与
-   键盘选中时浮现（opacity + pointer-events，DESIGN §7.9）。 */
+/* 命中行：整行是按钮，三列固定（角色 / 片段 / 箭头）。
+   箭头**常显**：它是这一行「可点」的唯一主线索，藏进 hover 等于让触屏与
+   首次使用先猜一次（§7.9 的 hover 浮现只给行内操作钮，不是整行主操作）。 */
 .ss-hit {
 	display: grid;
 	grid-template-columns: 52px minmax(0, 1fr) 14px;
@@ -13074,19 +13089,20 @@ button.agent-row {
 	border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
 }
 
-.ss-hit:hover,
-.ss-hit.is-active {
+.ss-hit:hover {
 	background: var(--bg-hover);
 }
 
+/* 选中项比 hover 更实：底升一档 + 左条，不看颜色也读得出（§7.6）。 */
 .ss-hit.is-active {
+	background: var(--bg-raised);
 	box-shadow: inset 2px 0 0 var(--primary);
 }
 
 .ss-hit-role {
 	padding-top: 1px;
 	font-size: var(--text-meta);
-	color: var(--text-faint);
+	color: var(--text-secondary);
 	white-space: nowrap;
 }
 
@@ -13100,27 +13116,33 @@ button.agent-row {
 	-webkit-line-clamp: 2;
 }
 
-/* 命中词：主色低透明底 + 下划线偏移，不用荧光黄 —— 深浅主题下都不刺眼。 */
+/* 命中词：主色低透明底 + 下划线，不用荧光黄 —— 深浅主题下都不刺眼。
+   仅靠底色时，高亮块与卡底只差 1.5:1（选中行上更低），所以补一条下划线：
+   第二线索不依赖颜色，也兑现「文字本身可读」这一条。 */
 .ss-hit-text mark {
 	padding: 0 2px;
 	border-radius: 3px;
-	background: color-mix(in srgb, var(--primary) 20%, transparent);
+	background: color-mix(in srgb, var(--primary) 26%, transparent);
 	color: inherit;
 	font-weight: 600;
+	text-decoration: underline;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 2px;
+	text-decoration-color: color-mix(in srgb, var(--text) 55%, transparent);
 }
 
 .ss-hit-arrow {
 	margin-top: 3px;
 	color: var(--text-faint);
-	opacity: 0;
 	pointer-events: none;
-	transition: opacity var(--dur-fast) var(--ease-standard);
+	transition: color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
 }
 
 .ss-hit:hover .ss-hit-arrow,
 .ss-hit:focus-visible .ss-hit-arrow,
 .ss-hit.is-active .ss-hit-arrow {
-	opacity: 1;
+	color: var(--text-secondary);
+	transform: translateX(2px);
 }
 
 /* 「还有 N 处没展开」：如实说明，不冒充全部命中。 */
@@ -13129,7 +13151,7 @@ button.agent-row {
 	padding: var(--space-2) var(--space-4) var(--space-3);
 	border-top: 1px solid color-mix(in srgb, var(--border) 62%, transparent);
 	font-size: var(--text-meta);
-	color: var(--text-faint);
+	color: var(--text-secondary);
 }
 
 /* ── 骨架：与真行同尺寸同类名，到达时是「同一片区域被填上」（DESIGN §4） ── */
@@ -13137,9 +13159,22 @@ button.agent-row {
 	pointer-events: none;
 }
 
+/* 骨架与真行同一网格：结果到达时是「同一片区域被填上」，不是文字右跳 52px。 */
 .ss-results-skeleton .ss-hit {
-	display: block;
-	padding: var(--space-3) var(--space-4);
+	pointer-events: none;
+}
+
+/* 只给读屏的说明（骨架承担 role=status 时的文案）。 */
+.ss-visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
 }
 
 /* 窄窗：角色列收成片段上一行的文字，片段拿满整行。 */
