@@ -65,6 +65,15 @@ import {
 	readVersionFile,
 	restoreVersion,
 } from "./version-store.js";
+import {
+	REVIEW_MAX_BYTES,
+	buildReviewEntries,
+	markReviewed,
+	readReviewDiff,
+	readReviewState,
+	unmarkReviewed,
+	writeReviewState,
+} from "./review.js";
 import { hasExportableContent, renderSessionMarkdown } from "./session-markdown.js";
 import {
 	loadMemorySystemPrompt,
@@ -4740,6 +4749,65 @@ const handlers = {
       // 还原成功写一条 file/restored 审计（沿用 onAudit 注入 writeAuditRecord 的既有模式）。
       onAudit: writeAuditRecord,
     });
+  },
+  /*
+   * 变更审阅台：按**变更**列队（每个文件最近一次被覆盖 = 一条）。同样是拉式，
+   * 只读版本 meta；状态文件在 `<config>/review-state.json`（审阅状态与版本存储
+   * 分开，坏文件当空，不碰 versions/）。逻辑在 review.js（可单测）。
+   */
+  [INVOKE.reviewList]: async () => {
+    const { files, truncated } = listVersionFiles({ dir: versionsDir() });
+    const state = readReviewState(getConfigDir());
+    const { entries, pending, reviewed } = buildReviewEntries(files, state);
+    // 被跳过的改动（二进制 / 超 1 MiB）没有旧内容可审，不成卡；但要如实计数，
+    // 否则用户会以为「这个文件从来没被改过」。只统计进了清单的那些文件。
+    const skippedTotal = files.reduce((sum, file) => sum + (Number.isFinite(file.skipped) ? file.skipped : 0), 0);
+    return { entries, pending, reviewed, truncated, skippedTotal };
+  },
+  [INVOKE.reviewRead]: async ([input]) => readReviewDiff({
+    key: typeof input?.key === "string" ? input.key : "",
+    versionId: typeof input?.versionId === "string" ? input.versionId : "",
+    versionsDir: versionsDir(),
+    maxBytes: REVIEW_MAX_BYTES,
+  }),
+  [INVOKE.reviewMark]: async ([input]) => {
+    const key = typeof input?.key === "string" ? input.key : "";
+    const versionId = typeof input?.versionId === "string" ? input.versionId : "";
+    /*
+     * `versionId === ""` = **撤销已阅**（同一个通道的清除语义）。
+     *
+     * 为什么不另开一条 `review:unmark`：两者改的是同一个键、写的是同一份文件，
+     * 分成两条通道只会让 preload 与 handler 各多一份重复的校验；而「标记」与
+     * 「撤销标记」在契约上本来就是同一个状态位的 set / clear。
+     */
+    if (versionId === "") {
+      const stateDir = getConfigDir();
+      const next = unmarkReviewed(readReviewState(stateDir), key);
+      const written = writeReviewState(stateDir, next);
+      if (!written.ok) {
+        return { ok: false, reason: "write-failed", message: `审阅状态没能写入：${written.message}` };
+      }
+      const { files: afterUnmark } = listVersionFiles({ dir: versionsDir() });
+      return { ok: true, pending: buildReviewEntries(afterUnmark, next).pending, cleared: true };
+    }
+    const file = readVersionFile(key, { dir: versionsDir() });
+    if (file === undefined) {
+      return { ok: false, reason: "unknown", message: "这个文件的版本记录不在（可能已被清理）。" };
+    }
+    // 只认「当前最新的那一版」：用户审的是旧版、标记却盖住了之后的新改动，是
+    // 最坏的一种静默失效 —— 新改动会永远显示为已阅。宁可拒绝，让界面刷新后再标。
+    const latest = file.versions.length > 0 ? file.versions[file.versions.length - 1] : undefined;
+    if (latest === undefined || latest.id !== versionId) {
+      return { ok: false, reason: "stale", message: "这个文件又有了新的改动，请先刷新，再重新审阅这一版。" };
+    }
+    const stateDir = getConfigDir();
+    const next = markReviewed(readReviewState(stateDir), key, versionId);
+    const written = writeReviewState(stateDir, next);
+    if (!written.ok) {
+      return { ok: false, reason: "write-failed", message: `审阅状态没能写入：${written.message}` };
+    }
+    const { files } = listVersionFiles({ dir: versionsDir() });
+    return { ok: true, pending: buildReviewEntries(files, next).pending };
   },
   // 归档 / 取消归档（L28）：只动 archive.json 索引，会话文件与宿主不动 ——
   // 归档 ≠ 下线，正在聊的会话归档后照常可用。列表变化推

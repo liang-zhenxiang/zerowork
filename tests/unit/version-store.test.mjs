@@ -244,7 +244,15 @@ describe("listVersionFiles —— 排序、字段与截断", () => {
 			lastSessionId: "sA2",
 			lastTool: "edit",
 			exists: true,
+			// 变更审阅台要的「最后一条版本」描述：**只增字段**，上面那些既有字段照旧。
+			versionId: "300",
+			at: 300,
+			tool: "edit",
+			sessionId: "sA2",
 		});
+		// 行数变化来自那次改动（这里没传，字段缺席而不是 0）。
+		expect(files[0]).not.toHaveProperty("added");
+		expect(files[0]).not.toHaveProperty("removed");
 		expect(files[1]).toMatchObject({ name: "b.txt", dir: resolve(root, "sub"), exists: false });
 	});
 

@@ -178,6 +178,34 @@ const INVOKE = {
    */
   fileHistoryRestore: "versions:restore",
   /**
+   * 变更审阅台（按**变更**列队，与按文件组织的文件历史互补）。
+   *
+   * **拉式**：用户打开「变更审阅」页面时才调用，不挂推送、不进 run 边界热路径。
+   * 只读版本 meta、**不读任何文件正文**（页面打开要快，侧栏角标也要便宜）。
+   * 返回 `{ entries: [{ key, path, name, dir, versionId, at, tool?, sessionId?,
+   * added?, removed?, exists, reviewed }], pending, reviewed, truncated, skippedTotal }`
+   * —— 按 `at` 降序；`truncated` 与 `skippedTotal` 都是「如实说出来」的一部分
+   *（文件数超上限 / 二进制或超大被跳过的次数）。
+   */
+  reviewList: "review:list",
+  /**
+   * 读一条变更的「改前 / 现在」并算并排 diff。入参 `{ key, versionId }`。
+   * 成功 `{ ok:true, hunks, before, after, added, removed, truncated }`，失败
+   * `{ ok:false, reason }`（reason ∈ unknown / no-such-version / missing / binary /
+   * too-large / no-after / symlink，**不 reject**）。
+   * 当前文件的读取自限：256 KiB、二进制 sniff、符号链接不跟随（见 daemon/review.js）。
+   */
+  reviewRead: "review:read",
+  /**
+   * 标记某条变更已阅。入参 `{ key, versionId }`。
+   *
+   * `versionId` 必须仍是该文件**最新的**那一版，否则返回
+   * `{ ok:false, reason:"stale" }` —— 防止「用户审的是旧版、标记却盖住了新改动」。
+   * 成功返回 `{ ok:true, pending }`（新的待审阅计数，供侧栏角标即时更新）。
+   * 幂等；审阅状态单独落在 `<config>/review-state.json`，坏了当空。
+   */
+  reviewMark: "review:mark",
+  /**
    * 项目（projects.json 索引）：把「同一件正在推进的事」的会话装订成活页夹。
    * 与工作空间（磁盘目录）正交——项目不建目录、不动文件、不改会话 cwd，
    * 只是一层组织引用。**拉式**（打开项目视图时读，与 library 同口径）；

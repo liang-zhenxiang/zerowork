@@ -141,6 +141,16 @@ const INVOKE = {
   /** 还原到某一版。入参 `{ key, id }`。 */
   fileHistoryRestore: "versions:restore",
   /**
+   * 变更审阅台：按**变更**列队（文件历史按文件）。**拉式**（打开页面时读），
+   * 只读版本 meta、不读正文。与 shared/ipc.js 的注释同源（两份手工副本，
+   * ipc 单测守一致性）。
+   */
+  reviewList: "review:list",
+  /** 读一条变更的改前/现在并算 diff。入参 `{ key, versionId }`，失败用 ok:false 表达。 */
+  reviewRead: "review:read",
+  /** 标记已阅。入参 `{ key, versionId }`；版本已过期返回 `{ ok:false, reason:"stale" }`。 */
+  reviewMark: "review:mark",
+  /**
    * 项目（projects.json 索引）：会话 + 产物 + 常驻指令的活页夹，与工作空间
    * （磁盘目录）正交。**拉式**（打开项目视图时读）；归属变化复用
    * taskListChanged 推送。与 shared/ipc.js 的注释同源（两份手工副本，ipc 单测
@@ -671,6 +681,10 @@ const bridge = {
   listFileHistory: () => ipcRenderer.invoke(INVOKE.fileHistoryList),
   readFileHistory: (input) => ipcRenderer.invoke(INVOKE.fileHistoryRead, input),
   restoreFileHistory: (input) => ipcRenderer.invoke(INVOKE.fileHistoryRestore, input),
+  // 变更审阅台：入参统一是 `{ key, versionId }`；失败用 `{ ok:false, reason }` 表达。
+  listReviewChanges: () => ipcRenderer.invoke(INVOKE.reviewList),
+  readReviewChange: (input) => ipcRenderer.invoke(INVOKE.reviewRead, input),
+  markReviewChange: (input) => ipcRenderer.invoke(INVOKE.reviewMark, input),
   listProjects: () => ipcRenderer.invoke(INVOKE.projectsList),
   createProject: (name) => ipcRenderer.invoke(INVOKE.projectsCreate, name),
   renameProject: (id, name) => ipcRenderer.invoke(INVOKE.projectsRename, id, name),

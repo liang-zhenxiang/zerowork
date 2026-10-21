@@ -127,9 +127,26 @@ export function versionChangeText(version, { isLatest = false } = {}) {
 	return `被一次 +${added} −${removed} 的改动替换`;
 }
 
+/**
+ * 工具名 → 用户话术（**两页共用**：文件历史与变更审阅都展示版本条目的来源）。
+ *
+ * 版本存储里存的是工具 id（`write` / `edit` / `restore`），直接铺在界面上就是
+ * 实现泄漏 —— 办公用户不需要知道工具叫什么。未知工具原样返回（不吞信息）。
+ */
+const TOOL_LABELS = {
+	write: "写入",
+	edit: "编辑",
+	restore: "还原",
+};
+
+export function formatToolName(tool) {
+	if (typeof tool !== "string" || tool === "") return "";
+	return TOOL_LABELS[tool] ?? tool;
+}
+
 /** 版本节点的来源（右端「工具 · 会话标题」）。会话解析不到时如实说，不显示裸 id。 */
 export function versionSourceText(version, sessionTitle) {
-	const tool = typeof version?.tool === "string" ? version.tool : "";
+	const tool = formatToolName(version?.tool);
 	const title = typeof sessionTitle === "string" ? sessionTitle : "";
 	if (title === "") return tool === "" ? "来源会话已不在" : `${tool} · 来源会话已不在`;
 	return tool === "" ? title : `${tool} · ${title}`;

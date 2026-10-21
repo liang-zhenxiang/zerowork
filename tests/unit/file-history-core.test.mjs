@@ -19,6 +19,7 @@ import {
 	fileRowNote,
 	formatDirLabel,
 	formatRelativeTime,
+	formatToolName,
 	formatTruncatedNote,
 	formatVersionTime,
 	restoreConfirmText,
@@ -141,14 +142,16 @@ describe("versionChangeText：节点第二行", () => {
 });
 
 describe("versionSourceText：节点右端的来源", () => {
-	it("工具 · 会话标题", () => {
-		expect(versionSourceText({ tool: "write" }, "市场部周报")).toBe("write · 市场部周报");
-		expect(versionSourceText({ tool: "restore" }, "财务整理")).toBe("restore · 财务整理");
+	it("工具名翻成用户话术，不露 write / edit / restore", () => {
+		expect(versionSourceText({ tool: "write" }, "市场部周报")).toBe("写入 · 市场部周报");
+		expect(versionSourceText({ tool: "edit" }, "财务整理")).toBe("编辑 · 财务整理");
+		expect(versionSourceText({ tool: "restore" }, "")).toBe("还原 · 来源会话已不在");
+		expect(formatToolName("custom")).toBe("custom");
 	});
 
 	it("只有其一就不摆分隔符", () => {
 		expect(versionSourceText({}, "周报")).toBe("周报");
-		expect(versionSourceText({ tool: "edit" }, "")).toBe("edit · 来源会话已不在");
+		expect(versionSourceText({ tool: "edit" }, "")).toBe("编辑 · 来源会话已不在");
 	});
 
 	it("会话解析不到时不显示裸 sessionId，如实说", () => {

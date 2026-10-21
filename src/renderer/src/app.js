@@ -13313,6 +13313,8 @@ function Sidebar({
   onOpenDiagnostics,
   onOpenStats,
   onOpenFileHistory,
+  onOpenReview,
+  reviewPending,
   onOpenSearch,
   onOpenSkills,
   onOpenAutomations,
@@ -13933,9 +13935,15 @@ function Sidebar({
       ] }),
       // 「文件历史」排在「资料库」之后（资料库是 NAV_ITEMS$1 里最后一项已就绪项）。
       // 它与「诊断」「统计」同款：独立页面、独立 .nav-item，不进 NAV_ITEMS$1 数组。
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenFileHistory, children: [
+      //
+      // 「变更审阅」**不单开侧栏项**：两者是同一份版本存储的两种看法（按文件 / 按变更），
+      // 入口放在该页页头；把待审阅数做成这里的角标，既不增加侧栏高度，也不丢发现性。
+      // 为什么在意高度：600px 高的窗口里侧栏本来就紧，多一行 nav 会把任务行的 ⋯ 菜单
+      // 推出可视区（tests/e2e/session-pin.mjs ⑬ 会当场变红 —— 那是真实可达性，不是脆断言）。
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenFileHistory, "aria-label": reviewPending > 0 ? `文件历史，另有 ${reviewPending} 项变更待审阅` : "文件历史", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconHistory, { size: 16 }),
-        "文件历史"
+        "文件历史",
+        reviewBadgeText(reviewPending) !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "nav-badge", children: reviewBadgeText(reviewPending) })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenDiagnostics, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconChart, { size: 16 }),
@@ -30113,6 +30121,28 @@ import {
 	versionCountLabel,
 	versionSourceText
 } from "./file-history-core.js";
+// 变更审阅台的纯逻辑：筛选 / 计数 / 并排 diff 配对 / 边界措辞都在 review-core.js，
+// 单测直测 —— 视图只负责摆位置，e2e 只验「IPC 通了、DOM 挂上了、标记与还原真的落盘了」。
+import {
+	REVIEW_EMPTY_DESC,
+	REVIEW_EMPTY_TITLE,
+	REVIEW_PENDING_EMPTY_DESC,
+	REVIEW_PENDING_EMPTY_TITLE,
+	formatChangeStats,
+	formatHunkHeader,
+	formatReviewCounts,
+	formatReviewTruncatedNote,
+	parseSideBySideDiff,
+	reviewBadgeText,
+	reviewIndexTitle,
+	reviewReasonRetryable,
+	reviewReasonText,
+	reviewSkippedNote,
+	reviewSourceText,
+	reviewStateLabel,
+	reviewTruncatedDiffNote,
+	visibleReviewEntries
+} from "./review-core.js";
 import {
 	buildHighlightSegments,
 	describeSearchSummary,
@@ -68338,7 +68368,7 @@ function SearchView({ onClose, onOpenHit }) {
   ] });
 }
 
-function FileHistoryView({ onClose, sessions, onToast }) {
+function FileHistoryView({ onClose, sessions, onToast, onOpenReview, reviewPending }) {
   const [list, setList] = reactExports.useState(void 0);
   const [listError, setListError] = reactExports.useState(void 0);
   const [selectedKey, setSelectedKey] = reactExports.useState(void 0);
@@ -68728,6 +68758,18 @@ function FileHistoryView({ onClose, sessions, onToast }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "文件历史" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /*
+       * 同一份版本存储的另一种看法：按**变更**列队、逐条审阅。
+       * 入口放在这里而不是侧栏 —— 多一行 nav 会把矮窗口里的任务菜单推出可视区
+       * （session-pin e2e ⑬ 守的就是这条可达性）。待审阅数直接写在按钮上。
+       */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        type: "button",
+        className: "mini-btn",
+        title: "按变更审阅 Agent 改过的文件（可并排对照、标记已审阅、还原）",
+        onClick: onOpenReview,
+        children: ["变更审阅", reviewBadgeText(reviewPending) !== "" ? ` ${reviewBadgeText(reviewPending)}` : ""]
+      }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取文件历史", onClick: refresh, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
         "刷新"
@@ -68743,6 +68785,398 @@ const FILE_HISTORY_SKELETON_ROWS = [
   { dir: "66%", note: "84%" },
   { dir: "38%", note: "56%" }
 ];
+/*
+ * 变更审阅台（侧栏「变更审阅」）：文件历史按**文件**组织，这一页按**变更**组织 ——
+ * 每个文件最近一次被覆盖 = 一条变更卡，配上「待审阅 / 已审阅」与并排对照。
+ *
+ * 版式照 FileHistoryView：左列是**无边框索引列**（导航，不是第二个盒子），右区是
+ * 全页唯一的内容卡。文案、筛选、并排 diff 的行配对全在 review-core.js（单测直测），
+ * 这里只负责摆位置与接线。
+ *
+ * 数据面（design.md §2）：
+ *   listReviewChanges()              → { entries, pending, reviewed, truncated, skippedTotal }
+ *   readReviewChange({key,versionId})→ { ok:true, hunks, before, after, added, removed, truncated }
+ *                                    | { ok:false, reason, message? }
+ *   markReviewChange({key,versionId})→ { ok:true, pending } | { ok:false, reason, message }
+ * **失败一律用返回值表达、不 reject**（与 restoreFileHistory 同族）——所以这里判的是
+ * `res.ok === false`，catch 只兜「IPC 本身断了」。还原复用 `restoreFileHistory` 的
+ * 既有语义（先留当前内容、再写回），不新造一套。
+ *
+ * 三态互斥（docs/DESIGN.md §4）：list === undefined 是加载、listError 是错误、
+ * entries 为空才是空态；「筛选后为空」与「真空」分开说，不混为一谈。
+ */
+function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChange }) {
+  const [list, setList] = reactExports.useState(void 0);
+  const [listError, setListError] = reactExports.useState(void 0);
+  const [filter, setFilter] = reactExports.useState("all");
+  const [selectedKey, setSelectedKey] = reactExports.useState(void 0);
+  /*
+   * 「刚标记的那一条」在「只看待审阅」筛选下临时保留在可见列表里。
+   * 不这么做时，点完「标记为已审阅」右区会**立刻**跳到下一条 —— 用户看不到自己
+   * 刚才那条变成了什么状态，也会误以为页面自己翻页了。用户点了别的条目才真正跳走。
+   */
+  const [keptKey, setKeptKey] = reactExports.useState(void 0);
+  const [detail, setDetail] = reactExports.useState(void 0);
+  const [detailError, setDetailError] = reactExports.useState(void 0);
+  const [marking, setMarking] = reactExports.useState(false);
+  const [markError, setMarkError] = reactExports.useState(void 0);
+  const [confirmingRestore, setConfirmingRestore] = reactExports.useState(false);
+  const [restoring, setRestoring] = reactExports.useState(false);
+  const [restoreError, setRestoreError] = reactExports.useState(void 0);
+  const [reloadToken, setReloadToken] = reactExports.useState(0);
+  const titleBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.title])), [sessions]);
+  const pathBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.path])), [sessions]);
+  const loadList = reactExports.useCallback(async () => {
+    try {
+      const next = await window.kami.listReviewChanges();
+      setList(next);
+      setListError(void 0);
+      /*
+       * 侧栏角标与这一页同源：页面自己刷新（打开 / 标记 / 还原 / 手动刷新）时顺手
+       * 把计数交回 App。**不订阅会话事件** —— 版本存储的变化没有推送，逐事件重拉
+       * 只会让每次对话都多一次无意义的 IO。
+       */
+      if (typeof next?.pending === "number") onPendingChange(next.pending);
+    } catch (e) {
+      setListError(errorText(e));
+    }
+  }, [onPendingChange]);
+  reactExports.useEffect(() => {
+    void loadList();
+  }, [loadList, reloadToken]);
+  const entries = list?.entries ?? [];
+  const visibleEntries = reactExports.useMemo(
+    () => visibleReviewEntries(entries, filter, keptKey),
+    [entries, filter, keptKey]
+  );
+  /*
+   * 选中项**直接推导**，不另存一份「当前有效 key」：
+   * 切换筛选、标记/撤销后当前项可能不在可见列表里，推导会自动落到第一条；
+   * 没有下一条时 selectedEntry 为 undefined，右区给出「都处理完了」而不是一张空卡。
+   */
+  const activeKey = selectedKey !== void 0 && visibleEntries.some((entry) => entry.key === selectedKey) ? selectedKey : visibleEntries[0]?.key;
+  const selectedEntry = entries.find((entry) => entry.key === activeKey);
+  const selectedVersionId = selectedEntry?.versionId;
+  const sessionTitle = selectedEntry?.sessionId === void 0 ? void 0 : titleBySessionId.get(selectedEntry.sessionId);
+  const sessionPath = selectedEntry?.sessionId === void 0 ? void 0 : pathBySessionId.get(selectedEntry.sessionId);
+  /* 选中项换了（或整页刷新）→ 重新读「改前 / 现在」。 */
+  reactExports.useEffect(() => {
+    if (activeKey === void 0 || selectedVersionId === void 0) {
+      setDetail(void 0);
+      setDetailError(void 0);
+      return void 0;
+    }
+    let cancelled = false;
+    setDetail(void 0);
+    setDetailError(void 0);
+    setMarkError(void 0);
+    setConfirmingRestore(false);
+    setRestoreError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.readReviewChange({ key: activeKey, versionId: selectedVersionId });
+        if (cancelled) return;
+        if (res?.ok === false) {
+          setDetailError({ reason: res.reason, message: res.message });
+          return;
+        }
+        setDetail(res);
+      } catch (e) {
+        if (!cancelled) setDetailError({ reason: "unknown", message: errorText(e) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeKey, selectedVersionId, reloadToken]);
+  /* Esc 只取消二次确认，不离开页面 —— 与文件历史的确认条同口径。 */
+  reactExports.useEffect(() => {
+    if (!confirmingRestore) return void 0;
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setConfirmingRestore(false);
+      setRestoreError(void 0);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirmingRestore]);
+  const refresh = reactExports.useCallback(() => {
+    setKeptKey(void 0);
+    setReloadToken((n) => n + 1);
+  }, []);
+  /**
+   * 标记 / 撤销统一走这里：`reviewed` 是目标状态。
+   *
+   * 撤销用**同一条通道**的清除语义（`versionId: ""`，daemon 返回 `cleared:true`），
+   * 不另开一条 IPC —— 标记是单行道时，误点一次就再也没有回退入口。
+   *
+   * 两种更新都是**就地**的：右区停在同一条变更上看得到状态怎么变，只有角标与计数
+   * 跟着回传的新值走；不整页重拉（那会让用户刚看的 diff 闪一下）。
+   */
+  const applyMark = (entry, reviewed) => {
+    if (entry === void 0 || marking) return;
+    setMarking(true);
+    setMarkError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.markReviewChange({
+          key: entry.key,
+          versionId: reviewed ? entry.versionId : ""
+        });
+        if (res?.ok === false) {
+          setMarkError({ reason: res.reason, message: res.message });
+          /* 「又有了新的改动」不是错误现场，是清单过期了 —— 当场刷新对齐。 */
+          if (res.reason === "stale") refresh();
+          return;
+        }
+        setList((prev) => {
+          if (prev === void 0) return prev;
+          const nextEntries = prev.entries.map((row) =>
+            row.key === entry.key && row.versionId === entry.versionId ? { ...row, reviewed } : row
+          );
+          const pending = nextEntries.filter((row) => row.reviewed !== true).length;
+          return { ...prev, entries: nextEntries, pending, reviewed: nextEntries.length - pending };
+        });
+        /*
+         * 「只看待审阅」下标记后把这一条**临时留在列表里**（见 keptKey 的说明）；
+         * 撤销时它本来就回到待审阅，不需要保留位。
+         */
+        setKeptKey(filter === "pending" && reviewed ? entry.key : void 0);
+        if (typeof res.pending === "number") onPendingChange(res.pending);
+        onToast(
+          reviewed ? `已标记「${entry.name}」为已审阅` : `已将「${entry.name}」标为待审阅`,
+          "ok"
+        );
+      } catch (e) {
+        setMarkError({ reason: "write-failed", message: errorText(e) });
+      } finally {
+        setMarking(false);
+      }
+    })();
+  };
+  const markRead = () => applyMark(selectedEntry, true);
+  const unmarkRead = () => applyMark(selectedEntry, false);
+  /* 状态形态通道：待审阅=实心 accent 点，已阅=对勾（不只靠颜色，DESIGN §7.6）。 */
+  const stateIcon = (reviewed) => reviewed === true
+    ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 12, className: "rv-state-check" })
+    : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-state-dot", "aria-hidden": "true" });
+  const selectFilter = (next) => {
+    setFilter(next);
+    setKeptKey(void 0);
+  };
+  const restore = () => {
+    if (selectedEntry === void 0 || restoring) return;
+    setRestoring(true);
+    setRestoreError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.restoreFileHistory({ key: selectedEntry.key, id: selectedEntry.versionId });
+        if (res?.ok === false) {
+          setRestoreError({ text: restoreFailureText(res.reason, res.message), reason: res.reason });
+          if (res.reason === "no-such-version") refresh();
+          return;
+        }
+        setConfirmingRestore(false);
+        onToast(restoreSuccessText(res.at ?? selectedEntry.at), "ok");
+        /*
+         * 还原本身也留一版（先留后改），所以清单与详情都要重拉：最新一条变更
+         * 换成「还原之前的内容」那一版，右区跟着它刷新。
+         */
+        refresh();
+      } catch (e) {
+        setRestoreError({ text: restoreFailureText("unknown", errorText(e)), reason: "unknown" });
+      } finally {
+        setRestoring(false);
+      }
+    })();
+  };
+  const now = Date.now();
+  const row = (entry) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+    type: "button",
+    className: `rv-row${entry.key === activeKey ? " selected" : ""}`,
+    /* 主从选择用 aria-current（它描述的是「当前所在条目」，不是开关状态）。 */
+    "aria-current": entry.key === activeKey ? "true" : void 0,
+    "data-review-key": entry.key,
+    onClick: () => {
+      /* 点击别的条目才结束「刚标记的那条」的临时保留；点自己不算换页。 */
+      if (entry.key !== activeKey) setKeptKey(void 0);
+      setSelectedKey(entry.key);
+    },
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-row-main", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(FileTypeIcon, { name: entry.name, size: 14 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-name", title: entry.path, children: entry.name }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `rv-state${entry.reviewed === true ? "" : " pending"}`, children: [
+          stateIcon(entry.reviewed),
+          reviewStateLabel(entry.reviewed)
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-dir", title: entry.dir, children: formatDirLabel(entry.dir) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-row-meta", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: typeof entry.at === "number" && entry.at > 0 ? formatRelativeTime(entry.at, now) : "时间未知" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-stats", children: formatChangeStats(entry) })
+      ] })
+    ]
+  }, entry.key);
+  const indexColumn = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-index", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-index-head", children: reviewIndexTitle(visibleEntries.length) }),
+    /* 计数放在左列区头，而不是紧挨着筛选：页头 40px 内不该重复同一个词，
+       而且计数描述的是「这份队列」，与它并列才读得通。 */
+    list !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "rv-head-counts", "data-review-counts": true, children: formatReviewCounts(list.pending, list.reviewed) }),
+    list !== void 0 && list.truncated === true && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: formatReviewTruncatedNote() }),
+    list !== void 0 && reviewSkippedNote(list.skippedTotal) !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: reviewSkippedNote(list.skippedTotal) }),
+    visibleEntries.length === 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-file-note", children: "没有待审阅的变更" })
+      : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-list", children: visibleEntries.map(row) })
+  ] });
+  const diffRows = detail === void 0 || detail.truncated === true ? [] : parseSideBySideDiff(detail.hunks);
+  const hunkTotal = diffRows.filter((diffRow) => diffRow.kind === "hunk").length;
+  let hunkSeen = 0;
+  const card = selectedEntry === void 0
+    ? /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+        icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 22 }),
+        title: REVIEW_PENDING_EMPTY_TITLE,
+        description: REVIEW_PENDING_EMPTY_DESC,
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => selectFilter("all"), children: "看全部" })
+      }) })
+    : /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "fh-card", "data-review-card": true, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "fh-card-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(FileTypeIcon, { name: selectedEntry.name, size: 14 }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-card-name", title: selectedEntry.path, children: selectedEntry.name }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `rv-state${selectedEntry.reviewed === true ? "" : " pending"}`, children: [
+            stateIcon(selectedEntry.reviewed),
+            reviewStateLabel(selectedEntry.reviewed)
+          ] }),
+          selectedEntry.exists === false && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-card-flag", children: "文件已不在" })
+        ] }),
+        /* `+N −M` 并进 meta 行末尾（等宽）—— 单独占一行时它整行只有一个无标签的数字，
+           与 diff 里的逐行增删重复，还把 diff 往下压。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "fh-card-meta", title: selectedEntry.dir, children: [
+          `${formatDirLabel(selectedEntry.dir)} · ${formatVersionTime(selectedEntry.at)} · ${reviewSourceText(selectedEntry, sessionTitle)}`,
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-meta-stats", children: [
+            " · ",
+            formatChangeStats(selectedEntry)
+          ] })
+        ] }),
+        detailError !== void 0
+          ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-boundary", role: "status", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-boundary-text", children: reviewReasonText(detailError.reason, detailError.message) }),
+              reviewReasonRetryable(detailError.reason) && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: refresh, children: "刷新" })
+            ] })
+          : detail === void 0
+            ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取改动…" })
+            : detail.truncated === true
+              ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", role: "status", children: reviewTruncatedDiffNote(detail.added, detail.removed) })
+              : diffRows.length === 0
+                ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", role: "status", children: "这一版与当前文件逐行相同，没有可对照的差异。" })
+                : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-diff", role: "group", "aria-label": "改前与现在的并排对照", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-diff-head", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "改前" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "现在" })
+                    ] }),
+                    diffRows.map((diffRow, index) => diffRow.kind === "hunk"
+                      ? (() => {
+                          /* 单个、从第 1 行起的 hunk 不渲染区头（整份文件就是 diff）；
+                             其余显示「第 N 行起」，原始 @@ 只留在 title / aria-label。 */
+                          const label = formatHunkHeader(diffRow.header, { total: hunkTotal });
+                          hunkSeen += 1;
+                          return label === "" ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+                            className: "rv-diff-hunk diff-hunk",
+                            title: diffRow.header,
+                            "aria-label": diffRow.header,
+                            children: [
+                              label,
+                              hunkTotal > 1 ? `（第 ${hunkSeen} 段，共 ${hunkTotal} 段）` : ""
+                            ]
+                          }, `hunk-${index}`);
+                        })()
+                      : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-diff-row", children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `rv-diff-cell${diffRow.left.kind === "del" ? " diff-del" : ""}${diffRow.left.kind === "empty" ? " is-empty" : ""}`, children: diffRow.left.text === "" ? " " : diffRow.left.text }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: `rv-diff-cell${diffRow.right.kind === "add" ? " diff-add" : ""}${diffRow.right.kind === "empty" ? " is-empty" : ""}`, children: diffRow.right.text === "" ? " " : diffRow.right.text })
+                        ] }, `row-${index}`))
+                  ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-actions", children: [
+          selectedEntry.reviewed === true
+            ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: marking, onClick: unmarkRead, children: marking ? "处理中…" : "标为待审阅" })
+            : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: marking, onClick: markRead, children: marking ? "标记中…" : "标记为已审阅" }),
+          /* 还原是**可逆**动作（当前内容先留一版），不用 danger 色、用 mini-btn。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: () => {
+            setConfirmingRestore(true);
+            setMarkError(void 0);
+            setRestoreError(void 0);
+          }, children: "还原到改前" }),
+          selectedEntry.sessionId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+            type: "button",
+            className: "mini-btn",
+            disabled: sessionPath === void 0,
+            title: sessionPath === void 0 ? "来源会话已不在列表中" : "打开产生这次改动的会话",
+            onClick: () => {
+              if (sessionPath !== void 0) onResumeSession(sessionPath);
+            },
+            children: "回到那次会话"
+          })
+        ] }),
+        markError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm fh-confirm-error", role: "alert", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: reviewReasonText(markError.reason, markError.message) }),
+          markError.reason === "stale" && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: refresh, children: "刷新" })
+        ] }),
+        confirmingRestore && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: restoreConfirmText({
+            name: selectedEntry.name,
+            at: selectedEntry.at,
+            exists: selectedEntry.exists !== false
+          }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: () => {
+            setConfirmingRestore(false);
+            setRestoreError(void 0);
+          }, children: "取消" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: restore, children: restoring ? "还原中…" : "确认还原" })
+        ] }),
+        restoreError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm fh-confirm-error", role: "alert", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: restoreError.text }),
+          restoreFailureRetryable(restoreError.reason) && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: restoring, onClick: restore, children: "重试" })
+        ] }),
+        /* §非目标：命令改的文件没有旧内容可留 —— 必须如实说明，不假装覆盖了所有改动。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note fh-card-note-tail", children: "这里只看 Agent 用写入 / 编辑工具改过的文件；命令改的文件没有旧内容可留。还原会先把当前内容存成一条新版本，之后还能退回来。" })
+      ] });
+  const body = listError !== void 0
+    ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: listError, onRetry: refresh })
+    : list === void 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-index", role: "status", "aria-label": "正在读取变更", children: [0, 1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-row", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${72 - i * 9}%`, height: 12 }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${52 + i * 5}%`, height: 10 }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 90, height: 10 })
+          ] }, i)) }),
+          /* 加载态就在卡片里（与文件历史一致）：卡片的边框从第一帧就在，
+             数据到达时是「同一片区域被填上」，不是整块出现。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取变更…" }) })
+        ] })
+      : entries.length === 0
+        ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 22 }),
+            title: REVIEW_EMPTY_TITLE,
+            description: REVIEW_EMPTY_DESC
+          })
+        : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [indexColumn, card] });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "变更审阅" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-filter", role: "group", "aria-label": "筛选变更", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `rv-filter-btn${filter === "all" ? " is-active" : ""}`, "aria-pressed": filter === "all", onClick: () => selectFilter("all"), children: "全部" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `rv-filter-btn${filter === "pending" ? " is-active" : ""}`, "aria-pressed": filter === "pending", onClick: () => selectFilter("pending"), children: "只看待审阅" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取变更清单", onClick: refresh, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
+        "刷新"
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-review-desk": true, children: body })
+  ] });
+}
 /*
  * 项目视图（L1 卡片墙 / L2 详情）：骨架照 LibraryView（.settings 壳 + 三态一行表达式）。
  * 纯逻辑（卡片排序 / 会话行 / 产物过滤 / 字数）在 projects-core.js，单测直测。
@@ -69734,6 +70168,7 @@ function paletteActionEntries(ctx) {
     { id: "action:diagnostics", title: "打开诊断", keywords: ["诊断", "排错", "日志", "diagnostics"], run: ctx.openDiagnostics },
     { id: "action:stats", title: "打开统计", keywords: ["统计", "用量", "token", "stats"], run: ctx.openStats },
     { id: "action:file-history", title: "打开文件历史", keywords: ["文件", "历史", "版本", "还原", "时光机", "file", "history", "version"], run: ctx.openFileHistory },
+    { id: "action:review", title: "打开变更审阅", subtitle: "AI 改过的文件，逐条确认或还原", keywords: ["变更", "审阅", "审阅台", "已阅", "待审阅", "review", "diff"], run: ctx.openReview },
     { id: "action:session-search", title: "会话检索", subtitle: "在最近 200 个会话的正文里找，可跳回原消息", keywords: ["检索", "搜索", "查找", "会话", "历史", "search", "find"], run: ctx.openSearch },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
     { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
@@ -70538,6 +70973,7 @@ function App() {
       reloadSessions();
       reloadExperts();
       refreshGroups();
+      reloadReviewPending();
     };
     const offEvent = window.kami.onSessionEvent(({ sessionId, event }) => {
       if (sessionId !== visibleSessionIdRef.current) {
@@ -71429,6 +71865,28 @@ function App() {
     setView("projects");
     void reloadProjects();
   }, [view, reloadProjects]);
+  /*
+   * 侧栏「变更审阅」的角标。**只在启动、打开这一页、以及页面内标记/还原之后**
+   * 更新（ReviewView 通过 onPendingChange 交回计数），不在每次会话事件时重拉：
+   * 版本存储没有推送，逐事件拉只会把一次对话变成一串无意义的 IO。
+   * 失败静默（角标不是功能本体，拉不到时最多不显示数字）。
+   */
+  const [reviewPending, setReviewPending] = reactExports.useState(0);
+  const reloadReviewPending = reactExports.useCallback(() => {
+    window.kami.listReviewChanges().then((result) => {
+      if (typeof result?.pending === "number") setReviewPending(result.pending);
+    }).catch(() => {
+    });
+  }, []);
+  const openReview = reactExports.useCallback(() => {
+    /*
+     * 从「文件历史」进来的，返回就回「文件历史」—— 两页是同一份数据的两种看法，
+     * 退回去应该是「换个看法」，不是「跳回首页」。其它入口（命令面板）仍回原处。
+     */
+    setReturnView(view === "file-history" ? "file-history" : view === "chat" ? "chat" : "home");
+    setView("review");
+    reloadReviewPending();
+  }, [view, reloadReviewPending]);
   const assignProjectSession = reactExports.useCallback((sessionPath, projectId) => {
     void window.kami.assignProjectSession(sessionPath, projectId).then(() => {
       void reloadProjects();
@@ -71475,6 +71933,7 @@ function App() {
       openDiagnostics,
       openStats,
       openFileHistory,
+      openReview,
       openSearch,
       openSkills: () => openSkillsAt("skills"),
       openAutomations,
@@ -71534,7 +71993,7 @@ function App() {
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
     // 而是**面板搜到过期数据**——结果悄悄不对，界面上没有任何失败信号。
     // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
-  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openSearch, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
+  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openReview, openSearch, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
   const paletteIdleEntries = reactExports.useMemo(() => {
     const byId = new Map(paletteEntries.map((entry) => [entry.id, entry]));
     // 收藏的条目可能**不在**引导集里（一条更早的会话、一个技能、一个自动化）——
@@ -71676,6 +72135,8 @@ function App() {
         onOpenDiagnostics: openDiagnostics,
         onOpenStats: openStats,
         onOpenFileHistory: openFileHistory,
+        onOpenReview: openReview,
+        reviewPending,
         onOpenSearch: openSearch,
         onOpenSkills: () => setView("skills"),
         onOpenAutomations: openAutomations,
@@ -71832,7 +72293,21 @@ function App() {
         // 会话列表是 App 层的单一 state（侧栏与续摊卡共用），这里只读它把
         // version.sessionId 翻成会话标题；解析不到就如实说「来源会话已不在」。
         sessions: taskList,
-        onToast: showToast
+        onToast: showToast,
+        onOpenReview: openReview,
+        reviewPending
+      }
+    ),
+    view === "review" && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      ReviewView,
+      {
+        onClose: () => setView(returnView),
+        // 同一份会话列表：把变更的 sessionId 翻成标题 / 路径（「回到那次会话」）。
+        sessions: taskList,
+        onResumeSession: resumeTask,
+        onToast: showToast,
+        // 标记已阅 / 还原之后把新的待审阅数交回 App 更新侧栏角标。
+        onPendingChange: setReviewPending
       }
     ),
     view === "automations" && /* @__PURE__ */ jsxRuntimeExports.jsx(
