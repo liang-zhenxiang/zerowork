@@ -378,11 +378,18 @@ await h.check("⑦ 文件又有了新改动（新版本）→ 自动回到待审
 	writeFileSync(WORKSPACE_FILE, V3, "utf8");
 
 	await clickHeaderRefresh();
+	/*
+	 * 谓词必须把**两侧**都钉住，不能只等「新增侧出现 REVIEW_LATEST」：
+	 * CI 上撞到过一份「旧版本 id + 新磁盘内容」的瞬时对照 —— 改前那一侧是更早的
+	 * V1，新增侧却有 REVIEW_LATEST，弱谓词会当场放行，随后断言才红。
+	 * daemon 现在对这种情况返回 stale，根本不会画出假对照；这条谓词是第二道。
+	 */
 	const s = await waitView(
 		(state) =>
 			state.counts === "待审阅 1 · 已审阅 0" &&
 			state.rows[0]?.state === "待审阅" &&
-			state.cells.some((c) => c.add && c.text.includes("REVIEW_LATEST")),
+			state.cells.some((c) => c.add && c.text.includes("REVIEW_LATEST")) &&
+			state.cells.some((c) => c.del && c.text.includes("REVIEW_AFTER")),
 		"刷新后回到待审阅，并画出以 V2 为改前的新对照"
 	);
 	assert.equal(s.rows[0].stats, "+1 −0", `新变更的增删行数应来自 v2：${JSON.stringify(s.rows[0].stats)}`);

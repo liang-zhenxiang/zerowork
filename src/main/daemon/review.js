@@ -189,7 +189,13 @@ function unmarkReviewed(state, key) {
  * 入参 `{ key, versionId, versionsDir?, maxBytes? }`。返回：
  *   `{ ok:true, hunks, before, after, added, removed, truncated }`
  *   或 `{ ok:false, reason }`，reason ∈ unknown / no-such-version / missing /
- *   binary / too-large / no-after / symlink。
+ *   binary / too-large / no-after / symlink / stale。
+ *
+ * **`stale` 是必要的**：「改前」来自指定版本，「现在」读的是磁盘当前内容。
+ * 若在这两次读之间文件又被改了一版，拿旧版本 id 去配新文件内容，会画出一份
+ * **归因错误的 diff**（改前那一侧根本不是实际的上一次改动）。CI 上真的撞到过：
+ * 列表刷新与详情请求交错时，页面短暂显示「第一版 → 第三版」，而真正的上一次改动
+ * 是第二版。宁可拒绝，让界面刷新后按最新版本重算。
  *
  * `truncated:true` 表示 diff 触顶了 `DIFF_CELL_BUDGET`（`computeLineDiff` 只给
  * 增删行数、不给 `diff`）：界面必须降级为「改动过大，只给行数」，**不能**把空
@@ -208,6 +214,13 @@ function readReviewDiff(input = {}) {
 
   const file = readVersionFile(key, { dir });
   if (file === undefined) return { ok: false, reason: "unknown" };
+  /*
+   * 只认**最新**那一版：旧版本 id + 新磁盘内容 = 一份归因错误的 diff。
+   * 列表刷新与详情请求交错时真的会发生（CI 抓到过），所以在这里拒绝而不是
+   * 画一张「改前不是上一次改动」的图。
+   */
+  const latest = file.versions.length > 0 ? file.versions[file.versions.length - 1] : undefined;
+  if (latest === undefined || latest.id !== versionId) return { ok: false, reason: "stale" };
 
   // lstat 而不是 stat：符号链接**不跟随**。审阅台只该看 Agent 写过的那份文件本身，
   // 跟随链接会把这个页面变成「读链接指向的任意路径」的跳板（design.md §4）。

@@ -318,4 +318,22 @@ describe("readReviewDiff —— 改前读版本、改后读当前磁盘", () => 
 		rmSync(join(versionsDir, key, "100.txt"));
 		expect(readReviewDiff({ key, versionId: "100", versionsDir })).toEqual({ ok: false, reason: "missing" });
 	});
+
+	it("旧版本 id + 新磁盘内容 → stale（不画归因错误的 diff）", () => {
+		/*
+		 * CI 上真的撞到过：列表刷新与详情请求交错时，界面拿「第一版」去配
+		 * 「第三版」的磁盘内容，画出「改前 = 第一版」的假对照 —— 而真正的上一次
+		 * 改动是第二版。这里钉住：只要 versionId 不是最新，就拒绝。
+		 */
+		const versionsDir = tempDir();
+		const file = join(tempDir(), "z.md");
+		recordVersion({ path: file, content: "第一版\n", at: 100 }, { dir: versionsDir });
+		recordVersion({ path: file, content: "第二版\n", at: 200 }, { dir: versionsDir });
+		writeFileSync(file, "第三版\n");
+		const key = versionKeyOf(resolve(file));
+
+		// 最新一版（200）可以算；旧的那一版（100）必须拒绝。
+		expect(readReviewDiff({ key, versionId: "200", versionsDir }).ok).toBe(true);
+		expect(readReviewDiff({ key, versionId: "100", versionsDir })).toEqual({ ok: false, reason: "stale" });
+	});
 });
