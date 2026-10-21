@@ -53,7 +53,7 @@ daemon 就绪后向渲染层推送 `daemon:ready`。但**推送可能在渲染�
 | 路径 | 职责 |
 | --- | --- |
 | `src/main/index.js` | 应用入口：窗口、菜单、快捷键、CSP、IPC 注册、daemon 拉起 |
-| `src/main/daemon/` | Agent 内核，43 个领域模块（见下） |
+| `src/main/daemon/` | Agent 内核，52 个领域模块（见下） |
 | `src/main/sandbox/` | 沙箱探测与执行，独立 worker |
 | `src/preload/index.js` | contextBridge 桥接层，定义渲染层可见的 IPC 面 |
 | `src/shared/ipc.js` | IPC 通道常量与文档类型判定，主进程与 preload 共用 |
@@ -63,7 +63,7 @@ daemon 就绪后向渲染层推送 `daemon:ready`。但**推送可能在渲染�
 
 ### daemon 模块划分
 
-daemon 共约 24,400 行，按领域拆为 43 个模块（两个数字都会随迭代漂移，
+daemon 共约 24,400 行，按领域拆为 52 个模块（两个数字都会随迭代漂移，
 实时值以 `npm run check:daemon-graph` 的输出为准）。主要模块：
 
 | 模块 | 职责 |
@@ -73,6 +73,7 @@ daemon 共约 24,400 行，按领域拆为 43 个模块（两个数字都会随�
 | `session-view.js` | 会话视图投影：时间线、diff、文件呈现、对话条目 |
 | `session-state.js` | 状态归约、宿主池、上下文用量、会话检索 |
 | `session-files.js` | 会话文件读写、分支、用量统计、自动化调度 |
+| `review.js` | 变更审阅台：按变更列队、已阅状态、并排 diff 读取（复用 `version-store.js`） |
 | `command-exec.js` | 命令执行、权限闸门、危险模式匹配 |
 | `permission-rules.js` | 命令与路径的权限判定 |
 | `runtimes.js` | 运行时管理：安装、探测、环境注入、诊断 |

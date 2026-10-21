@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e/单测分层、反向验证与等待谓词规范"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层改动规范"}

@@ -12800,6 +12800,340 @@ button.agent-row {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   变更审阅台（.rv-*）
+
+   与文件历史同构：左列是**无边框索引列**（导航，不是第二个盒子），右区是
+   **全页唯一的内容卡**（复用 .fh-card，不再造第二个卡片语言，DESIGN §3.9）。
+   新增的只有「变更行」与「并排对照」两块：
+
+   · 状态**文字 + 颜色双通道**（DESIGN §7.6）：每行都写「待审阅 / 已审阅」，
+     颜色只是第二通道；待审阅用 --accent、已阅用次文（design.md §5）。
+   · diff 的 +/− 行直接复用既有的 .diff-add / .diff-del（变更预览同一套颜色，
+     不新造色值）；左右两列本身就是第二条通道 —— 只有左侧有的行 = 删除。
+   · 行数不是状态，不借 --ok / --danger（同 .fh-node-change 的口径）。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.settings-body[data-review-desk] {
+	max-width: none;
+	container-type: inline-size;
+}
+
+.rv-layout {
+	display: grid;
+	grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+	gap: var(--space-6);
+	align-items: start;
+}
+
+.rv-index {
+	min-width: 0;
+}
+
+/* 左列区头的计数：等宽数字，宽度随数字变化不推挤下面的列表。
+   颜色用 --text 而不是次文 —— 「已审阅」是必须读得出的状态（P1-4）。 */
+.rv-head-counts {
+	flex: 0 0 auto;
+	margin: 0 0 var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+}
+
+/* 筛选是一枚分段控件：静态底 --bg-chip，选中项回到页面底色 —— 不用下划线，
+   也不借状态色（「全部 / 待审阅」是视图选择，不是状态）。 */
+.rv-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	padding: 2px;
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+}
+
+/* 未选中的筛选标签也是必须读得出的控件文字 —— 用 --text（P1-4），
+   选中态靠抬升面 + 字重区分，不再多造一档颜色。 */
+.rv-filter-btn {
+	flex: 0 0 auto;
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	font-size: var(--text-meta);
+	color: var(--text);
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.rv-filter-btn:hover {
+	background: var(--bg-hover);
+}
+
+.rv-filter-btn:active {
+	transform: scale(0.98);
+}
+
+/* 选中是双通道：抬升面 + 字重（与 .settings-nav-item.active 同一手法），
+   不靠颜色深浅单独表达。 */
+.rv-filter-btn.is-active {
+	background: var(--bg-raised);
+	color: var(--text);
+	font-weight: 500;
+}
+
+/* 变更队列：可独立滚动（右区对比可能很长，左列不该被一起推下去）。 */
+.rv-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	max-height: min(60vh, 560px);
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+/* 整行可点的透明底行，hover 才浮底，选中复用 .fh-file-row 的既有口径。 */
+.rv-row {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	width: 100%;
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	text-align: left;
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.rv-row:hover {
+	background: var(--bg-hover);
+}
+
+.rv-row:active {
+	transform: scale(0.98);
+}
+
+.rv-row.selected {
+	background: var(--bg-raised);
+}
+
+.rv-row-main {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+.rv-row-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-list);
+	color: var(--text);
+}
+
+/* 状态是文字 + 形态 + 颜色三重表达（DESIGN §7.6）：
+   待审阅 = 实心 accent 点，已阅 = 对勾 —— 两态的**形状**就不一样，扫视不必靠颜色。
+   已阅文字用 --text（P1-4：必须读得出的状态）。 */
+.rv-state {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	font-size: var(--text-meta);
+	color: var(--text);
+	white-space: nowrap;
+}
+
+.rv-state-dot {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	background: currentColor;
+}
+
+.rv-state-check {
+	flex: none;
+}
+
+.rv-state.pending {
+	color: var(--accent);
+}
+
+/* 目录 / 时间 / 行数是索引行里必须读得出的信息，用 --text（P1-4）。 */
+.rv-row-dir {
+	display: block;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
+.rv-row-meta {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
+.rv-row-stats {
+	flex: 0 0 auto;
+	font-family: var(--font-mono);
+}
+
+/* ── 右区：动作 / 边界说明 / 并排对照（卡片本体复用 .fh-card）────────── */
+.rv-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+
+/* `+N −M` 并进 meta 行，等宽数字（与左列 .rv-row-stats 同一口径）。 */
+.rv-meta-stats {
+	font-family: var(--font-mono);
+}
+
+/* 本页卡片里的 meta 是「目录 · 时间 · 来源 · 行数」，必须读得出（P1-4）。
+   只作用于审阅页，不动全局 .fh-card-meta（文件历史的视觉另行评估）。 */
+.settings-body[data-review-desk] .fh-card-meta {
+	color: var(--text);
+}
+
+/* 边界（二进制 / 文件已不在 / 版本过期…）不是错误现场：中性抬升面 + 可读正文，
+   只有真正的写入失败才走 .fh-confirm-error 的 danger 语言。 */
+.rv-boundary {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	margin-top: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
+.rv-boundary-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	line-height: 1.6;
+}
+
+/* 并排对照：左「改前」右「现在」。列头 sticky，长 diff 滚动时仍读得出哪列是哪列。
+   这是本页**唯一需要逐字读**的内容，正文用 --text-list（DESIGN §3.4），
+   高度上限放到 70vh / 720px，避免长 diff 在 420px 盒子里滚动、下方却空半屏。 */
+.rv-diff {
+	margin-top: var(--space-3);
+	max-height: min(70vh, 720px);
+	overflow: auto;
+	scrollbar-gutter: stable;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	font-family: var(--font-mono);
+	font-size: var(--text-list);
+	line-height: 1.6;
+	tab-size: 4;
+}
+
+.rv-diff-head,
+.rv-diff-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.rv-diff-head {
+	position: sticky;
+	top: 0;
+	z-index: var(--z-base);
+	background: var(--bg-raised);
+	border-bottom: 1px solid var(--border);
+}
+
+.rv-diff-head span {
+	padding: var(--space-1) var(--space-3);
+	color: var(--text);
+}
+
+.rv-diff-head span+span {
+	border-left: 1px solid var(--border);
+}
+
+.rv-diff-cell {
+	min-height: 1.6em;
+	padding: 0 var(--space-3);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	color: var(--text);
+}
+
+/* 增删底色复用既有 .diff-add / .diff-del；正文色**显式**保持 --text。
+   不加这一条时，黑字只是靠「书签顺序 + 特异性相同」压住 .diff-add 的绿字 ——
+   以后有人调整规则顺序，就会放出 2.17:1 的绿字。 */
+.rv-diff-cell.diff-add,
+.rv-diff-cell.diff-del {
+	color: var(--text);
+}
+
+.rv-diff-cell+.rv-diff-cell {
+	border-left: 1px solid var(--border);
+}
+
+/* 一侧没有对应行 = 纯增 / 纯删；空槽用抬升面，读起来是「这一侧原来是空的」。 */
+.rv-diff-cell.is-empty {
+	background: var(--bg-raised);
+}
+
+/* 区头是「第 N 行起」这句人话，不是装饰 —— 用 --text（P1-4）。 */
+.rv-diff-hunk {
+	padding: 0 var(--space-3);
+	background: var(--bg-raised);
+	color: var(--text);
+}
+
+/* ── 侧栏角标：待审阅数，0 时整个节点不渲染（调用方判） ───────────── */
+.nav-badge {
+	flex: 0 0 auto;
+	margin-left: auto;
+	padding: 0 var(--space-1);
+	border-radius: var(--radius-full);
+	background: var(--bg-chip);
+	font-size: var(--text-meta);
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+	/* 与 .space-group-badge / .settings-section-badge 同一条基线口径。 */
+	line-height: 18px;
+}
+
+/* ── 窄容器退让（容器查询锚在可用宽度上）───────────────────────── */
+@container (max-width: 880px) {
+	.rv-layout {
+		grid-template-columns: minmax(200px, 240px) minmax(0, 1fr);
+	}
+}
+
+/* < 620px：索引列与内容卡上下叠放，队列自己限高滚动（不另造选择条：
+   这一页的右区不依赖「一次只看一条」，上下叠放仍能逐条点开）。 */
+@container (max-width: 620px) {
+	.rv-layout {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-5);
+	}
+
+	.rv-list {
+		max-height: 30vh;
+	}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
    会话检索（.ss-*）
 
    本屏只做一件事：把「搜一句话 → 回到那句话」做成最短路径。因此

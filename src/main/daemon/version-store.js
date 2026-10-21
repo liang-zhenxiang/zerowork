@@ -279,6 +279,18 @@ function listVersionFiles(options = {}) {
     };
     if (last !== undefined && last.sessionId !== undefined) entry.lastSessionId = last.sessionId;
     if (last !== undefined && last.tool !== undefined) entry.lastTool = last.tool;
+    // 变更审阅台（review.js）需要「最近这次改动」的完整描述才能列队：版本 id 用来
+    // 判定「已阅的到底是哪一版」，at 用来排序，tool / sessionId / 行数变化直接展示。
+    // **只增字段**：上面的既有字段（含 lastAt / lastTool / lastSessionId）一个都不动，
+    // 文件历史页还在读它们。
+    if (last !== undefined) {
+      entry.versionId = last.id;
+      entry.at = last.at;
+      if (last.tool !== undefined) entry.tool = last.tool;
+      if (last.sessionId !== undefined) entry.sessionId = last.sessionId;
+      if (last.added !== undefined) entry.added = last.added;
+      if (last.removed !== undefined) entry.removed = last.removed;
+    }
     files.push(entry);
   }
   files.sort((a, b) => b.lastAt - a.lastAt);
@@ -434,6 +446,9 @@ export {
   VERSION_LIST_MAX_FILES,
   VERSION_MAX_BYTES,
   VERSION_MAX_PER_FILE,
+  // 变更审阅台读「当前磁盘文件」时复用同一个二进制判据（前 8 KiB 含 NUL），
+  // 不能各写一套 —— 两处判据一旦分叉，同一个文件会在两个页面里有两种说法。
+  looksBinary,
   listVersionFiles,
   readVersionContent,
   readVersionFile,

@@ -686,9 +686,10 @@ await h.check("⑥ 确认还原 → 磁盘内容退回到那一版（副作用�
 	);
 	await h.shoot("file-history-restored-light");
 	assert.equal(s.nodes.length, 3, `还原之后应有 3 个节点（2 版历史 + 还原留的那一版）：${JSON.stringify(s.nodes.map((n) => n.change))}`);
+	// 工具名已翻成用户话术（与变更审阅共用 file-history-core 的 formatToolName）。
 	assert.ok(
-		s.nodes[2].source.includes("restore"),
-		`新留下的那一版来源应是 restore：${JSON.stringify(s.nodes[2].source)}`
+		s.nodes[2].source.includes("还原"),
+		`新留下的那一版来源应是「还原」：${JSON.stringify(s.nodes[2].source)}`
 	);
 	// 左列清单也跟着刷新（版本数从 2 变 3），不是只刷了右列。
 	const row = s.rows.find((r) => r.name === FILE_NAME);
