@@ -164,7 +164,7 @@ const clickBack = async () => {
 };
 
 // ══ ① 视图页仍是灰底上的圆角白卡 ══════════════════════════════════════
-await h.check("① 视图页（.app 直接子项）仍是圆角白卡：margin 6px / radius 10px / bg var(--bg)", async () => {
+await h.check("① 视图页（.app 直接子项）仍是一张不透明的圆角卡：margin 6px / radius=--radius-md / 底色不透明", async () => {
 	await waitFor("main.home", "首页视图出现（默认 view=home）");
 	const card = await win.evaluate(() => {
 		const el = document.querySelector(".app > main.home");
@@ -173,8 +173,19 @@ await h.check("① 视图页（.app 直接子项）仍是圆角白卡：margin 6
 		return { margin: cs.margin, radius: cs.borderRadius, bg: cs.backgroundColor };
 	});
 	assert.equal(card.margin, "6px", `视图页 margin 应为 var(--space-2)=6px，实际 ${card.margin}（改坏了吗？）`);
-	assert.equal(card.radius, "10px", `视图页 border-radius 应为 var(--radius-md)=10px，实际 ${card.radius}`);
-	assert.equal(card.bg, "rgb(255, 255, 255)", `视图页背景应为 var(--bg)=#ffffff（浅色），实际 ${card.bg}`);
+	// 圆角与底色都不再写死：极光墨把 --radius-md 从 10 提到 14、把视图页底色
+	// 从 --bg 纯白换成 --canvas 冷白（这是有意的视觉变更）。这条用例真正要守的是
+	// 「视图页仍是一张**不透明**的圆角卡，没被模态背板之类的东西盖掉」，
+	// 所以改成对着 token 断言，而不是对着上一次的数值。
+	const tok = await win.evaluate(() => {
+		const cs = getComputedStyle(document.documentElement);
+		return { md: cs.getPropertyValue("--radius-md").trim() };
+	});
+	assert.equal(card.radius, tok.md, `视图页 border-radius 应等于 --radius-md(${tok.md})，实际 ${card.radius}`);
+	assert.ok(
+		/^rgb\(/.test(card.bg),
+		`视图页底色必须不透明，实际 ${card.bg} —— 透明意味着被别的层盖掉了`,
+	);
 });
 
 // ══ ② 设置面板（直挂 .app，受影响；浅色） ══════════════════════════════

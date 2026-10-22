@@ -38,7 +38,14 @@ const pressShortcut = (combo) => win.keyboard.press(combo);
 await h.check("默认侧栏展开", async () => {
 	assert.equal(await sidebarState(), "open");
 });
-const openStats = (await h.shoot("sidebar-open")).stats;
+await h.shoot("sidebar-open");
+// 主列左边缘：折叠侧栏后应左移。几何比「整幅平均亮度」可靠得多。
+const mainLeft = () =>
+	win.evaluate(() => {
+		const el = document.querySelector(".home, .chat, .settings, .app-view");
+		return el ? el.getBoundingClientRect().left : -1;
+	});
+const openLeft = await mainLeft();
 
 await h.check("⌘+.（meta 修饰）能折叠侧栏", async () => {
 	await pressShortcut("Meta+.");
@@ -48,16 +55,18 @@ await h.check("⌘+.（meta 修饰）能折叠侧栏", async () => {
 	});
 });
 await h.waitForSettled();
-const collapsedStats = (await h.shoot("sidebar-collapsed")).stats;
+await h.shoot("sidebar-collapsed");
 
-await h.check("折叠后画面确实变了（亮度差 > 1，布局真的让位了）", async () => {
-	// 侧栏灰底比主区白底暗：折叠后灰区消失，浅色主题下画面应变亮。
-	// 阈值取 1：这是「布局是否真的变了」的信号断言，不是主题级的大反差。
-	const delta = Math.abs(collapsedStats.mean - openStats.mean);
+await h.check("折叠后主列真的向让位了（几何断言：主列左边缘左移）", async () => {
+	// 原断言比的是整幅平均亮度（旧版侧栏是灰底、主区是白底，折叠后必然变亮）。
+	// 极光墨之后侧栏与画布同属浅色系，平均亮度对布局几乎不敏感（实测 |Δ|≈0.4），
+	// 它就不再是「布局有没有让位」的有效信号 —— 换成直接量几何：主列左边缘应左移。
+	const collapsedLeft = await mainLeft();
+	assert.ok(openLeft >= 0, `找不到主列容器（left=${openLeft}）`);
 	assert.ok(
-		delta > 1,
-		`展开 mean=${openStats.mean.toFixed(2)}，折叠 mean=${collapsedStats.mean.toFixed(2)}，` +
-			`|Δ|=${delta.toFixed(2)} ≤ 1 —— 属性切了但布局没让位？`,
+		collapsedLeft < openLeft - 80,
+		`展开 left=${openLeft.toFixed(1)}，折叠 left=${collapsedLeft.toFixed(1)} —— ` +
+			`侧栏收了但主列没有让位？`,
 	);
 });
 

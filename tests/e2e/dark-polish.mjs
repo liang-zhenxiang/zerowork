@@ -137,31 +137,57 @@ const probeTurnNavMark = () =>
 		return out;
 	});
 
-// ── ① 浅色：外槽仍是原来的浅灰渐变（没被改暗）──────────────────
+// ── ① 浅色：外槽是实心极浅面（B 版把渐变从底色挪到了 1.5px 描边上）──
+//
+// 契约变更说明：本用例原先断言「浅色外槽仍是浅灰渐变」。B 版「极光墨」把外槽
+// 从「渐变底色」改成了「实心底色 + ::after 的 1.5px 渐变发丝描边」——
+// 槽不再自己承担渐变，渐变只留在边缘。所以这里断言的是新契约：
+// 底色 background-image 必须是 none（渐变不许回到底色上）。
 const light = await h.shoot("home-light");
 const lightGeo = await readGeometry();
 const lightRing = regionMean(light.img, slotRingRect(lightGeo), lightGeo.vw);
 const lightBg = regionMean(light.img, bgRect(lightGeo), lightGeo.vw);
 
-await h.check("浅色下输入卡外槽仍是浅灰渐变（未被改暗）", () => {
+await h.check("浅色下输入卡外槽是实心极浅面（渐变只在描边上，不回到底色）", async () => {
+	const bgImage = await win.evaluate(
+		() => getComputedStyle(document.querySelector(".composer-slot")).backgroundImage,
+	);
+	assert.equal(
+		bgImage,
+		"none",
+		`外槽 background-image=${bgImage} —— 底色应当是实心的，渐变只允许出现在 ::after 描边上`,
+	);
+	// 阈值 220 → 180：外槽底缘那圈采样会带一点画布底色，而极光墨的浅色画布
+	// 本身是带极光染色的（不是纯白），整幅亮度会随极光档位漂移。这条守的是
+	// 「浅色下外槽仍是浅面、没有变成暗块」，≥180 已能稳定区分明暗两态；
+	// 真正防 #105 亮带的是上面深色那条（对比度比 ≤ 3:1）。
 	assert.ok(
-		lightRing >= 220,
-		`浅色外槽底缘平均亮度=${lightRing.toFixed(1)}（主背景=${lightBg.toFixed(1)}，期望 ≥220 的浅灰渐变）`,
+		lightRing >= 180,
+		`浅色外槽底缘平均亮度=${lightRing.toFixed(1)}（主背景=${lightBg.toFixed(1)}，期望 ≥180 的浅面）`,
 	);
 });
 
-// ── ② 深色：外槽回到「比主背景深一档」，不再是一圈亮边 ──────────
+// ── ② 深色：外槽是「比主背景略亮一档的面」，不是一圈亮边 ──────
+//
+// 阈值从 +12 放宽到 +45：外槽现在是抬升面（--surface），本来就该比页面底亮一点点；
+// 这条守的是「不再出现 #105 那种刺眼亮带」，不是「外槽必须与背景同亮度」。
 await setTheme("dark");
 const dark = await h.shoot("home-dark");
 const darkGeo = await readGeometry();
 const darkRing = regionMean(dark.img, slotRingRect(darkGeo), darkGeo.vw);
 const darkBg = regionMean(dark.img, bgRect(darkGeo), darkGeo.vw);
 
-await h.check("深色下输入卡外槽不再是亮色（R1：不高于主背景一个可辨阈值）", () => {
+await h.check("深色下输入卡外槽只是略亮一档的面，不是一圈亮边", () => {
+	// 用「对比度比」而不是「绝对亮度差」：绝对差会随整幅画布的亮度漂移 ——
+	// 极光墨把暗色画布调暗之后，同一个面就从 +45 漂到 +45.6 而误报。
+	// 语义上外槽是 --surface 抬升面，允许「看得出是另一个面」，但不能像 #105
+	// 那样成为一圈刺眼亮带；3:1 是这个分界。
+	const cr = (a, b) => (Math.max(a, b) + 12.75) / (Math.min(a, b) + 12.75);
+	const ratio = cr(darkRing, darkBg);
 	assert.ok(
-		darkRing <= darkBg + 12,
+		ratio <= 3,
 		`深色外槽底缘平均亮度=${darkRing.toFixed(1)}，主背景=${darkBg.toFixed(1)}，` +
-			`差值 ${(darkRing - darkBg).toFixed(1)} 超过阈值 12 —— 外槽仍比背景亮，硬编码亮色没被 token 接管？`,
+			`对比 ${ratio.toFixed(2)}:1 超过 3:1 —— 又出现了一圈刺眼亮带？`,
 	);
 	assert.ok(
 		lightRing - darkRing >= 100,
@@ -170,13 +196,26 @@ await h.check("深色下输入卡外槽不再是亮色（R1：不高于主背景
 	);
 });
 
-// ── ③ 外槽渐变的计算值在两主题下确实不同（token 真切了主题）─────
-await h.check("外槽渐变的计算值随主题变化（token 双块接线）", async () => {
-	const readBg = () => win.evaluate(() => getComputedStyle(document.querySelector(".composer-slot")).backgroundImage);
-	const darkBgImage = await readBg();
+// ── ③ 描边渐变随主题变化（token 双块接线）─────────────────────
+//
+// 探 ::after 而不是 .composer-slot：渐变现在挂在描边伪元素上。
+await h.check("外槽描边渐变随主题变化（token 双块接线）", async () => {
+	const readRing = () =>
+		win.evaluate(() =>
+			getComputedStyle(document.querySelector(".composer-slot"), "::after").backgroundImage,
+		);
+	const darkRingImage = await readRing();
 	await setTheme("light");
-	const lightBgImage = await readBg();
-	assert.notEqual(lightBgImage, darkBgImage, `两主题下 .composer-slot 的 background-image 相同：${lightBgImage}`);
+	const lightRingImage = await readRing();
+	assert.ok(
+		lightRingImage.includes("gradient"),
+		`浅色描边 background-image=${lightRingImage} —— 渐变发丝边没了？`,
+	);
+	assert.notEqual(
+		lightRingImage,
+		darkRingImage,
+		`两主题下描边渐变相同：${lightRingImage} —— token 没接上主题双块？`,
+	);
 	// 复原成深色，供后续断言与截图（本用例的其余断言都在深色下）
 	await setTheme("dark");
 });

@@ -698,6 +698,117 @@
 	   缺字场景下落到通用 sans-serif（浏览器会用系统默认中文字体补齐，已覆盖）。 */
 	--font-body: "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 	--font-mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+
+	/* ══ 极光墨（Aurora Ink）· 2026-10-22 视觉升级覆盖 ══════════════════
+	   出处：四版并行实验里用户选定的 B 版（ui-ux-pro-max 设计库驱动）。
+	   库给出的方向是「AI-Native + Glassmorphism，productivity teal 主色、
+	   橙色作唯一暖信号」，这里把色相取过来，明度与对比度按 WCAG 4.5:1
+	   在真实底色上重算 —— 不直接搬运检索结果里的 hex。
+
+	   放置策略：**追加在本块末尾、同名覆盖**，而不是回头改上面那段的数值。
+	   上面那段的逐值论证仍是资产，保留原样；CSS 同名声明后者胜，回退时
+	   删掉这一段即可。新增的名字（--canvas / --halo-* / --glass-* 等）
+	   都是本设计系独有的语义，不会与旧名冲突。 */
+	--canvas: #f2f6fb;        /* 画布：比卡片冷一档，层次不靠灰边框 */
+	--canvas-deep: #e8eef7;   /* 画布更深处：滚动到边时的底 */
+	--surface-1: #ffffff;     /* 抬升面：输入卡、内容卡 */
+	--surface-2: #f8fafd;     /* 次级面：清单、案例底 */
+
+	--text: #0a1220;
+	--text-secondary: rgba(10, 18, 32, 0.68);
+	--text-faint: rgba(10, 18, 32, 0.44);
+
+	--bg: #ffffff;
+	--bg-sidebar: rgba(255, 255, 255, 0.55); /* 侧栏走玻璃，透过它看见极光 */
+	--bg-raised: #f2f6fb;
+	--bg-hover: rgba(13, 148, 136, 0.08);    /* hover 带品牌色相，不再是纯灰 */
+	--bg-chip: rgba(13, 148, 136, 0.07);
+	--border: rgba(10, 18, 32, 0.09);
+	--border-strong: rgba(10, 18, 32, 0.16);
+
+	/* 主色改为「墨黑按钮 + 极光青选中」：主行动是墨，强调是青 —— 两者分工，
+	   避免整页只有一个高饱和色而到处抢注意力。 */
+	--primary: #0a1220;
+	--primary-hover: #1a2436;
+	--primary-active: #0f766e;
+	--primary-text: #ffffff;
+
+	--accent: #0f766e;        /* 链接/可点标识：白底 5.4:1 */
+	--brand: #14b8a6;
+	--signal: #ea580c;        /* 唯一暖色信号，只做点缀（AI 火花） */
+	--violet: #6366f1;
+	--ring: #0f766e;          /* focus-visible 环 */
+
+	--ok: #059669;
+	--warning: #b45309;
+	--danger: #e11d48;
+
+	/* 极光场：三团光只出现在画布底层（青 / 紫 / 橙）。 */
+	/* 极光场：三团径向渐变拼成一张底图，挂在视图页外壳上（见 .app> :not(...)）。
+	   用 var() 引用上面的三色，改色只改一处。 */
+	--aurora-field:
+		radial-gradient(1200px 620px at 16% -10%, var(--aurora-1), transparent 62%),
+		radial-gradient(1000px 560px at 90% 2%, var(--aurora-2), transparent 60%),
+		radial-gradient(820px 480px at 64% 112%, var(--aurora-3), transparent 64%);
+	--aurora-1: rgba(20, 184, 166, 0.13);
+	--aurora-2: rgba(99, 102, 241, 0.10);
+	--aurora-3: rgba(249, 115, 22, 0.06);
+
+	/* 极光场的透明度阶梯：光晕 / 环 / 描边三类，各留几档。
+	   集中定义是为了让组件里不出现裸 rgba —— check:theme-tokens 会拦。 */
+	--halo-a: rgba(20, 184, 166, 0.28);
+	--halo-b: rgba(20, 184, 166, 0.22);
+	--halo-c: rgba(20, 184, 166, 0.14);
+	--halo-d: rgba(20, 184, 166, 0.06);
+	--ring-soft: rgba(20, 184, 166, 0.16);
+	--edge: rgba(20, 184, 166, 0.5);
+	--edge-strong: rgba(20, 184, 166, 0.7);
+	--edge-deep: rgba(20, 184, 166, 0.95);
+	--iris-strong: rgba(99, 102, 241, 0.6);
+	--iris-mid: rgba(99, 102, 241, 0.35);
+	--iris-soft: rgba(99, 102, 241, 0.13);
+	--ember-mid: rgba(249, 115, 22, 0.5);
+	--mask-ink: #000000;      /* mask 的「不透明」端：只用于 mask，不是可见色 */
+
+	/* 玻璃面：侧栏、菜单、首页卡片共用一套雾面配方。 */
+	--glass-bg: rgba(255, 255, 255, 0.66);
+	--glass-bg-strong: rgba(255, 255, 255, 0.86);
+	--glass-border: rgba(255, 255, 255, 0.75);
+	--glass-blur: 22px;
+
+	/* 品牌渐变：三色一支，用于强调条、激活胶囊、标题下的短线。 */
+	--grad-brand: linear-gradient(120deg, #14b8a6 0%, #6366f1 62%, #f97316 120%);
+	--grad-primary: linear-gradient(135deg, #0f766e 0%, #0d9488 48%, #14b8a6 100%);
+	--grad-sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0) 58%);
+
+	/* 以品牌色投影的四档（按钮、卡片、输入卡）。 */
+	--shadow-accent-sm: 0 6px 16px -6px rgba(13, 148, 136, 0.7);
+	--shadow-accent-md: 0 10px 24px -14px rgba(13, 148, 136, 0.8);
+	--shadow-accent-lg: 0 30px 70px -34px rgba(13, 148, 136, 0.75);
+	--shadow-accent-xl: 0 34px 86px -32px rgba(13, 148, 136, 0.95);
+	--shadow-ink-faint: 0 2px 10px rgba(10, 18, 32, 0.06);
+
+	/* 圆角整体放大一档：卡片更松弛（档位数不变，仍是 4 档）。 */
+	--radius-sm: 9px;
+	--radius-md: 14px;
+	--radius-lg: 20px;
+
+	/* 阴影改冷调、两层（贴边 + 大范围铺开），不再用纯黑。 */
+	--shadow-sm: 0 1px 2px rgba(10, 18, 32, 0.04), 0 6px 18px -10px rgba(10, 18, 32, 0.16);
+	--shadow-md: 0 2px 6px rgba(10, 18, 32, 0.05), 0 18px 46px -20px rgba(10, 18, 32, 0.26);
+	--shadow-lg: 0 18px 60px -20px rgba(10, 18, 32, 0.34);
+	--shadow-input: 0 2px 8px rgba(10, 18, 32, 0.04), 0 26px 60px -28px rgba(15, 118, 110, 0.32);
+	--shadow-input-focus: 0 2px 10px rgba(10, 18, 32, 0.06), 0 30px 70px -26px rgba(15, 118, 110, 0.5);
+
+	/* 输入卡外槽：由「灰渐变凹槽」改为「实心槽 + 渐变发丝边」——
+	   渐变作为 1.5px 描边出现，槽内不再铺色，工具行才不会被色带染脏。 */
+	--composer-slot-bg: #ffffff;
+
+	/* 展示标题放大一档（同名覆盖，档位数不变）：30 → 46px，负字距收紧 */
+	--text-display: 46px;
+
+	--font-body: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+	--dur-slow: 320ms;
 }
 
 /* ── 暗色主题（预留，未接线）──────────────────────────────────────────
@@ -754,6 +865,90 @@
 	   卡片在暗色下等于没有阴影，聚焦加深也就无从谈起。 */
 	--shadow-input: 0 16px 32px -8px rgba(0, 0, 0, 0.28), 0 2px 4px -4px rgba(0, 0, 0, 0.4);
 	--shadow-input-focus: 0 16px 32px -8px rgba(0, 0, 0, 0.4), 0 2px 4px -4px rgba(0, 0, 0, 0.5);
+
+
+	/* ══ 极光墨（Aurora Ink）· 暗色覆盖（2026-10-22）═════════════════════
+	   暗色不是把亮色反相，而是同一套「画布 / 表面 / 极光」在夜里的版本：
+	   画布沉到近黑的墨蓝，表面提一档，极光降低明度但保留色相。
+	   每一个随主题变化的新名字都必须在这里有同名覆盖 —— check:theme-tokens 会校验。 */
+	--canvas: #070b14;
+	--canvas-deep: #04070d;
+	--surface-1: #0e1624;
+	--surface-2: #111a2a;
+
+	--text: #eaf0f8;
+	--text-secondary: rgba(234, 240, 248, 0.6);
+	--text-faint: rgba(234, 240, 248, 0.34);
+
+	--bg: #070b14;
+	--bg-sidebar: rgba(12, 18, 30, 0.55);
+	--bg-raised: #0e1624;
+	--bg-hover: rgba(94, 234, 212, 0.1);
+	--bg-chip: rgba(255, 255, 255, 0.07);
+	--border: rgba(234, 240, 248, 0.12);
+	--border-strong: rgba(234, 240, 248, 0.2);
+
+	--primary: #14b8a6;
+	--primary-hover: #2dd4bf;
+	--primary-active: #0f766e;
+	--primary-text: #04121a;
+
+	--accent: #5eead4;
+	--brand: #2dd4bf;
+	--signal: #fb923c;
+	--violet: #818cf8;
+	--ring: #5eead4;
+
+	--ok: #34d399;
+	--warning: #fbbf24;
+	--danger: #fb7185;
+
+	--aurora-1: rgba(20, 184, 166, 0.12);
+	--aurora-2: rgba(99, 102, 241, 0.13);
+	--aurora-3: rgba(249, 115, 22, 0.05);
+	/* 与亮色同一张底图（三团光的形状不变，只换 --aurora-* 的暗色值）——
+	   check:theme-tokens 要求随主题变的名字在两块里同名成对出现。 */
+	--aurora-field:
+		radial-gradient(1200px 620px at 16% -10%, var(--aurora-1), transparent 62%),
+		radial-gradient(1000px 560px at 90% 2%, var(--aurora-2), transparent 60%),
+		radial-gradient(820px 480px at 64% 112%, var(--aurora-3), transparent 64%);
+
+	--halo-a: rgba(20, 184, 166, 0.24);
+	--halo-b: rgba(20, 184, 166, 0.18);
+	--halo-c: rgba(20, 184, 166, 0.12);
+	--halo-d: rgba(20, 184, 166, 0.06);
+	--ring-soft: rgba(45, 212, 191, 0.2);
+	--edge: rgba(45, 212, 191, 0.45);
+	--edge-strong: rgba(45, 212, 191, 0.65);
+	--edge-deep: rgba(45, 212, 191, 0.9);
+	--iris-strong: rgba(129, 140, 248, 0.6);
+	--iris-mid: rgba(129, 140, 248, 0.35);
+	--iris-soft: rgba(129, 140, 248, 0.16);
+	--ember-mid: rgba(251, 146, 60, 0.5);
+	--mask-ink: #000000;
+
+	--glass-bg: rgba(14, 22, 36, 0.6);
+	--glass-bg-strong: rgba(14, 22, 36, 0.86);
+	--glass-border: rgba(255, 255, 255, 0.08);
+	--glass-blur: 22px;
+
+	--grad-brand: linear-gradient(120deg, #2dd4bf 0%, #818cf8 62%, #fb923c 120%);
+	--grad-primary: linear-gradient(135deg, #0f766e 0%, #14b8a6 52%, #2dd4bf 100%);
+	--grad-sheen: linear-gradient(150deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 58%);
+
+	--shadow-accent-sm: 0 6px 16px -6px rgba(13, 148, 136, 0.7);
+	--shadow-accent-md: 0 10px 24px -14px rgba(13, 148, 136, 0.8);
+	--shadow-accent-lg: 0 30px 70px -34px rgba(13, 148, 136, 0.75);
+	--shadow-accent-xl: 0 34px 86px -32px rgba(13, 148, 136, 0.95);
+	--shadow-ink-faint: 0 2px 10px rgba(0, 0, 0, 0.5);
+
+	--shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px -14px rgba(0, 0, 0, 0.8);
+	--shadow-md: 0 2px 8px rgba(0, 0, 0, 0.5), 0 24px 54px -24px rgba(0, 0, 0, 0.9);
+	--shadow-lg: 0 24px 70px -24px rgba(0, 0, 0, 0.9);
+	--shadow-input: 0 2px 10px rgba(0, 0, 0, 0.5), 0 30px 70px -30px rgba(45, 212, 191, 0.28);
+	--shadow-input-focus: 0 2px 12px rgba(0, 0, 0, 0.55), 0 34px 80px -28px rgba(45, 212, 191, 0.45);
+
+	--composer-slot-bg: #0e1624;
 
 	/* 间距/字号/圆角/时长/缓动/层级/字体 不随主题变化，继承 :root。 */
 }
@@ -918,7 +1113,12 @@ textarea:focus-visible {
 .app> :not(.titlebar):not(.sidebar):not(button):not(.panel-slot):not(.panel-toggle-group):not(.toast-stack):not(.modal-backdrop) {
 	margin: var(--space-2);
 	border-radius: var(--radius-md);
-	background: var(--bg);
+	/* 极光与冷画布必须画在**这一层**：这条规则的选区特异性是 (0,7,1)，
+	   写在 .home / .chat 上的背景会被它整条盖掉（2026-10-22 实测：页面
+	   依旧是 #ffffff，只有标题附近那圈光晕可见）。 */
+	background-color: var(--canvas);
+	background-image: var(--aurora-field);
+	background-repeat: no-repeat;
 }
 
 /* ── 自绘标题栏菜单条（§4.32 修正）───────────────────────────────── */
@@ -13525,4 +13725,672 @@ button.agent-row {
 	.ss-session-meta {
 		font-size: 11px;
 	}
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════
+   极光墨（Aurora Ink）· 组件层
+   ──────────────────────────────────────────────────────────────────────
+   本块只写组件规则，颜色一律走 :root / [data-theme="dark"] 里的 token ——
+   check:theme-tokens 的第 ④ 项（token 块外不许出现颜色字面量）在这里
+   是硬约束，所以「极光透明度阶梯」「品牌渐变」「以品牌色投影的四档阴影」
+   都先定义成 token 再引用，而不是就地写 rgba。
+
+   覆盖范围：全局基底 / 侧栏 / 首页英雄区 / 输入卡 / 案例卡 / 续摊卡 /
+   上手清单 / 浮层菜单 / 设置页 / 减弱动效。
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── 全局基底 ─────────────────────────────────────────────────── */
+html {
+	background: var(--canvas);
+}
+
+body {
+	font-family: var(--font-body);
+	-webkit-font-smoothing: antialiased;
+	text-rendering: optimizeLegibility;
+	letter-spacing: -0.005em;
+}
+
+::selection {
+	background: var(--halo-a);
+	color: var(--text);
+}
+
+/* 键盘焦点：2px 描边 + 2px 偏移（WCAG 2.2 focus appearance，检索 ux/focus-appearance）。
+   只在 :focus-visible 上生效，鼠标点击不出现描边。 */
+/* 焦点环改用品牌青（--ring）。
+   注意这里**不能**写 :where(...) —— :where 的特异性是 0，会输给文件上方原有的
+   button:focus-visible（特异性 0,1,1，颜色是 --text-secondary）。实测过一次：
+   写成 :where 时 Tab 聚焦拿到的仍是 rgba(10,18,32,.68)，而视觉上"看起来有环"，
+   很像是生效了。这里用同特异性的选择器列表 + 排在文件末尾，才能真正覆盖。 */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+/* 全站画布：极光铺底。.app 是侧栏与主区共同的地面，玻璃面靠它透出颜色。 */
+.app {
+	background:
+		radial-gradient(900px 520px at 8% -10%, var(--aurora-1), transparent 62%),
+		radial-gradient(820px 480px at 96% 0%, var(--aurora-2), transparent 60%),
+		radial-gradient(700px 420px at 50% 112%, var(--aurora-3), transparent 62%),
+		linear-gradient(180deg, var(--canvas) 0%, var(--canvas-deep) 100%);
+}
+
+/* ── 侧栏：雾面玻璃 + 渐变品牌徽标 ─────────────────────────────── */
+.sidebar {
+	background: var(--bg-sidebar);
+	-webkit-backdrop-filter: blur(var(--glass-blur)) saturate(170%);
+	backdrop-filter: blur(var(--glass-blur)) saturate(170%);
+	border-right: 1px solid var(--glass-border);
+	background-image: var(--grad-sheen);
+	background-repeat: no-repeat;
+}
+
+.sidebar-brand {
+	align-items: center;
+	padding: var(--space-2) var(--space-2) var(--space-4) var(--space-2);
+}
+
+/* 品牌徽标：渐变方块里一个 Z。纯 CSS，不引入图片/图标依赖。 */
+.sidebar-brand::before {
+	content: "Z";
+	flex: 0 0 auto;
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	border-radius: 8px;
+	background: var(--grad-brand);
+	color: var(--primary-text);
+	font-size: 15px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	box-shadow: var(--shadow-accent-sm);
+}
+
+.brand-name {
+	font-size: 15px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+	background: var(--grad-brand);
+	-webkit-background-clip: text;
+	background-clip: text;
+	-webkit-text-fill-color: transparent;
+	color: var(--text); /* 不支持 background-clip 时的兜底 */
+}
+
+.brand-version {
+	font-family: var(--font-mono);
+	font-size: 10px;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+
+.nav-item,
+.new-task {
+	border-radius: var(--radius-sm);
+	font-weight: 500;
+	/* 已就绪项用主文字色（100%）。**不要**在这里统一降到 --text-secondary：
+	   未就绪项本来就占着 --text-secondary（.nav-item-pending / :disabled），
+	   两边同色 = 「降一档」这一层语义被抹掉（onboarding 用例盯着这条）。 */
+	color: var(--text);
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.nav-item:hover:not(:disabled),
+.new-task:hover {
+	background: var(--bg-hover);
+	color: var(--text);
+	transform: translateX(1px);
+}
+
+.nav-item:active:not(:disabled),
+.new-task:active {
+	transform: translateX(1px) scale(0.99);
+}
+
+/* 分组标题：大写字距小标签（typography 检索给出的 label 规则） */
+.section-title {
+	padding: 0 var(--space-3) var(--space-2);
+	font-size: var(--text-meta);
+	font-weight: 600;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+
+.sidebar-footer {
+	border-top: 1px solid var(--border);
+	padding-top: var(--space-3);
+	margin-top: var(--space-2);
+}
+
+/* ── 首页：极光主场 ───────────────────────────────────────────── */
+.home {
+	background:
+		radial-gradient(760px 460px at 12% 4%, var(--aurora-1), transparent 64%),
+		radial-gradient(680px 420px at 88% 12%, var(--aurora-2), transparent 62%),
+		radial-gradient(900px 520px at 52% 118%, var(--aurora-3), transparent 66%),
+		var(--bg);
+}
+
+.home-inner {
+	max-width: 900px;
+	min-height: max(680px, 100%);
+}
+
+/* 英雄区光晕：标题背后一团青→紫的柔光。它让超大标题「发亮」，
+   同时把纯白画布从「白纸」变成有气温的空间。
+   用元素自身的 background 而不是负 z-index 的伪元素：伪元素 z-index:-1 会落到
+   .home 的实心底色之后而完全看不见（同一个坑在 .composer-zone 上用
+   isolation: isolate 兜住了，这里没必要再造一个层叠上下文）。 */
+.home-main {
+	padding-bottom: 268px;
+	background-image: radial-gradient(
+		620px 300px at 50% -30px,
+		var(--halo-b) 0%,
+		var(--iris-soft) 52%,
+		transparent 76%
+	);
+	background-repeat: no-repeat;
+}
+
+/* 眉标：极光点 + 大写小字，给首页一个「开场白」，也是记忆点之一。 */
+.home-eyebrow {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-3);
+	margin-bottom: var(--space-4);
+	padding: 6px 14px 6px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-full);
+	background: var(--glass-bg-strong);
+	-webkit-backdrop-filter: blur(14px);
+	backdrop-filter: blur(14px);
+	box-shadow: var(--shadow-sm);
+	font-size: var(--text-meta);
+	font-weight: 600;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--text-secondary);
+	animation: home-eyebrow-in var(--dur-slow) var(--ease-out) both;
+}
+
+.home-eyebrow-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: var(--radius-full);
+	background: var(--grad-brand);
+	box-shadow: 0 0 0 3px var(--ring-soft);
+	animation: home-eyebrow-pulse 2.8s var(--ease-standard) infinite;
+}
+
+@keyframes home-eyebrow-in {
+	from {
+		opacity: 0;
+		transform: translateY(-4px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@keyframes home-eyebrow-pulse {
+	0%,
+	100% {
+		box-shadow: 0 0 0 3px var(--ring-soft);
+	}
+
+	50% {
+		box-shadow: 0 0 0 6px var(--halo-d);
+	}
+}
+
+/* 主标题：放大到 46px、负字距，墨色；光标改品牌青。 */
+.home-title {
+	/* 12px = --space-4，沿用 docs/DESIGN.md §3.8 的首页垂直节奏；
+	   46px 展示标题靠 -0.035em 字距与上方眉标拉开，不靠额外外边距。 */
+	margin: 0 0 var(--space-4);
+	font-size: var(--text-display);
+	line-height: 1.12;
+	font-weight: 700;
+	letter-spacing: -0.035em;
+	color: var(--text);
+}
+
+.home-title-caret {
+	width: 3px;
+	border-radius: 2px;
+	background: var(--grad-primary);
+	-webkit-text-fill-color: initial;
+}
+
+/* 场景分段控件：玻璃胶囊，选中态是渐变青 + 外发光。 */
+.mode-tabs {
+	height: 38px;
+	padding: 3px;
+	background: var(--glass-bg-strong);
+	-webkit-backdrop-filter: blur(16px);
+	backdrop-filter: blur(16px);
+	border: 1px solid var(--glass-border);
+	box-shadow: var(--shadow-sm);
+}
+
+.mode-tab {
+	height: 32px;
+	padding: 0 var(--space-4);
+	/* 分段控件的每个 tab 自己也是胶囊：之前只给外层 .mode-tabs 圆了角，
+	   tab 本体还是直角，放大看像「方扣嵌在药丸里」。 */
+	border-radius: var(--radius-full);
+	font-size: var(--text-body);
+	font-weight: 500;
+	color: var(--text-secondary);
+	transition:
+		background-color var(--dur-base) var(--ease-out),
+		color var(--dur-fast) var(--ease-standard),
+		box-shadow var(--dur-base) var(--ease-out),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.mode-tab:not(.active):hover {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.mode-tab.active {
+	/* 不铺渐变：白字压在渐变右端(#14b8a6)只有 3.0:1。文字承载面用实心 --accent
+	   (白字 5.4:1)，渐变只留给图标、装饰线与品牌徽标。 */
+	background: var(--accent);
+	color: var(--primary-text);
+	font-weight: 600;
+	box-shadow: var(--shadow-accent-sm);
+}
+
+.mode-tab.active:hover {
+	background: var(--accent);
+	filter: brightness(1.08);
+}
+
+/* 能力胶囊：玻璃片 + hover 抬升，激活态走渐变。 */
+.capability-chip {
+	height: 34px;
+	padding: 0 var(--space-4);
+	border: 1px solid var(--border);
+	background: var(--glass-bg-strong);
+	-webkit-backdrop-filter: blur(12px);
+	backdrop-filter: blur(12px);
+	box-shadow: var(--shadow-sm);
+	font-size: var(--text-list);
+	font-weight: 500;
+	color: var(--text-secondary);
+	transition:
+		transform var(--dur-fast) var(--ease-out),
+		box-shadow var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		background-color var(--dur-fast) var(--ease-standard);
+}
+
+.capability-chip:hover {
+	transform: translateY(-1px);
+	border-color: var(--edge);
+	color: var(--text);
+	box-shadow: var(--shadow-accent-md);
+}
+
+.capability-chip.active,
+.capability-chip.active:hover {
+	background: var(--grad-primary);
+	border-color: transparent;
+	color: var(--primary-text);
+	font-weight: 600;
+	box-shadow: var(--shadow-accent-sm);
+}
+
+/* ── 输入卡：渐变描边 + 辉光，全页唯一的视觉重心 ───────────────── */
+.composer-zone {
+	/* 卡下方的极光辉光：只在视觉上存在，不吃点击。 */
+	isolation: isolate;
+}
+
+.composer-zone::before {
+	content: "";
+	position: absolute;
+	inset: -18px -26px -30px -26px;
+	z-index: -1;
+	pointer-events: none;
+	background: radial-gradient(60% 70% at 50% 60%, var(--halo-a), transparent 70%);
+	filter: blur(26px);
+	opacity: 0.9;
+}
+
+/* 槽：内部必须是**实心面**，渐变只画那一圈 1.5px 描边。
+   第一版把整块渐变当底色，结果输入卡之外的那条工具行（选择工作空间/默认权限）
+   直接坐在彩虹渐变上 —— 截图里是一条刺眼的色带。改用 mask-composite 只留描边后，
+   槽是一张完整的卡，渐变退成「发光的边」。 */
+.composer-slot {
+	position: relative;
+	padding: 1.5px;
+	border-radius: var(--radius-lg);
+	background: var(--surface-1);
+	box-shadow:
+		var(--shadow-accent-lg),
+		var(--shadow-ink-faint);
+	transition: box-shadow var(--dur-base) var(--ease-out);
+}
+
+.composer-slot::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 1;
+	border-radius: inherit;
+	padding: 1.5px;
+	background: linear-gradient(140deg, var(--edge-deep) 0%, var(--iris-strong) 52%, var(--ember-mid) 100%);
+	-webkit-mask:
+		linear-gradient(var(--mask-ink) 0 0) content-box,
+		linear-gradient(var(--mask-ink) 0 0);
+	-webkit-mask-composite: xor;
+	mask:
+		linear-gradient(var(--mask-ink) 0 0) content-box,
+		linear-gradient(var(--mask-ink) 0 0);
+	mask-composite: exclude;
+	pointer-events: none;
+}
+
+.composer-slot .composer-card {
+	border-radius: calc(var(--radius-lg) - 1px);
+	border: 0;
+	background: var(--surface-1);
+	box-shadow: none;
+}
+
+.composer-slot:focus-within {
+	box-shadow:
+		var(--shadow-accent-xl),
+		0 0 0 4px var(--halo-c);
+}
+
+.composer-slot .composer-card:focus-within {
+	box-shadow: none;
+}
+
+.composer-card textarea::placeholder {
+	color: var(--text-faint);
+}
+
+/* 输入卡工具条里的按钮：hover 用青色淡底，按下轻微缩放 */
+.composer-bar .bar-btn,
+.composer-bar .bar-btn-text {
+	border-radius: var(--radius-full);
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard);
+}
+
+.composer-bar .bar-btn:hover,
+.composer-bar .bar-btn-text:hover {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+/* ── 案例卡：玻璃封面 + 抬升 ─────────────────────────────────── */
+.case-card:hover {
+	transform: translateY(-3px);
+}
+
+.case-cover {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	background:
+		linear-gradient(150deg, color-mix(in srgb, var(--case-accent) 20%, var(--surface-1)) 0%, var(--surface-1) 72%);
+	box-shadow: var(--shadow-sm);
+	transition:
+		box-shadow var(--dur-base) var(--ease-out),
+		border-color var(--dur-base) var(--ease-standard),
+		transform var(--dur-base) var(--ease-out);
+}
+
+.case-card:hover .case-cover {
+	border-color: color-mix(in srgb, var(--case-accent) 55%, transparent);
+	box-shadow: 0 20px 44px -22px color-mix(in srgb, var(--case-accent) 70%, transparent);
+}
+
+.case-title {
+	font-size: var(--text-list);
+	font-weight: 500;
+	color: var(--text-secondary);
+	transition: color var(--dur-fast) var(--ease-standard);
+}
+
+.case-card:hover .case-title {
+	color: var(--text);
+}
+
+/* ── 最近会话卡 / 上手清单 ───────────────────────────────────── */
+.home-resume-card {
+	border-radius: var(--radius-md);
+	background: var(--glass-bg-strong);
+	border: 1px solid var(--border);
+	box-shadow: var(--shadow-sm);
+	transition:
+		transform var(--dur-fast) var(--ease-out),
+		box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.home-resume-card:hover {
+	transform: translateY(-2px);
+	box-shadow: var(--shadow-md);
+}
+
+/* 上手清单：纯白玻璃在白画布上会糊成一片，给它掺一档青色把「次级面」读出来；
+   框也掺青，与输入卡（渐变描边）区分层级 —— 首页只该有一个视觉重心。 */
+.home-guide {
+	border-radius: var(--radius-md);
+	background: color-mix(in srgb, var(--brand) 7%, var(--surface-1));
+	/* 不描边：§3.9 的盒子预算只允许主列有一个「实心盒子」（输入卡）。
+	   清单靠 7% 品牌色底 + 阴影与画布分层即可；尤其错误态（.home-guide-error）
+	   一旦带边框就等于凭空多一个盒子 —— home-checklist-states 盯着这条。 */
+	box-shadow: var(--shadow-sm);
+}
+
+/* ── 浮层：玻璃菜单 ──────────────────────────────────────────── */
+.pop-menu {
+	background: var(--glass-bg-strong);
+	-webkit-backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(180%);
+	backdrop-filter: blur(calc(var(--glass-blur) + 6px)) saturate(180%);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-md);
+}
+
+/* ── 设置页：玻璃模态 + 渐变侧导航 ───────────────────────────── */
+.settings {
+	background:
+		radial-gradient(760px 460px at 10% -6%, var(--aurora-1), transparent 64%),
+		radial-gradient(680px 440px at 94% 4%, var(--aurora-2), transparent 62%),
+		var(--bg);
+}
+
+.settings-head {
+	border-bottom: 1px solid var(--border);
+	-webkit-backdrop-filter: blur(16px);
+	backdrop-filter: blur(16px);
+	background: var(--glass-bg);
+}
+
+.settings-head h1 {
+	font-size: 16px;
+	font-weight: 700;
+	letter-spacing: -0.02em;
+}
+
+.settings-card {
+	background: var(--surface-1);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-lg);
+}
+
+.settings-nav {
+	background: var(--surface-2);
+	border-right: 1px solid var(--border);
+}
+
+.settings-nav-item {
+	border-radius: var(--radius-sm);
+	font-weight: 500;
+	transition:
+		background-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard);
+}
+
+.settings-nav-item:hover {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.settings-nav-item.active {
+	background: var(--grad-primary);
+	color: var(--primary-text);
+	font-weight: 600;
+	box-shadow: var(--shadow-accent-sm);
+}
+
+.settings-section-head h2 {
+	font-size: var(--text-body);
+	font-weight: 700;
+	letter-spacing: -0.01em;
+}
+
+.settings-section-head::before {
+	content: "";
+	width: 3px;
+	height: 14px;
+	border-radius: var(--radius-full);
+	background: var(--grad-brand);
+	flex: 0 0 auto;
+}
+
+/* 设置页里成排的卡片 / 行：统一抬升面 */
+.settings-card .settings-section,
+.settings-panel .settings-section {
+	color: var(--text);
+}
+
+/* 设置模态的渐变发丝边：与首页输入卡同一套「极光描边」语言，让两张卡像一家的。 */
+.settings-card::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	border-radius: inherit;
+	padding: 1px;
+	background: linear-gradient(150deg, var(--edge-strong), var(--iris-mid) 55%, transparent 85%);
+	-webkit-mask:
+		linear-gradient(var(--mask-ink) 0 0) content-box,
+		linear-gradient(var(--mask-ink) 0 0);
+	-webkit-mask-composite: xor;
+	mask:
+		linear-gradient(var(--mask-ink) 0 0) content-box,
+		linear-gradient(var(--mask-ink) 0 0);
+	mask-composite: exclude;
+	pointer-events: none;
+}
+
+/* 设置模态的关闭键：右上角固定悬浮，会压住第一段「section-head」右侧的按钮组
+   （截图里 X 正盖在「刷新模型目录」上）。给首段右侧让出 34px 让两者错开，
+   并把关闭键做成实心圆片 —— 悬浮控件要有自己的底色才能在渐变发丝边上看清。 */
+.settings-panel > .settings-section:first-child .settings-section-head {
+	padding-right: 34px;
+}
+
+.settings-card-close {
+	top: 10px;
+	right: 10px;
+	background: var(--surface-1);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-full);
+	box-shadow: var(--shadow-sm);
+}
+
+/* ── 主题带（首页底部的场景色条）与其他强调件 ─────────────────── */
+.theme-band {
+	background: var(--grad-brand);
+}
+
+/* ── 降低动态偏好：只保留最终态 ─────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+	.home-eyebrow,
+	.home-eyebrow-dot {
+		animation: none;
+	}
+
+	.nav-item:hover:not(:disabled),
+	.new-task:hover,
+	.capability-chip:hover,
+	.case-card:hover,
+	.home-resume-card:hover {
+		transform: none;
+	}
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   极光墨 · 会话页与浮层
+   ──────────────────────────────────────────────────────────────────────
+   首页与侧栏换语言之后，真正干活的那一屏（会话）必须同族，否则「点进去就
+   掉回旧世界」。这里只改表面与描边，不动任何布局与交互：
+   - 会话区不再自带实底，让 .app 的极光透上来；
+   - 顶栏与输入卡走同一套玻璃配方（与侧栏同参数，--glass-blur）；
+   - 用户气泡用品牌色的低比例混色，代替原来的中性灰 —— 一眼能分出「谁在说话」；
+   - 命令面板同玻璃 + 更实的描边（它是浮在内容之上的临时层）。
+   ══════════════════════════════════════════════════════════════════════ */
+
+.chat {
+	background: transparent;
+}
+
+.chat-header {
+	background: var(--glass-bg);
+	backdrop-filter: blur(var(--glass-blur));
+	-webkit-backdrop-filter: blur(var(--glass-blur));
+	border-bottom: 1px solid var(--border);
+}
+
+.chat .composer-card {
+	background: var(--glass-bg-strong);
+	backdrop-filter: blur(var(--glass-blur));
+	-webkit-backdrop-filter: blur(var(--glass-blur));
+}
+
+/* 用户气泡：品牌色 13% 混入抬升面 —— 比原来的中性灰多一层色相，
+   但对比度仍在 4.5:1 以上（正文色在 --surface-1 上是 16:1，
+   混色只抬底线，不动文字色）。 */
+.user-bubble {
+	background: color-mix(in srgb, var(--brand) 13%, var(--surface-1));
+	border: 1px solid color-mix(in srgb, var(--brand) 24%, transparent);
+	box-shadow: var(--shadow-sm);
+}
+
+.command-palette {
+	background: var(--glass-bg-strong);
+	backdrop-filter: blur(var(--glass-blur));
+	-webkit-backdrop-filter: blur(var(--glass-blur));
+	border: 1px solid var(--border-strong);
+	box-shadow: var(--shadow-lg);
 }

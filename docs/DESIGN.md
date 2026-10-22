@@ -405,3 +405,62 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 > 纸张与开关滑块的 3 处落在**自带亮底**的元素上（纸永远是白纸、滑块有自绘底），暗色下依然成立；
 > 预览菜单与全屏面板的 2 处在暗色下的分层由底色差与边框承担（`--bg` 对 `--bg-raised`），
 > 阴影弱化可接受——若暗色实测中发现分层不足，优先给这两处补暗色版而不是动档位。
+## §11 「极光墨」视觉语言（2026-10-22）
+
+首页、侧栏、设置页、会话页共用一套新的视觉语言，代号**极光墨（Aurora Ink）**。
+本节只写「新增了什么、哪些旧规矩被它替代、哪些红线仍然不许越」，取值真源仍是
+`app.css` 的 `:root`（§2.0 的双块同构不变）。
+
+### §11.1 新增的 token 家族（都已进 `:root` 与暗色块）
+
+| 家族 | 成员 | 语义 |
+| --- | --- | --- |
+| 画布 | `--canvas` / `--canvas-warm` | 页面底色（冷调，不再是纯白）。**纯白只允许出现在卡片内部** |
+| 面 | `--surface` / `--surface-1` / `--surface-2` 与 `--bg-sidebar` | 抬升面阶梯。侧栏是其中**最低**的一层，卡片最高 |
+| 品牌 | `--brand` / `--brand-soft` / `--primary-text` / `--ring` | 唯一的强调色（teal）+ 它上面的文字色 + 焦点环 |
+| 极光 | `--aurora-a` / `--aurora-b` / `--aurora-c` | 三团径向渐变的颜色。**只许出现在 `.app` 的背景层**，不许进组件 |
+| 薰衣草 | `--iris-*` | 次强调（紫）。命名刻意避开 `violet` —— 那与 CSS 命名色同名，会让 `check:theme-tokens` 的字面量检测误判 |
+| 玻璃 | `--glass-bg` / `--glass-bg-strong` / `--glass-border` / `--glass-blur` | 雾面层。`--glass-bg-*` 必须带透明度，`--glass-blur` 是 blur 半径 |
+| 渐变 | `--grad-primary` / `--grad-brand` / `--grad-sheen` / `--grad-ring` | 四个固定配方。**不要在组件里现写 linear-gradient** |
+| 展示字 | `--text-display` | 46px，仅首页主标题与同类欢迎语使用 |
+
+### §11.2 盒子与描边的契约变更（重要）
+
+**输入卡外槽（`.composer-slot`）从「渐变底色」改为「实心底 + 1.5px 渐变发丝描边」**：
+
+- 底色 `background` 用 `--surface-1`，`background-image` 必须是 `none`；
+- 渐变只出现在 `::after`（`inset: -1px` + `mask-composite: exclude` 只留一圈边）；
+- 理由：渐变铺满底色时，槽内除输入卡以外的工具行（工作空间 / 默认权限）坐在色带上，
+  读起来「脏」；把渐变收到边缘之后，页面只在一个地方有光。
+
+`tests/e2e/dark-polish.mjs` 的断言已随之改写（底色 `none` + 描边渐变随主题变），
+它盯的仍是**旧缺陷**（#105 的暗色亮边），只是换了正确的观测点。
+
+### §11.3 侧栏的三级文字色必须保住
+
+`.nav-item` 用 `--text`（已就绪），未就绪项（`.nav-item-pending` / `:disabled`）用
+`--text-secondary` —— 差值就是 §2.1 的「降一档」。**不要把两者统一到同一个档位**：
+`tests/e2e/onboarding.mjs` 有一条断言专门盯着这件事。
+
+侧栏背景是 `--bg-sidebar` + `backdrop-filter: blur(--glass-blur) saturate(170%)`，
+它是一条**性能敏感**的规则：`--glass-blur` 不许超过 20px，也不许在滚动容器上重复叠加。
+
+### §11.4 动效
+
+零新增时长档位（仍是 §2.8 的三档）。新增的只有「眉标圆点的呼吸」一条无限动画，
+它必须出现在 `prefers-reduced-motion` 的第 ④ 组关停清单里 ——
+`tests/e2e/ui-aurora-ink.mjs` 会真的开一次减弱动效去验。
+
+### §11.5 禁止
+
+- 不许在组件里写 `hsl()` / `rgb()` / hex / 命名色（`check:theme-tokens` 会报错）。
+- 不许为了「更炫」再加第四团极光或第二种强调色：视觉重心只能有一个。
+- 不许把玻璃面用在内容滚动区（`backdrop-filter` 在滚动时逐帧重绘）。
+
+### §11.6 字体策略：不随包任何 web font
+
+`--font-body` 是**系统字体栈**（`-apple-system` / `SF Pro Text` / `Segoe UI Variable` /
+`PingFang SC` / `Microsoft YaHei`），刻意**不写 Inter 之类的 web font**：
+本项目不发字体二进制，写了也会在 macOS 静默回退到 SF、在 Windows 回退到 Segoe UI，
+而文档上的「Inter 负字距」就成了空话。展示标题的个性靠**字号 + 负字距 + 字重**建立，
+不靠换字体 —— 这是「不承诺没做到的事」在本层的具体落实。
