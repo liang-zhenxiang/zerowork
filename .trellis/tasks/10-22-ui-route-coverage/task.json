@@ -1,0 +1,8 @@
+{
+  "id": "10-22-ui-route-coverage",
+  "name": "ui-route-coverage",
+  "title": "UI 覆盖：画布光照方向 + 二级页面全路由视觉回归",
+  "status": "in_progress",
+  "createdAt": "2026-10-22",
+  "branch": "feat/ui-route-coverage"
+}
