@@ -1,0 +1,5 @@
+{"file": "src/renderer/src/app.css", "reason": "设计 token 单一真源（:root 522-706 与 [data-theme=\"dark\"] 707 起），本轮改造主体"}
+{"file": "docs/DESIGN.md", "reason": "改界面必读：token 档位纪律、禁止清单、§10.3.2 档外色彩登记"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层编码规范：token 使用、三态、禁止大规模重排"}
+{"file": "scripts/check-theme-tokens.mjs", "reason": "token 化守卫：暗色同构 + token 块外颜色字面量检查"}
+{"file": "tests/e2e/lib/harness.mjs", "reason": "GUI 测试骨架：launch / shoot / 隔离目录"}

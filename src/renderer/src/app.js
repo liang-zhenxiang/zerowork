@@ -16438,7 +16438,13 @@ function HomeView({
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsx("main", { className: "home", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-inner", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-main", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
+        // 首页眉标（极光墨）：一行小字给首页开场，渐变圆点做呼吸。
+      // 纯装饰层，不承担任何状态，故不进 a11y 树（aria-hidden）。
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-eyebrow", "aria-hidden": "true", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-eyebrow-dot" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["本地优先", " · ", "桌面办公智能体"] })
+      ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
       !snapshotLanded ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mode-tabs", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取场景…" }) }) : scenes.length === 0 ? (
         /* 空态不进 .mode-tabs：那个容器是固定 36px 高的胶囊，块级空态会被压扁溢出。 */
         /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "暂无可用场景" })
