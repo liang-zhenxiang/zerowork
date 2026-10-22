@@ -756,6 +756,10 @@
 	/* 选中行：列表里「当前这一条」的底色。曾经直接用 --bg-raised（纯灰），
 	   在冷画布上读作「脏掉的一块」；这里掺品牌色，与 chip/tab 的选中语言一致。 */
 	--row-selected: color-mix(in srgb, var(--brand) 11%, var(--surface-1));
+	/* 画布底部的收光：整页自上而下单调变暗，让「光从上面来」这件事成立。
+	   此前极光重心在标题上方、但页脚那条仍然亮，纵向明度不是单调的。
+	   只叠一层很淡的线性渐变，不做渐变球 —— 球会把注意力又拉回底部。 */
+	--canvas-floor: rgba(15, 23, 42, 0.05);
 
 	/* 极光场的透明度阶梯：光晕 / 环 / 描边三类，各留几档。
 	   集中定义是为了让组件里不出现裸 rgba —— check:theme-tokens 会拦。 */
@@ -910,6 +914,7 @@
 	--aurora-2: rgba(99, 102, 241, 0.13);
 	--aurora-3: rgba(249, 115, 22, 0.05);
 	--row-selected: color-mix(in srgb, var(--brand) 18%, var(--surface-1));
+	--canvas-floor: rgba(0, 0, 0, 0.45);
 	/* 与亮色同一张底图（三团光的形状不变，只换 --aurora-* 的暗色值）——
 	   check:theme-tokens 要求随主题变的名字在两块里同名成对出现。 */
 	--aurora-field:
@@ -1121,7 +1126,11 @@ textarea:focus-visible {
 	   写在 .home / .chat 上的背景会被它整条盖掉（2026-10-22 实测：页面
 	   依旧是 #ffffff，只有标题附近那圈光晕可见）。 */
 	background-color: var(--canvas);
-	background-image: var(--aurora-field);
+	/* 两层：上层是底部收光（纵向单调变暗），下层是三团极光。
+	   顺序不能反 —— 先写的图层画在上面。 */
+	background-image:
+		linear-gradient(180deg, transparent 0%, transparent 46%, var(--canvas-floor) 100%),
+		var(--aurora-field);
 	background-repeat: no-repeat;
 }
 
@@ -14514,4 +14523,60 @@ select:focus-visible,
 	overflow: hidden;
 	clip-path: inset(50%);
 	white-space: nowrap;
+}
+
+/* ── 二级页面（全页视图）的统一表面 ────────────────────────────────
+   `.app > main.settings` 是「整页视图」的外壳（统计 / 诊断 / 资料库 / 文件历史 /
+   会话检索 / 项目 …）。设置面板是 `.modal-backdrop` 里的 `.settings-card`，不命中
+   这条选择器 —— 所以这里加卡片不会让设置页又套一层。
+   此前这些页面把 section 直接铺在画布上，只有一条品牌色竖条做分组，读起来像
+   「首页有人做过、这些页没有」；这一段的唯一目的就是让它们共用同一套表面。 */
+.app> main.settings .settings-body>.settings-section {
+	background: var(--surface-1);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	padding: var(--space-5);
+	box-shadow: var(--shadow-xs);
+}
+
+/* 空态：不是一句孤零零的话漂在画布上，而是一张「虚线留位」的卡。 */
+.app> main.settings .settings-body>.state-empty {
+	max-width: 520px;
+	margin: var(--space-7) auto;
+	padding: var(--space-7) var(--space-5);
+	border: 1px dashed var(--border);
+	border-radius: var(--radius-lg);
+	background: color-mix(in srgb, var(--surface-1) 72%, transparent);
+}
+
+.app> main.settings .settings-body>.state-empty .state-empty-icon {
+	color: var(--accent);
+}
+
+.app> main.settings .settings-body>.state-empty .state-empty-title {
+	color: var(--text);
+	font-weight: 600;
+}
+
+/* 整页只有空态时，把它放到视觉重心上：否则一句「还没有…」贴着页头、
+   下面留一整屏空白，像是页面没加载完。:has() 在 Electron 44 上可用。 */
+.app> main.settings .settings-body:has(> .state-empty) {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: calc(100% - 2 * var(--space-5));
+}
+
+/* ── 主按钮统一到极光墨的强调色 ────────────────────────────────────
+   此前 `.primary-btn` 用的是 `--primary`（近黑），在冷画布上是「另一个品牌的
+   黑按钮」—— 首页的唯一强调是青，主操作却是黑，视觉上说了两句话。
+   改成 `--grad-primary`（同一支青色渐变），白字对比 5.4:1 不降。 */
+.primary-btn {
+	background: var(--grad-primary);
+	box-shadow: var(--shadow-accent-sm);
+}
+
+.primary-btn:hover:not(:disabled) {
+	opacity: 1;
+	filter: brightness(1.06);
 }
