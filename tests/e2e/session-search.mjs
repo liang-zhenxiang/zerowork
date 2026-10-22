@@ -297,11 +297,11 @@ await h.check("⑦ 深色主题下检索结果可读（截图 + 像素断言）"
 	// 的中间帧。等选中行真的落到暗色的 --bg-raised 再拍。
 	//
 	// 期望值不写死 rgb(38,38,42)：那是上一版 --bg-raised 的值，极光墨把暗色抬升面
-	// 调成了 #0e1624。这里把一个游离元素染成 var(--bg-raised) 读它的计算值，
+	// 调成了品牌色混色；这里把一个游离元素染成 var(--row-selected) 读它的计算值，
 	// 拿到的永远是当前 token 的真值 —— 断言守的是「选中行跟着 --bg-raised 走」。
 	const expectedActiveBg = await win.evaluate(() => {
 		const probe = document.createElement("div");
-		probe.style.backgroundColor = "var(--bg-raised)";
+		probe.style.backgroundColor = "var(--row-selected)";
 		document.body.appendChild(probe);
 		const value = getComputedStyle(probe).backgroundColor;
 		probe.remove();
@@ -312,7 +312,7 @@ await h.check("⑦ 深色主题下检索结果可读（截图 + 像素断言）"
 			const el = document.querySelector(".ss-hit.is-active");
 			return el !== null && getComputedStyle(el).backgroundColor === want;
 		}, expectedActiveBg),
-		{ timeout: 5_000, desc: `选中行的底色过渡到暗色 --bg-raised(${expectedActiveBg})` },
+		{ timeout: 5_000, desc: `选中行的底色过渡到暗色 --row-selected(${expectedActiveBg})` },
 	);
 	const dark = await h.shoot("session-search-results-dark");
 	assert.ok(dark.stats.stdDev > 3, `深色检索截图不像渲染出来的界面（stdDev=${dark.stats.stdDev.toFixed(2)}）`);
