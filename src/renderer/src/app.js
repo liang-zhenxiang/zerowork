@@ -13219,8 +13219,14 @@ const IconShieldDanger = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(SvgFilled,
     d: "M6.6037 0C7.502 0 8.6925 0.3456 9.758 0.7861C10.8279 1.2286 11.8858 1.8142 12.505 2.3691C13.2074 2.9987 13.2051 3.8466 13.2035 4.4249C13.2034 4.4518 13.2033 4.4782 13.2033 4.5039L13.2033 8.4326C13.2031 12.1628 9.8426 14.5332 6.6037 14.5332C5.4358 14.5331 3.8108 13.9176 2.4884 12.9014C1.1574 11.8783 0.0042 10.3461 0.0041 8.4326L0.0041 4.5039C0.0041 4.4784 0.004 4.4524 0.0039 4.4257C0.0023 3.8475 0 2.9989 0.7023 2.3691C0.8472 2.2392 1.0167 2.1076 1.2043 1.9766L1.2043 4.4541C1.2042 4.462 1.204 4.47 1.2038 4.4781C1.2035 4.4867 1.2033 4.4953 1.2033 4.5039L1.2033 8.4326C1.2034 9.8325 2.0502 11.0518 3.2189 11.9502C4.3962 12.8551 5.7716 13.3329 6.6037 13.333L6.8625 13.3271C9.5271 13.2067 12.0038 11.2388 12.004 8.4326L12.004 4.5039C12.004 3.8201 11.9788 3.5088 11.7042 3.2627C11.2321 2.8395 10.3181 2.3166 9.2999 1.8955C8.2774 1.4726 7.2628 1.1992 6.6037 1.1992C5.9445 1.1993 4.9298 1.4727 3.9074 1.8955C3.3578 2.1228 2.8392 2.3808 2.4035 2.6357L2.4035 1.2686C2.7405 1.0964 3.0941 0.9331 3.4494 0.7861C4.5148 0.3456 5.7053 0.0001 6.6037 0ZM7.2022 8.9326L7.2022 3.4326L6.0022 3.4326L6.0022 8.9326L7.2022 8.9326ZM6.0022 11.4325L6.0022 10.2325L7.2022 10.2325L7.2022 11.4325L6.0022 11.4325Z"
   }
 ) });
+/*
+ * 加载转圈：视觉上仍是那个圆环，但它**不再对自己 aria-hidden**。
+ * 理由是评审提的：整页只有转圈、没有任何文字的地方，读屏用户听到的是「什么都没有」，
+ * 与「加载中」和「空态」无法区分。这里给它 role=status + 一句 name，
+ * 转圈本身仍是装饰性的（名字由 role 承载），所以视觉零变化。
+ */
 function Spinner({ size = 12 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "spinner", style: { width: size, height: size }, "aria-hidden": "true" });
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "spinner", role: "status", "aria-label": "正在加载", style: { width: size, height: size } });
 }
 function Skeleton({
   width = "100%",
@@ -16903,7 +16909,12 @@ function ContextUsageRing({
   }, [open]);
   const percent = contextUsagePercent(detail);
   const percentText = percent.toFixed(1);
-  const tooltip = `${percentText}% · ${formatTokenCount(detail.used)} / ${formatTokenCount(detail.total)} 上下文已用`;
+  /*
+   * 分隔符约定（评审提的「· 与 / 混用」）：` · ` 只用来分开同级信息，
+   * `/` 只出现在「已用/总量」这种比例里，且不空格 —— 这样扫一眼就知道
+   * 哪个是并列、哪个是分数。
+   */
+  const tooltip = `${percentText}% · ${formatTokenCount(detail.used)}/${formatTokenCount(detail.total)} 上下文已用`;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "cu-wrap", ref: wrapRef, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
@@ -31116,7 +31127,9 @@ function SessionStatsLine({
   const rootRef = reactExports.useRef(null);
   const [truncated, setTruncated] = reactExports.useState(false);
   const groups = stats === void 0 ? [] : sessionStatsGroups(stats);
-  const line = groups.join(" | ");
+  // 分隔符约定：统计行里只用 ` · `。此前这里用 `|`、组内用 ` · `，
+	// 同一行读出两种并列记号（评审提的「分隔符混用」）；比例才用 `/`。
+  const line = groups.join(" · ");
   reactExports.useLayoutEffect(() => {
     const element2 = rootRef.current;
     if (element2 === null) return;
@@ -31131,7 +31144,7 @@ function SessionStatsLine({
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: rootRef, className: "session-stats", title: truncated ? line : void 0, children: groups.map((group, index2) => (
     // key 用分组文本：分组是「按内容生成的」，文本本身即最稳的标识。
     /* @__PURE__ */ jsxRuntimeExports.jsxs(reactExports.Fragment, { children: [
-      index2 > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "session-stats-sep", "aria-hidden": "true", children: "|" }),
+      index2 > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "session-stats-sep", "aria-hidden": "true", children: "·" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: group })
     ] }, group)
   )) });

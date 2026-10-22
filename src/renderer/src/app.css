@@ -753,6 +753,9 @@
 	--aurora-1: rgba(20, 184, 166, 0.13);
 	--aurora-2: rgba(99, 102, 241, 0.10);
 	--aurora-3: rgba(249, 115, 22, 0.06);
+	/* 选中行：列表里「当前这一条」的底色。曾经直接用 --bg-raised（纯灰），
+	   在冷画布上读作「脏掉的一块」；这里掺品牌色，与 chip/tab 的选中语言一致。 */
+	--row-selected: color-mix(in srgb, var(--brand) 11%, var(--surface-1));
 
 	/* 极光场的透明度阶梯：光晕 / 环 / 描边三类，各留几档。
 	   集中定义是为了让组件里不出现裸 rgba —— check:theme-tokens 会拦。 */
@@ -906,6 +909,7 @@
 	--aurora-1: rgba(20, 184, 166, 0.12);
 	--aurora-2: rgba(99, 102, 241, 0.13);
 	--aurora-3: rgba(249, 115, 22, 0.05);
+	--row-selected: color-mix(in srgb, var(--brand) 18%, var(--surface-1));
 	/* 与亮色同一张底图（三团光的形状不变，只换 --aurora-* 的暗色值）——
 	   check:theme-tokens 要求随主题变的名字在两块里同名成对出现。 */
 	--aurora-field:
@@ -14393,4 +14397,121 @@ select:focus-visible,
 	-webkit-backdrop-filter: blur(var(--glass-blur));
 	border: 1px solid var(--border-strong);
 	box-shadow: var(--shadow-lg);
+}
+
+/* ══ §11.7 收尾：案例封面 / 助手头像 / 选中行 / 无障碍小工具 ══════════
+   这一层解决的是设计师第二轮评审剩下的三条 P1，全部是纯样式改动：
+   封面原先读作「占位示意图」、助手头像还是旧 logo 圆形、列表选中行是纯灰。 */
+
+/* 封面：从「一张纸贴在灰底上」变成「有光照的小作品」——
+   两团分类色极光（左上 / 右下）+ 纸片轻倾斜，四张卡因此不像同一个模板排出来的。 */
+.case-cover {
+	overflow: hidden;
+	background:
+		radial-gradient(120% 92% at 16% -12%, color-mix(in srgb, var(--case-accent) 30%, transparent), transparent 64%),
+		radial-gradient(96% 84% at 92% 110%, color-mix(in srgb, var(--case-accent) 15%, transparent), transparent 60%),
+		linear-gradient(158deg, var(--surface-2) 0%, var(--surface-1) 74%);
+}
+
+/* hover 要整组重写：原规则是「底色加深一档」，直接盖掉上面那张极光底。 */
+.case-card:hover .case-cover {
+	background:
+		radial-gradient(120% 92% at 16% -12%, color-mix(in srgb, var(--case-accent) 42%, transparent), transparent 64%),
+		radial-gradient(96% 84% at 92% 110%, color-mix(in srgb, var(--case-accent) 22%, transparent), transparent 60%),
+		linear-gradient(158deg, var(--surface-2) 0%, var(--surface-1) 74%);
+	border-color: color-mix(in srgb, var(--case-accent) 50%, transparent);
+}
+
+/* 纸片自己带一点倾角：偶数卡反着歪，四张摆在一起才像「放的」而不是「排的」。
+   hover 回正 —— 这是那一下「被拿起来」的反馈，不用位移也不用缩放。 */
+.case-cover-sheet {
+	transform: translate(-50%, -50%) rotate(-0.9deg);
+	border-radius: var(--radius-sm);
+	box-shadow:
+		0 12px 24px -16px color-mix(in srgb, var(--case-accent) 70%, transparent),
+		0 1px 0 color-mix(in srgb, var(--text) 7%, transparent);
+	transition: transform var(--dur-base) var(--ease-out);
+}
+
+.case-card:nth-child(2n) .case-cover-sheet {
+	transform: translate(-50%, -50%) rotate(0.9deg);
+}
+
+.case-card:hover .case-cover-sheet {
+	transform: translate(-50%, -50%) rotate(0deg);
+}
+
+/* 纸面内容也跟着分类色走：顶部色条是渐变而不是一截实色，柱子和版面各自有光是暗面。 */
+.case-cover-bar-top {
+	border-radius: var(--radius-full);
+	background: linear-gradient(
+		90deg,
+		var(--case-accent),
+		color-mix(in srgb, var(--case-accent) 32%, var(--surface-1))
+	);
+	opacity: 1;
+}
+
+.case-cover-line {
+	background: var(--text);
+	opacity: 0.16;
+}
+
+.case-cover-line-lead {
+	background: var(--case-accent);
+	opacity: 0.72;
+}
+
+.case-cover-bar {
+	background: linear-gradient(
+		180deg,
+		color-mix(in srgb, var(--case-accent) 80%, var(--surface-1)),
+		color-mix(in srgb, var(--case-accent) 36%, var(--surface-1))
+	);
+}
+
+.case-cover-slide {
+	background:
+		radial-gradient(120% 100% at 20% 0%, color-mix(in srgb, var(--case-accent) 34%, transparent), transparent 70%),
+		color-mix(in srgb, var(--case-accent) 16%, var(--surface-1));
+}
+
+/* 助手头像：换成与侧栏品牌印同一套语言的渐变 Z 方块底，
+   旧的应用 logo 图（.turn-avatar-img）在这里不再出现 —— 它单独当头像时
+   与新版品牌块是两种性格，会话里显得像没换过。 */
+.turn-avatar {
+	background: var(--grad-primary);
+	border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+	box-shadow: var(--shadow-accent-sm);
+}
+
+.turn-avatar-img {
+	display: none;
+}
+
+.turn-avatar::after {
+	content: "Z";
+	font-size: 13px;
+	font-weight: 800;
+	line-height: 1;
+	letter-spacing: -0.02em;
+	color: var(--primary-text);
+}
+
+/* 选中行：掺品牌色的抬升面，而不是纯灰。左条与字重仍是第二、第三通道（§7.6）。 */
+.ss-hit.is-active {
+	background: var(--row-selected);
+}
+
+/* 读屏专用文本：给只有转圈、没有文字的加载态补一句人话。 */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	border: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
 }

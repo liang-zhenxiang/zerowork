@@ -177,6 +177,34 @@ await h.check("focus-visible 环用品牌青而不是浏览器默认蓝", async 
 await blurActive();
 await h.shoot("01-home-light");
 
+await h.check("案例封面是带光照的作品，不是纯色占位：纸片有倾角 + 封面底是分类色极光", async () => {
+	const cover = await win.evaluate(() => {
+		const sheet = document.querySelector(".case-cover-sheet");
+		const box = document.querySelector(".case-cover");
+		if (sheet === null || box === null) return null;
+		const sheetCs = getComputedStyle(sheet);
+		const boxCs = getComputedStyle(box);
+		return {
+			transform: sheetCs.transform,
+			radius: sheetCs.borderRadius,
+			boxShadow: sheetCs.boxShadow,
+			backgroundImage: boxCs.backgroundImage,
+		};
+	});
+	assert.ok(cover !== null, "首页找不到案例封面（.case-cover / .case-cover-sheet）");
+	// 倾角：matrix 的第 2 个元素非 0 就说明转了角度 —— 四张卡因此不是同一个模子。
+	assert.ok(
+		/\(-?[\d.]+,\s*-?[\d.]+,\s*-?[\d.]+,\s*-?[\d.]+,\s*-?[\d.]+,\s*-?[\d.]+\)/.test(cover.transform),
+		`纸片没有倾角（transform=${cover.transform}）`,
+	);
+	assert.ok(
+		cover.backgroundImage.includes("radial-gradient"),
+		`封面底没有分类色极光（background-image=${cover.backgroundImage.slice(0, 80)}）`,
+	);
+	assert.notEqual(cover.boxShadow, "none", "纸片没有投影，读不出「浮在封面上」的层次");
+});
+
+
 // ── 2. 暗色首页 ─────────────────────────────────────────────
 await setTheme("dark");
 const dark = await probe();
@@ -307,5 +335,62 @@ await h.check("对话气泡与容器用的是同一套表面 token（没有残�
 await h.waitForSettled();
 await blurActive();
 await h.shoot("04-session-light");
+
+// ══ 收尾层：案例封面 / 助手头像 / 选中行 token ═══════════════════════
+await h.check("助手头像换成了品牌渐变块，不再显示旧应用 logo 图", async () => {
+	const facts = await win.evaluate(() => {
+		const avatar = document.querySelector(".turn-avatar");
+		if (avatar === null) return null;
+		const img = avatar.querySelector(".turn-avatar-img");
+		return {
+			hasImg: img !== null,
+			imgDisplay: img === null ? null : getComputedStyle(img).display,
+			mark: getComputedStyle(avatar, "::after").content,
+			background: getComputedStyle(avatar).backgroundImage,
+		};
+	});
+	assert.ok(facts !== null, "会话里找不到 .turn-avatar");
+	assert.ok(
+		facts.imgDisplay === "none",
+		`旧 logo 图仍在显示（display=${facts.imgDisplay}）—— 头像与新品牌块不一致`,
+	);
+	assert.ok(
+		facts.mark.includes("Z"),
+		`头像没有品牌字印（::after content=${facts.mark}）`,
+	);
+	assert.ok(
+		facts.background.includes("gradient"),
+		`头像底不是渐变（background-image=${facts.background}）`,
+	);
+});
+
+await h.check("会话底部统计行只用一种并列分隔符（不再 · 与 | 混排）", () => {
+	const text = win.evaluate(() => document.querySelector(".session-stats")?.textContent ?? null);
+	return text.then((t) => {
+		assert.ok(t !== null, "会话里找不到 .session-stats");
+		assert.ok(
+			!t.includes("|"),
+			`统计行里出现了 |：${t} —— · 与 | 混排，同级信息应该用同一种记号`,
+		);
+	});
+});
+
+await h.check("选中行底色是独立的语义 token，且与抬升面可区分", async () => {
+	const tok = await win.evaluate(() => {
+		const probe = (name) => {
+			const el = document.createElement("div");
+			el.style.backgroundColor = `var(${name})`;
+			document.body.appendChild(el);
+			const value = getComputedStyle(el).backgroundColor;
+			el.remove();
+			return value;
+		};
+		return { selected: probe("--row-selected"), raised: probe("--bg-raised") };
+	});
+	assert.ok(
+		tok.selected !== tok.raised,
+		`--row-selected 与 --bg-raised 同色（${tok.selected}）—— 选中行又退回纯灰了`,
+	);
+});
 
 await h.finish();
