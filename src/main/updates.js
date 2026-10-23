@@ -16,17 +16,36 @@
  * tests/e2e/gui-updates.mjs）——「显式喂了 feed」本身就是测试意图。
  * dev（npm run dev）两者都不满足，更新器完全静默。
  */
-import { app, ipcMain } from "electron";
-import { readFileSync } from "node:fs";
+import { app, ipcMain, net, shell } from "electron";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, createWriteStream } from "node:fs";
+import { createHash } from "node:crypto";
 // 显式 import 而不是用全局（main 目录的 eslint globals 白名单不含 timers；
 // 显式源也和本文件其余 import 的风格一致）。
 import process from "node:process";
 import { setTimeout as scheduleCheck, setInterval as schedulePeriodicCheck, clearInterval as cancelPeriodicCheck } from "node:timers";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { URL } from "node:url";
 import electronUpdater from "electron-updater";
 
 const { autoUpdater } = electronUpdater;
+
+/**
+ * macOS 手动下载安装包的状态。
+ *
+ * 为什么不复用 autoUpdater.downloadUpdate()：macOS 上它下载的是 Squirrel
+ * 自动更新用的 `.zip`，不能直接打开安装。要「应用内下载并打开」，只能从
+ * update-available 的 info.files 里挑 `.dmg` 自己下。
+ *
+ * 字段在 update-available 时填充（候选产物），下载成功后 path/version 有值。
+ */
+const installer = {
+  /** 最近一次 update-available 的 files 数组（electron-updater 的 UpdateInfo.files）。 */
+  files: undefined,
+  /** 已下载完成的 dmg 路径与对应版本。 */
+  path: undefined,
+  version: undefined,
+};
 
 /** 内部可变状态（渲染层经 getUpdateState 读取的投影）。 */
 const state = {
@@ -99,6 +118,122 @@ function check() {
   autoUpdater.checkForUpdates().catch(() => {});
 }
 
+/** 从 UpdateInfo.files 里挑出 macOS 的 .dmg（zip 是 Squirrel 用的，打不开安装）。 */
+function pickDmgFile(files) {
+	if (!Array.isArray(files)) return undefined;
+	return files.find((entry) => typeof entry?.url === "string" && /\.dmg$/i.test(entry.url));
+}
+
+/**
+ * 把 update info 里的 url 解析成可下载的绝对地址。
+ *
+ * generic provider（e2e 的 mock feed）给的是相对文件名，要拼回 feed 根；
+ * github provider 给的是完整 URL，原样使用。解析不出时返回 undefined，
+ * 由调用方如实报错，不要猜一个地址出来。
+ */
+function resolveDownloadUrl(url) {
+	if (/^https?:\/\//iu.test(url)) return url;
+	if (feedOverride !== undefined && feedOverride !== "") {
+		try {
+			return new URL(url, feedOverride).toString();
+		} catch {
+			return undefined;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * macOS：应用内下载 .dmg 并校验 SHA512。
+ *
+ * 这里**不**调用 autoUpdater.downloadUpdate()：它下载的是 Squirrel 用的
+ * zip，无法直接打开安装（见文件头的平台差异说明）。
+ *
+ * 校验是必要的：这类下载绕开了 electron-updater 自己的产物校验流程，
+ * 而 macOS 安装包本身未签名 —— 不再比对发布清单里的 sha512 的话，
+ * 中间人替换的 dmg 会被直接交给用户。
+ */
+async function downloadInstaller() {
+	if (process.platform !== "darwin") {
+		return { ok: false, reason: "Windows 由更新器自动下载；此操作仅用于 macOS" };
+	}
+	if (state.phase !== "available" && state.phase !== "downloaded") {
+		return { ok: false, reason: "当前没有可下载的新版本，请先检查更新" };
+	}
+	const version = state.availableVersion;
+	if (version === undefined) return { ok: false, reason: "更新信息缺少版本号" };
+	if (installer.version === version && installer.path !== undefined && existsSync(installer.path)) {
+		return { ok: true, path: installer.path, reused: true };
+	}
+	const entry = pickDmgFile(installer.files);
+	if (entry === undefined) return { ok: false, reason: "这次发布没有提供 .dmg 安装包" };
+	const url = resolveDownloadUrl(entry.url);
+	if (url === undefined) return { ok: false, reason: "无法解析安装包的下载地址" };
+
+	const dir = join(app.getPath("temp"), "zerowork-updates");
+	mkdirSync(dir, { recursive: true });
+	const target = join(dir, `ZeroWork-${version}.dmg`);
+	const part = `${target}.part`;
+	// 同一版本重复点按不会重复下载；换版本时旧的半成品没有价值。
+	rmSync(part, { force: true });
+
+	setPhase({ phase: "downloading", percent: 0, error: undefined });
+	try {
+		const response = await net.fetch(url);
+		if (!response.ok) throw new Error(`下载安装包失败：HTTP ${response.status}`);
+		if (response.body === null) throw new Error("下载安装包失败：响应没有内容");
+		const header = response.headers.get("content-length");
+		const totalBytes = header === null ? 0 : Number(header);
+		const hash = createHash("sha512");
+		const stream = createWriteStream(part);
+		let received = 0;
+		for await (const chunk of response.body) {
+			hash.update(chunk);
+			await new Promise((resolve, reject) => {
+				stream.write(chunk, (error) => (error === null ? resolve() : reject(error)));
+			});
+			received += chunk.length;
+			if (totalBytes > 0) {
+				setPhase({ phase: "downloading", percent: Math.min(99, Math.round((received / totalBytes) * 100)) });
+			}
+		}
+		await new Promise((resolve, reject) => {
+			stream.end(() => resolve());
+			stream.once("error", reject);
+		});
+		if (typeof entry.sha512 === "string" && entry.sha512 !== "") {
+			const actual = hash.digest("base64");
+			if (actual !== entry.sha512) {
+				throw new Error("安装包校验失败（SHA512 不符），文件已丢弃。请重试或到发布页下载");
+			}
+		}
+		renameSync(part, target);
+		installer.path = target;
+		installer.version = version;
+		setPhase({ phase: "downloaded", percent: 100 });
+		return { ok: true, path: target };
+	} catch (error) {
+		rmSync(part, { force: true });
+		const reason = error instanceof Error ? error.message : String(error);
+		setPhase({ phase: "error", error: reason });
+		return { ok: false, reason };
+	}
+}
+
+/** 打开已下载的 dmg；打不开时退回「在文件管理器中定位」，不让用户空手。 */
+async function openInstaller() {
+	const path = installer.path;
+	if (path === undefined || !existsSync(path)) {
+		return { ok: false, reason: "安装包不存在或已被清理，请重新下载" };
+	}
+	const failure = await shell.openPath(path);
+	if (failure !== "") {
+		shell.showItemInFolder(path);
+		return { ok: false, reason: `无法自动打开安装包（${failure}），已在文件管理器中定位` };
+	}
+	return { ok: true };
+}
+
 /**
  * 注册 IPC 与事件转发。在 app.whenReady、窗口创建之后调用一次。
  * @param {import("electron").BrowserWindow} win
@@ -112,6 +247,8 @@ export function initUpdates(win) {
     ipcMain.handle("updates:get-state", () => ({ version: app.getVersion(), channel: "stable", phase: "unavailable" }));
     ipcMain.handle("updates:check", () => ({ ok: false, reason: "dev 环境不启用更新器" }));
     ipcMain.handle("updates:install", () => ({ ok: false, reason: "dev 环境不启用更新器" }));
+    ipcMain.handle("updates:download", () => ({ ok: false, reason: "dev 环境不启用更新器" }));
+    ipcMain.handle("updates:open-installer", () => ({ ok: false, reason: "dev 环境不启用更新器" }));
     return;
   }
 
@@ -134,8 +271,12 @@ export function initUpdates(win) {
 
   autoUpdater.on("checking-for-update", () => setPhase({ phase: "checking" }));
   autoUpdater.on("update-available", (info) => {
+    // 留存候选产物：macOS 的「应用内下载」要从这里挑 .dmg（见 downloadInstaller）。
+    installer.files = Array.isArray(info?.files) ? info.files : undefined;
+    installer.path = undefined;
+    installer.version = undefined;
     setPhase({ phase: "available", availableVersion: info?.version });
-    // mac（autoDownload=false）到这一步就停：通知用户去 Release 页。
+    // mac（autoDownload=false）到这一步就停：等用户点「下载更新」。
   });
   autoUpdater.on("update-not-available", () => setPhase({ phase: "not-available", availableVersion: undefined }));
   autoUpdater.on("download-progress", (progress) => {
@@ -167,6 +308,9 @@ export function initUpdates(win) {
     autoUpdater.quitAndInstall();
     return { ok: true };
   });
+  // macOS 的替代路径：应用内下载 dmg 并打开（不能自动安装，但省掉去发布页找版本）。
+  ipcMain.handle("updates:download", () => downloadInstaller());
+  ipcMain.handle("updates:open-installer", () => openInstaller());
 
   // 启动静默检查（延迟 10s：让 daemon/界面先起来，更新检查不抢启动带宽），
   // 之后每 24h 一次。Channel 切换时的立即检查由 main 的 setUpdateChannel

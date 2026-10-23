@@ -62897,8 +62897,9 @@ function SelectField({ value, options, onChange, disabled, ariaLabel, placeholde
  * 更新区（设置 → 通用，spec: update-channels）：渠道选择 + 当前版本 + 检查/安装。
  * 状态机来自主进程 updates:event 的 state 投影（phase 全集见 updates.js）——
  * 这里只做展示与触发，不持有更新状态（单一真源在主进程）。
- * 平台差异如实降级：Windows 下载完显示「重启并安装」；macOS 永远不显示
- * 安装按钮（未签名不支持自动安装），显示「到 Release 页下载」的引导。
+ * 平台差异如实降级：Windows 下载完显示「重启并安装」；macOS 未签名不支持
+ * 自动安装，改为「应用内下载 dmg → 打开安装包」（下载与打开都走主进程，
+ * 见 updates.js 的 downloadInstaller），发布页入口保留为手动兜底。
  */
 const UPDATE_CHANNEL_LABELS = {
   stable: "稳定版",
@@ -62944,10 +62945,10 @@ function UpdatesSection({ busy }) {
   const phaseText = {
     idle: "尚未检查",
     checking: "正在检查…",
-    available: isMac ? "有新版本，请到发布页下载" : "发现新版本，下载中…",
+    available: isMac ? "有新版本，可下载安装包" : "发现新版本，下载中…",
     "not-available": "已是最新",
     downloading: `下载中 ${state?.percent ?? 0}%`,
-    downloaded: "已就绪，重启后安装",
+    downloaded: isMac ? "安装包已下载，可打开安装" : "已就绪，重启后安装",
     error: "检查失败",
     unavailable: "开发模式不启用更新器"
   };
@@ -63003,7 +63004,37 @@ function UpdatesSection({ busy }) {
             children: "重启并安装"
           }
         ),
+        /* macOS：不能自动安装（未签名），但可以在应用内下载 dmg 并打开，
+         * 省掉「去发布页找版本、找资产、等浏览器下载」这一段。 */
         phase === "available" && isMac && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            onClick: () => void window.kami.downloadUpdate(),
+            children: "下载更新"
+          }
+        ),
+        phase === "downloading" && isMac && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            disabled: true,
+            children: `下载中 ${state?.percent ?? 0}%`
+          }
+        ),
+        phase === "downloaded" && isMac && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            onClick: () => void window.kami.openUpdateInstaller(),
+            children: "打开安装包"
+          }
+        ),
+        /* 发布页始终留一个入口：自动下载失败时用户仍有路可走。 */
+        isMac && (phase === "available" || phase === "error" || phase === "downloaded") && /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
             type: "button",
@@ -63013,7 +63044,7 @@ function UpdatesSection({ busy }) {
           }
         )
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: channel === "beta" ? "Beta 渠道：每次功能合并后自动构建的预览版，尝鲜但可能不稳。切回稳定版后，下一次稳定发布才会收到更新。" : "稳定版：只有维护者确认过的版本才会收到更新。需要更早的体验可切到 Beta 尝鲜。macOS 未签名，有新版本时引导到发布页手动下载。" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: channel === "beta" ? "Beta 渠道：每次功能合并后自动构建的预览版，尝鲜但可能不稳。切回稳定版后，下一次稳定发布才会收到更新。" : isMac ? "稳定版：只有维护者确认过的版本才会收到更新。macOS 未签名，无法自动安装：点「下载更新」后会在应用内下载并打开安装包，拖入 Applications 即可（首次打开请右键 → 打开）。" : "稳定版：只有维护者确认过的版本才会收到更新。需要更早的体验可切到 Beta 尝鲜。" })
     ] })
   ] });
 }

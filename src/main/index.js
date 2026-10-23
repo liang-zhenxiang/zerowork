@@ -157,6 +157,10 @@ const MAIN_HANDLED = [
   INVOKE.getUpdateState,
   INVOKE.checkForUpdates,
   INVOKE.installUpdate,
+  // macOS 的应用内下载与打开安装包：下载走 Electron net，
+  // 打开走 shell —— 两者都住在主进程，同样不进批量转发表。
+  INVOKE.downloadUpdate,
+  INVOKE.openUpdateInstaller,
   // 同步通道（preload 用 sendSync），不能走 ipcMain.handle 的批量转发
   INVOKE.appVersion
 ];

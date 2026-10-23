@@ -15,7 +15,7 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from "node:fs";
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
@@ -218,6 +218,46 @@ await h.check("切回稳定版回到 latest.yml", async () => {
 		{ timeout: 30_000, interval: 500, desc: "latest.yml 被再次请求" },
 	);
 });
+
+// ── ⑤ macOS：应用内下载安装包 ────────────────────────────────
+// 只在本机 macOS 跑：Windows 的路径是「自动下载 + 重启并安装」，由
+// autoUpdater 自己处理，不需要这个用例；CI 的单元测试作业是 ubuntu，
+// GUI 测试在 macOS 上手工跑。
+if (process.platform === "darwin") {
+	await h.check("macOS：下载更新 → 安装包落到临时目录并出现「打开安装包」", async () => {
+		// 上一步切回稳定只等到「feed 收到请求」，状态可能还在 checking；
+		// 必须等按钮真的渲染出来再点，而不是查一次就断言不存在。
+		await waitUntil(
+			() =>
+				win.evaluate(() =>
+					[...document.querySelectorAll("button")].some((b) => b.textContent === "下载更新"),
+				),
+			{ timeout: 30_000, interval: 300, desc: "「下载更新」按钮出现" },
+		);
+		await win.evaluate(() => {
+			const btn = [...document.querySelectorAll("button")].find((b) => b.textContent === "下载更新");
+			if (btn === undefined) throw new Error("找不到「下载更新」按钮");
+			btn.click();
+		});
+		await waitUntil(async () => (await phaseKind()) === "downloaded", {
+			timeout: 30_000,
+			interval: 300,
+			desc: "下载完成（downloaded）",
+		});
+		const target = join(tmpdir(), "zerowork-updates", `ZeroWork-${STABLE_VERSION}.dmg`);
+		assert.ok(existsSync(target), `安装包没落到 ${target}`);
+		assert.equal(readFileSync(target, "utf8"), fakeBody, "安装包内容与 feed 不一致");
+		// 只断言按钮出现，**不点击**：点击会真的调用 shell.openPath，
+		// 在开发机上弹出 Finder / 挂载窗口。打开动作由真机手工验证。
+		const hasOpen = await win.evaluate(() =>
+			[...document.querySelectorAll("button")].some((b) => b.textContent === "打开安装包"),
+		);
+		assert.ok(hasOpen, "下载完成后没有「打开安装包」按钮");
+		const text = await phaseText();
+		assert.ok(String(text).includes("已下载"), `状态行没体现已下载：${text}`);
+	});
+	await h.snap("updates-mac-downloaded");
+}
 
 await h.finish();
 feedServer.close();
