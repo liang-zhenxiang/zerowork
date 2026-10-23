@@ -121,7 +121,8 @@
     "test:gui:projects": "node tests/e2e/projects.mjs",
     "test:gui:trace": "node tests/e2e/turn-trace.mjs",
     "test:gui:aurora-ink": "node tests/e2e/ui-aurora-ink.mjs",
-    "test:gui:route-crawl": "node tests/e2e/route-crawl.mjs"
+    "test:gui:route-crawl": "node tests/e2e/route-crawl.mjs",
+    "test:gui:ui-about-privacy": "node tests/e2e/ui-about-privacy.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "1.1.0",

@@ -15328,12 +15328,24 @@ function homeDigestText(digest, task) {
   if (digest.kind === "text" && typeof digest.text === "string" && digest.text !== "") return digest.text;
   return homeDigestFallbackText(task);
 }
-function HomeResumeDeck({ sessions, digests, onResume }) {
+function HomeResumeDeck({ sessions, digests, onResume, onClear }) {
   if (sessions.length === 0) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-resume", children: [
     /* 区头只有一行字，不设「查看全部」：侧栏任务列表全量常驻、⌘K 可搜会话，
        首页再加入口属于重复导航（2026-10-12 评审裁决）。 */
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "home-resume-head", children: "继续推进" }),
+    /* 清除：这排卡会把最近三个会话的标题与交接摘要摊在首屏，换人用同一台机器、
+       投屏或录屏时是一处隐私暴露面，所以要能主动收掉（记时间戳，见 App 里那段注释）。
+       区头此前只有一行字，加按钮后仍是「标题 + 行内动作」，不新增盒子。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-resume-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "继续推进" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "home-resume-clear",
+        title: "清除后，已有会话不再显示在首页；有新任务时会重新出现",
+        onClick: onClear,
+        children: "清除"
+      })
+    ] }),
     sessions.map((task) => {
       const digest = digests?.[task.path];
       const summary = homeDigestText(digest, task);
@@ -16372,6 +16384,7 @@ function HomeView({
   recentSessions,
   sessionDigests,
   onResumeSession,
+  onClearResume,
   thinkingLevel,
   availableThinkingLevels,
   cwd: cwd2,
@@ -16528,7 +16541,8 @@ function HomeView({
           {
             sessions: recentSessions,
             digests: sessionDigests,
-            onResume: onResumeSession
+            onResume: onResumeSession,
+            onClear: onClearResume
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
@@ -65723,6 +65737,23 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
         (window.kami?.appVersion ?? __APP_VERSION__)
       ] })
     ] }) }),
+    /* 项目主页：菜单「关于」里那条走 shell.openExternal，这里走渲染层的
+       target=_blank + 主进程 setWindowOpenHandler —— 两条通道最终都交给系统浏览器，
+       但设置页是用户主动找过来的地方，链接要可读、可右键复制。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "项目主页" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "源码、更新日志与问题反馈" }),
+      /* 按钮/链接是 provider-main 的第 4 个子节点（spacer 之后）—— 这是这一族行
+         的既定排法：spacer 把它推到右端，与「诊断」行那颗按钮对位。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("a", {
+        className: "mini-btn provider-link",
+        href: "https://github.com/liang-zhenxiang/zerowork",
+        target: "_blank",
+        rel: "noreferrer",
+        children: "打开 GitHub 仓库"
+      })
+    ] }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "许可" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
@@ -71544,9 +71575,37 @@ function App() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /*
+   * 「继续推进」的清除状态。首页一进来就把最近三个会话的标题 + 交接摘要摊在屏上，
+   * 换人用同一台机器 / 投屏 / 录屏时是一处明显的隐私暴露面 —— 用户要能主动收掉。
+   *
+   * 语义是「清到此刻为止」而不是「永久关闭」：记一个时间戳，modifieAt 早于它的
+   * 会话不再出现；之后有了新任务（或老任务又跑了一轮、modifiedAt 刷新）就自然回来。
+   * 这样既解决了隐私，又不会让人以后再也找不到续摊入口。
+   */
+  const [resumeClearedAt, setResumeClearedAt] = reactExports.useState(() => {
+    try {
+      const raw = window.localStorage.getItem(RESUME_CLEARED_KEY);
+      const n = raw === null ? 0 : Number(raw);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    } catch {
+      return 0;
+    }
+  });
+  const clearResumeDeck = reactExports.useCallback(() => {
+    const now = Date.now();
+    try {
+      window.localStorage.setItem(RESUME_CLEARED_KEY, String(now));
+    } catch {
+      /* 隐私优先：存不下也要清掉当前视图，只是下次启动会重新出现 */
+    }
+    setResumeClearedAt(now);
+    showToast("已清除「继续推进」。新任务出现时会再显示");
+  }, [showToast]);
   const recentForHome = reactExports.useMemo(
-    () => [...taskList ?? []].sort(byModifiedDesc).slice(0, 3),
-    [taskList]
+    () =>
+      [...taskList ?? []].sort(byModifiedDesc).filter((task) => (task.modifiedAt ?? 0) > resumeClearedAt).slice(0, 3),
+    [taskList, resumeClearedAt]
   );
   /*
    * 续摊卡的交接摘要（design.md §4 的数据流）：recentForHome 变化（首拉 +
@@ -72196,7 +72255,8 @@ function App() {
         onTodo: showTodo,
         recentSessions: recentForHome,
         sessionDigests,
-        onResumeSession: resumeTask
+        onResumeSession: resumeTask,
+        onClearResume: clearResumeDeck
       }
     ),
     view === "chat" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -72517,6 +72577,11 @@ class ErrorBoundary extends reactExports.Component {
  * 渲染层首帧的同步快照，两处不一致时以偏好文件为准。
  */
 const THEME_STORAGE_KEY = "zw:theme-pref";
+/*
+ * 「继续推进」被清除到哪一刻（毫秒时间戳）。存 localStorage 而不是 preferences.json：
+ * 它是这台机器上的显示偏好，不参与跨端同步，也不该出现在 daemon 的配置里。
+ */
+const RESUME_CLEARED_KEY = "zerowork.homeResumeClearedAt";
 const THEME_PREFS = ["light", "dark", "system"];
 let themePreference = null;
 function resolveTheme(pref) {

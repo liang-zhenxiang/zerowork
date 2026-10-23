@@ -2311,8 +2311,37 @@ textarea:focus-visible {
 }
 
 .home-resume-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--space-2);
 	font-size: var(--text-meta);
 	color: var(--text-secondary);
+}
+
+/* 「清除」是区头的行内动作，不是又一个按钮样式：无底、无描边、hover 才浮出
+ * 一处极浅的面。常态保持低调，避免和「继续推进」这张卡抢注意力；键盘可达，
+ * 焦点环沿用全局 :focus-visible。 */
+.home-resume-clear {
+	flex: none;
+	padding: 2px var(--space-1);
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	font: inherit;
+	font-size: var(--text-meta);
+	color: var(--text-faint);
+	cursor: pointer;
+	transition: color var(--dur-fast) var(--ease-standard), background-color var(--dur-fast) var(--ease-standard);
+}
+
+.home-resume-clear:hover {
+	color: var(--text-secondary);
+	background: var(--bg-hover);
+}
+
+.home-resume-clear:active {
+	background: var(--bg-active);
 }
 
 /* 卡 = button（整卡可点、键盘可达，全局 focus 环天然获得）。
@@ -14579,4 +14608,13 @@ select:focus-visible,
 .primary-btn:hover:not(:disabled) {
 	opacity: 1;
 	filter: brightness(1.06);
+}
+
+/* 设置页「关于」里的项目主页链接：借用 .mini-btn 的视觉，但它是 <a> —— 要去掉
+ * 下划线、把 display 对齐成按钮的行内居中，否则文字会贴着边框上沿。 */
+.provider-link {
+	display: inline-flex;
+	align-items: center;
+	text-decoration: none;
+	white-space: nowrap;
 }
