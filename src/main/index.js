@@ -23,6 +23,14 @@ import {
  */
 const APP_ID = "io.github.liang-zhenxiang.zerowork";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/**
+ * 仓库地址。菜单「关于」与设置页「关于」都指向它 —— 两处各写一份字符串迟早漂移，
+ * 所以由主进程持有单一常量，设置页那份经 preload 的 appVersion 同款通道暴露不好，
+ * 就直接在渲染层复用同一个字面量并用 GUI 断言锁住两者一致（见 ui-about-github.mjs）。
+ */
+const REPO_URL = "https://github.com/liang-zhenxiang/zerowork";
+/** 应用内的「关于」面板与菜单项共用这个地址，避免两处各写一份。 */
+const REPO_LABEL = "打开 GitHub 仓库";
 const MENU_BAR_ITEMS = [
   { id: "about", label: "关于", mnemonic: "A" },
   { id: "edit", label: "编辑", mnemonic: "E" },
@@ -39,6 +47,12 @@ function appMenuTemplate(isMac, onAbout) {
     if (id === "about") {
       return [
         { label: "关于 ZeroWork", click: onAbout },
+        {
+          label: REPO_LABEL,
+          click: () => {
+            void shell.openExternal(REPO_URL);
+          }
+        },
         { type: "separator" },
         isMac ? { role: "hide", label: "隐藏" } : { role: "quit", label: "退出" }
       ];
@@ -522,10 +536,16 @@ if (!app.requestSingleInstanceLock()) {
       applicationName: "ZeroWork",
       applicationVersion: app.getVersion()
     });
+    // 关于面板的 website 字段：macOS 的系统面板会把它渲染成可点链接；
+    // Windows 走自定义对话框时由菜单项顶替（见 appMenuTemplate）。
+    app.setAboutPanelOptions({
+      applicationName: "ZeroWork",
+      applicationVersion: app.getVersion(),
+      website: REPO_URL,
+      copyright: "本地优先的办公 AI Agent"
+    });
     Menu.setApplicationMenu(
-      Menu.buildFromTemplate(
-        appMenuTemplate(process.platform === "darwin", () => app.showAboutPanel())
-      )
+      Menu.buildFromTemplate(appMenuTemplate(process.platform === "darwin", () => app.showAboutPanel()))
     );
     createWindow();
     // 更新器：窗口就绪后初始化（事件转发需要 webContents；dev 环境内部自守卫）。
