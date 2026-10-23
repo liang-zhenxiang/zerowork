@@ -476,6 +476,13 @@ const INVOKE = {
    * 引导用户到 Release 页手动下载。
    */
   installUpdate: "updates:install",
+  /**
+   * macOS：应用内下载与当前版本对应的 .dmg。结果经 updates:event 事件流回报
+   * （downloading → downloaded / error）—— 这里只触发，不返回最终状态。
+   */
+  downloadUpdate: "updates:download",
+  /** macOS：打开已下载的 .dmg（下载完成后由「打开安装包」按钮触发）。 */
+  openUpdateInstaller: "updates:open-installer",
   /* ── 记忆（spec: add-memory-system） ─────────────────────────── */
   /** 读记忆系统开关。未配置时 daemon 回 true（缺省开启）。 */
   getMemoryEnabled: "settings:get-memory-enabled",

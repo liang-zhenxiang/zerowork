@@ -390,6 +390,8 @@ const INVOKE = {
   getUpdateState: "updates:get-state",
   checkForUpdates: "updates:check",
   installUpdate: "updates:install",
+  downloadUpdate: "updates:download",
+  openUpdateInstaller: "updates:open-installer",
   /* ── 记忆（spec: add-memory-system） ─────────────────────────── */
   /** 读记忆系统开关。未配置时 daemon 回 true（缺省开启）。 */
   getMemoryEnabled: "settings:get-memory-enabled",
@@ -751,6 +753,8 @@ const bridge = {
   appVersion: ipcRenderer.sendSync(INVOKE.appVersion),
   checkForUpdates: () => ipcRenderer.invoke(INVOKE.checkForUpdates),
   installUpdate: () => ipcRenderer.invoke(INVOKE.installUpdate),
+  downloadUpdate: () => ipcRenderer.invoke(INVOKE.downloadUpdate),
+  openUpdateInstaller: () => ipcRenderer.invoke(INVOKE.openUpdateInstaller),
   getMemoryEnabled: () => ipcRenderer.invoke(INVOKE.getMemoryEnabled),
   setMemoryEnabled: (enabled) => ipcRenderer.invoke(INVOKE.setMemoryEnabled, enabled),
   getAgentTeamsEnabled: () => ipcRenderer.invoke(INVOKE.getAgentTeamsEnabled),
