@@ -42,6 +42,12 @@
  *   3. **读数侧**：两列的 `↑/↓` 读数分别等于各自 mock 给的那组 token，
  *      且**互相不出现对方的数字**，两列的耗时都 > 0 且不相等。
  *
+/* 节流档位（2026-10-23）：A 从 200ms 提到 900ms、B 从 700ms 提到 1700ms。
+ * 原来的 A=200ms 意味着「第一列两三百毫秒就收尾」，而 ③ 断言的是「两列此刻都在流式中」——
+ * 在 CI 上第二列的请求晚到 300ms 就必然读到第一列已经 done，于是这条断言与机器快慢绑定，
+ * 实测在 CI 上连续失败两次（本地全绿）。把两列都放慢之后，重叠窗口由 mock 的节奏保证，
+ * 而不是由「谁的请求先发出去」保证；B 仍严格慢于 A，④ 的「快慢关系」断言不变。
+ *
  * 第 3 条以前是没法做的：默认 mock 不吐 `usage`，pi 会给出**全 0** 的用量，
  * 于是「两列的用量互不串台」变成「两列都是 ↑0 ↓0」。为此给 mock 加了 `usage` /
  * `delayMs` / `failWith` 三个选项（默认值下行为一个字节不变，
@@ -125,8 +131,8 @@ const h = createHarness({ name: "multi-model-compare" });
 // harness 负责隔离与清空工作区根目录，目录本身要由用例建出来
 mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
-const mockA = await startMockModelServer({ reply: REPLY_A, usage: USAGE_A, models: ["alpha-model"], delayMs: 200 });
-const mockB = await startMockModelServer({ reply: REPLY_B, usage: USAGE_B, models: ["beta-model"], delayMs: 700 });
+const mockA = await startMockModelServer({ reply: REPLY_A, usage: USAGE_A, models: ["alpha-model"], delayMs: 900 });
+const mockB = await startMockModelServer({ reply: REPLY_B, usage: USAGE_B, models: ["beta-model"], delayMs: 1700 });
 const mockFail = await startMockModelServer({ reply: "这一台刻意失败，回复不该出现在界面上", models: ["fail-model"], failWith: 400 });
 const mockChat = await startMockModelServer({
 	reply: REPLY_CHAT,
@@ -569,7 +575,7 @@ await h.check("④ 两列各收各的正文与读数：正文逐字等于各自 
 	assert.ok(betaUsage !== undefined, `账本里没有 output=${USAGE_B.completion_tokens} 的那一列：${JSON.stringify(usages)}`);
 	assert.notEqual(alphaUsage.id, betaUsage.id, "两列的用量落在了同一列上 —— 用量串台");
 
-	// 耗时：两列都 > 0 且**不相等**（mockB 每片之间多等 500ms，所以必然更慢）
+	// 耗时：两列都 > 0 且**不相等**（mockB 每片之间多等 800ms，所以必然更慢）
 	const windows = ids.map((id) => ({ id, ...windowOf(log, id) }));
 	const alphaMs = windows.find((w) => w.id === alphaUsage.id);
 	const betaMs = windows.find((w) => w.id === betaUsage.id);
