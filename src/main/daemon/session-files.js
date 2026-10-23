@@ -172,6 +172,7 @@ import {
 	isThemePreference,
 	readPaletteMemory,
 	readPreferences,
+	validateProxyInput,
 	writePreferences,
 } from "./preferences.js";
 import { PreviewServers } from "./preview-server.js";
@@ -5370,6 +5371,31 @@ const handlers = {
       throw new Error(`未知的更新渠道：${String(channel)}`);
     }
     writePreferences({ ...readPreferences(), updateChannel: channel });
+  },
+  /* ── 网络代理（spec: proxy-settings） ───────────────────────────── */
+  // 读侧不回传密码明文：设置页只需要知道「有没有设过」，回显只会扩大泄露面。
+  [INVOKE.getProxy]: async () => {
+    const proxy = readPreferences().proxy ?? { mode: "off" };
+    if (proxy.mode !== "manual") return { mode: proxy.mode, url: "", username: "", hasPassword: false };
+    return {
+      mode: proxy.mode,
+      url: proxy.url ?? "",
+      username: proxy.username ?? "",
+      hasPassword: (proxy.password ?? "") !== ""
+    };
+  },
+  // 只校验与落盘；session.setProxy 与 daemon 重启在主进程的包装层（daemon 不碰 Electron API）。
+  // password === undefined 表示「保持不变」—— 读侧不回传明文，若要求前端回填，
+  // 每次改地址都会把密码清空。
+  [INVOKE.setProxy]: async ([input]) => {
+    const result = validateProxyInput(input);
+    if (!result.ok) throw new Error(result.message);
+    const next = result.value;
+    if (next.mode === "manual" && input.password === void 0) {
+      const prev = readPreferences().proxy;
+      next.password = prev?.mode === "manual" ? prev.password ?? "" : "";
+    }
+    writePreferences({ ...readPreferences(), proxy: next });
   },
   /* ── 外观主题 ─────────────────────────────────────────────────── */
   // 未配置回 light（不是 system）：存量用户升级后界面保持浅色不变，

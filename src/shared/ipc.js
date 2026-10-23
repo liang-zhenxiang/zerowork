@@ -462,6 +462,17 @@ const INVOKE = {
   /** 写渠道偏好；daemon 落盘，main 侧同步重配 autoUpdater 并立即检查一次。 */
   setUpdateChannel: "settings:set-update-channel",
   /**
+   * 读网络代理设置：{ mode, url, username, hasPassword }。
+   * **不回传密码明文** —— 设置页只需要知道「有没有设过」。
+   */
+  getProxy: "settings:get-proxy",
+  /**
+   * 写网络代理设置（spec: proxy-settings）。daemon 只校验与落盘；
+   * 生效（session.setProxy + 重启 daemon）由主进程的包装层负责。
+   * password 缺省表示「保持不变」，空串表示「清除」。
+   */
+  setProxy: "settings:set-proxy",
+  /**
    * 应用版本号（`app.getVersion()`）。**同步通道**（preload 用 sendSync 取值）——
    * 侧栏品牌行是同步渲染的，异步取会先显示错误值再跳变。见 preload 的用法注释。
    */

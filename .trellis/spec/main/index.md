@@ -81,7 +81,30 @@ daemon 就绪后向渲染层**推送** `daemon:ready`。但推送**可能在渲�
 
 ---
 
-## 五、禁止事项
+## 五、出站网络与代理（2026-10-23 起）
+
+应用的出站请求分散在**三条互相独立的网络栈**上。改任何一处网络行为之前，
+先确认你要影响的是哪几条 —— 只改一条是「设置看起来生效了、实际没生效」的最常见来源：
+
+| 栈 | 谁在用 | 代理怎么接 |
+| --- | --- | --- |
+| Chromium（`session.defaultSession`） | 渲染层资源、`electron-updater` | `session.setProxy()`，保存在主进程 handler 里立即应用 |
+| daemon 的全局 `fetch` | pi 内核的模型请求、MCP http 连接器 | fork 时注入 `HTTP_PROXY` / `HTTPS_PROXY`，daemon 启动时 `undici.setGlobalDispatcher` + `undici.install()`（`src/main/daemon/network.js`） |
+| daemon 的 `undici.request` | 运行时下载（`runtimes.js`） | 同上，共用全局 dispatcher。**不要退回 `node:https`** —— 它不认代理 |
+
+三条硬约束：
+
+1. **`undici` 必须与 pi 内核同版本**（当前锁 `8.10.2`）。版本不同时 npm 会给出两份
+   实例，`setGlobalDispatcher` 设的是 A、模型 SDK 用的是 B，表现为设置无效。
+   升级 pi 时跑 `npm ls undici` 核对。
+2. **代理配置的写入只有一个出口**：daemon 的 `settings:set-proxy`。主进程只读
+   不写（与主题同一纪律），负责把结果应用到 session、注入 env、重启 daemon。
+3. **本地回环一律直连**：`NO_PROXY` 与 `proxyBypassRules` 都要含
+   `127.0.0.1,localhost,::1`，否则本地预览服务与测试 mock 会被代理出去。
+
+---
+
+## 六、禁止事项
 
 - **不放宽权限默认值或沙箱约束**（`AGENTS.md` 红线 4）。放宽是安全敏感变更，
   PR 里必须说明理由与影响面，并同步更新 `SECURITY.md` 的威胁模型
