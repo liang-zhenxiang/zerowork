@@ -16,9 +16,10 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { extname } from "node:path";
 import { fstatSync } from "node:fs";
-import { get } from "node:http";
-import { get as get$1 } from "node:https";
 import { homedir } from "node:os";
+// 运行时下载与模型请求共用同一个 undici 全局 dispatcher（见 network.js）：
+// 用 node:https 的话代理设置对它不生效，而它恰好是最需要代理的一类请求。
+import { request as undiciRequest } from "undici";
 import { isAbsolute } from "node:path";
 import { join } from "node:path";
 import { mkdirSync } from "node:fs";
@@ -380,20 +381,14 @@ function contentLengthOf(header) {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : void 0;
 }
 
-function requestOnce(url, rangeStart, signal) {
-  return new Promise((resolve2, reject) => {
-    const send = new URL(url).protocol === "http:" ? get : get$1;
-    const headers = { "user-agent": "ZeroWork-runtime-installer" };
-    if (rangeStart > 0) headers["range"] = `bytes=${rangeStart}-`;
-    const request = send(url, { headers }, (response) => resolve2(response));
-    request.on("error", reject);
-    if (signal === void 0) return;
-    if (signal.aborted) {
-      request.destroy(new DownloadCancelledError(url));
-      return;
-    }
-    signal.addEventListener("abort", () => request.destroy(new DownloadCancelledError(url)), { once: true });
-  });
+async function requestOnce(url, rangeStart, signal) {
+  const headers = { "user-agent": "ZeroWork-runtime-installer" };
+  if (rangeStart > 0) headers["range"] = `bytes=${rangeStart}-`;
+  // undici.request 的返回形状（statusCode / headers / body）与 node:http 的
+  // IncomingMessage 足够接近，openHttp 与 downloadArtifact 不需要改结构。
+  // 中止语义：signal 直接交给 undici，抛出的是它自己的 AbortError ——
+  // downloadArtifact 已经按 request.signal?.aborted 判定取消，不依赖错误类型。
+  return undiciRequest(url, signal === void 0 ? { headers } : { headers, signal });
 }
 
 async function openHttp(request, redirectsLeft = MAX_REDIRECTS) {
@@ -401,16 +396,18 @@ async function openHttp(request, redirectsLeft = MAX_REDIRECTS) {
   const status = response.statusCode ?? 0;
   const location = response.headers.location;
   if (REDIRECT_STATUS.has(status) && location !== void 0) {
-    response.resume();
+    // undici 的 body 需要显式丢弃，否则连接不会归还给连接池。
+    response.body.resume();
     if (redirectsLeft <= 0) throw new DownloadError("http", `重定向次数过多：${request.url}`);
     return openHttp({ ...request, url: new URL(location, request.url).toString() }, redirectsLeft - 1);
   }
   if (status !== 200 && status !== 206) {
-    response.resume();
+    response.body.resume();
     throw new DownloadError("http", `${request.url} 返回 HTTP ${status}（期望 200/206）`);
   }
   const contentLength = contentLengthOf(response.headers["content-length"]);
-  const body = response;
+  // node:http 的 IncomingMessage 自己就是流；undici 把它放在 body 字段上。
+  const body = response.body;
   return { status, ...contentLength === void 0 ? {} : { contentLength }, body };
 }
 

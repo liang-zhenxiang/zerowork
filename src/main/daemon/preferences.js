@@ -23,6 +23,7 @@ import { realpathSync } from "node:fs";
 import { relative } from "node:path";
 import { renameSync } from "node:fs";
 import { resolve } from "node:path";
+import { URL } from "node:url";
 import { rmSync } from "node:fs";
 import { sep } from "node:path";
 import { statSync } from "node:fs";
@@ -55,6 +56,100 @@ const THEMES = [
 // 两头共用这一份枚举，不会出现「写入时合法、读回时被丢」的口径漂移。
 function isThemePreference(value) {
   return typeof value === "string" && THEMES.includes(value);
+}
+
+/*
+ * 网络代理（spec: proxy-settings）
+ *
+ * 三档：off（直连）/ system（跟随系统）/ manual（手动地址 + 可选认证）。
+ * 读侧与写侧共用同一份判据（照 isThemePreference 的写法）：读侧丢弃非法值、
+ * 写侧拒绝非法值，不会出现「写入时合法、读回时被丢」的口径漂移。
+ *
+ * 为什么 v1 不支持 SOCKS：undici 的 ProxyAgent 只处理 HTTP(S) CONNECT，
+ * 接受一个 socks5 地址只会静默直连 —— 宁可明确拒绝，也不让用户以为它生效了。
+ */
+const PROXY_MODES = ["off", "system", "manual"];
+
+function isProxyMode(value) {
+  return typeof value === "string" && PROXY_MODES.includes(value);
+}
+
+/**
+ * 规范化代理地址。合法返回 URL 字符串（去空白），非法返回 undefined。
+ *
+ * 只接受 http / https：见上方「为什么不支持 SOCKS」。
+ * 不带端口的 `http://host` 是合法的（默认 80/443），由使用方决定。
+ */
+function normalizeProxyUrl(value) {
+  if (typeof value !== "string" || value.trim() === "") return void 0;
+  let parsed;
+  try {
+    parsed = new URL(value.trim());
+  } catch {
+    return void 0;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return void 0;
+  if (parsed.hostname === "") return void 0;
+  // 认证信息必须拆成独立字段落盘（否则整条 URL 被打印时密码跟着泄漏）。
+  if (parsed.username !== "" || parsed.password !== "") return void 0;
+  return parsed.toString();
+}
+
+/**
+ * 写侧校验：返回 { ok: true, value } 或 { ok: false, message }。
+ * 错误消息给用户看，要能指导下一步，而不是一句「格式错误」。
+ */
+function validateProxyInput(input) {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return { ok: false, message: "代理设置应为对象" };
+  }
+  const mode = input.mode;
+  if (!isProxyMode(mode)) {
+    return { ok: false, message: `未知的代理模式：${String(mode)}` };
+  }
+  if (mode !== "manual") {
+    return { ok: true, value: { mode } };
+  }
+  const raw = typeof input.url === "string" ? input.url.trim() : "";
+  if (raw === "") {
+    return { ok: false, message: "手动代理需要填写地址，例如 http://127.0.0.1:7890" };
+  }
+  if (/^socks[45]:\/\//iu.test(raw)) {
+    return {
+      ok: false,
+      message: "暂不支持 SOCKS 代理，请填写 HTTP 代理地址（多数代理客户端同时提供 HTTP 端口）"
+    };
+  }
+  if (!/^https?:\/\//iu.test(raw)) {
+    return { ok: false, message: "代理地址需要以 http:// 或 https:// 开头" };
+  }
+  const url = normalizeProxyUrl(raw);
+  if (url === undefined) {
+    return { ok: false, message: `代理地址无效：${raw}。请检查主机名与端口` };
+  }
+  const username = typeof input.username === "string" ? input.username : "";
+  const password = typeof input.password === "string" ? input.password : "";
+  return { ok: true, value: { mode, url, username, password } };
+}
+
+/** 读侧：整块非法就丢弃（与 skillOverrides 的口径一致），不留半个配置。 */
+function readProxy(value) {
+  if (value === void 0) return void 0;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    console.error("偏好文件的 proxy 应为对象（{ mode, url, username, password }），已忽略：", value);
+    return void 0;
+  }
+  const mode = value.mode;
+  if (!isProxyMode(mode)) return void 0;
+  if (mode !== "manual") return { mode };
+  const url = normalizeProxyUrl(value.url);
+  if (url === void 0) return void 0;
+  return {
+    mode,
+    url,
+    username: typeof value.username === "string" ? value.username : "",
+    password: typeof value.password === "string" ? value.password : ""
+  };
 }
 
 // 命令面板记忆（收藏 + 常用分）的上限。与渲染层的
@@ -138,6 +233,7 @@ function readPreferences() {
     const styleId = typeof record.styleId === "string" ? record.styleId : void 0;
     const memoryEnabled = typeof record.memoryEnabled === "boolean" ? record.memoryEnabled : void 0;
     const agentTeamsEnabled = typeof record.agentTeamsEnabled === "boolean" ? record.agentTeamsEnabled : void 0;
+    const proxy = readProxy(record.proxy);
     const rec = record;
     const optString = (k) => {
       const v = rec[k];
@@ -181,7 +277,8 @@ function readPreferences() {
       ...welcomeGreeting !== void 0 ? { welcomeGreeting } : {},
       ...showChangeDetails !== void 0 ? { showChangeDetails } : {},
       ...skillOverrides !== void 0 ? { skillOverrides } : {},
-      ...runtimes !== void 0 ? { runtimes } : {}
+      ...runtimes !== void 0 ? { runtimes } : {},
+      ...proxy !== void 0 ? { proxy } : {}
     };
   } catch {
     return EMPTY;
@@ -267,8 +364,12 @@ function getEffectiveWorkspaceRoot() {
 
 export {
 	EMPTY,
+	PROXY_MODES,
 	SKILL_NAME_PATTERN,
 	filterEnabledSkills,
+	normalizeProxyUrl,
+	readProxy,
+	validateProxyInput,
 	getEffectiveWorkspaceRoot,
 	getPath$1,
 	isSkillEnabled,

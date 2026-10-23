@@ -63048,6 +63048,159 @@ function UpdatesSection({ busy }) {
     ] })
   ] });
 }
+const PROXY_MODE_LABELS = {
+  off: "直连",
+  system: "跟随系统",
+  manual: "手动代理"
+};
+/*
+ * 网络代理（spec: proxy-settings）。
+ *
+ * 三档：直连 / 跟随系统 / 手动。生效范围在保存那一刻由主进程决定：
+ * Chromium（渲染层与更新器）立即生效，daemon 通过重启内核生效 ——
+ * 所以文案必须提前说明「进行中的对话会中断」，不能假装无感。
+ *
+ * 密码的三种语义（与 daemon handler 对齐）：
+ *   · 留空且未点「清除密码」→ 不传 password，保持已存值
+ *   · 填写 → 覆盖
+ *   · 点「清除密码」→ 传空串，清除
+ * 读侧从不回传明文（getProxy 只回 hasPassword），所以「留空保持」是唯一
+ * 不会误清密码的交互。
+ */
+function ProxySection({ busy }) {
+  const [config, setConfig] = reactExports.useState(void 0);
+  const [mode, setMode] = reactExports.useState("off");
+  const [url, setUrl] = reactExports.useState("");
+  const [username, setUsername] = reactExports.useState("");
+  const [password, setPassword] = reactExports.useState("");
+  const [hasPassword, setHasPassword] = reactExports.useState(false);
+  const [clearPassword, setClearPassword] = reactExports.useState(false);
+  const [error, setError] = reactExports.useState(void 0);
+  const [saving, setSaving] = reactExports.useState(false);
+  const { saved, flash } = useSavedFlash();
+  const refresh = reactExports.useCallback(async () => {
+    try {
+      const next = await window.kami.getProxy();
+      setConfig(next);
+      setMode(next.mode);
+      setUrl(next.url ?? "");
+      setUsername(next.username ?? "");
+      setPassword("");
+      setHasPassword(next.hasPassword === true);
+      setClearPassword(false);
+      setError(void 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  const save = async () => {
+    setSaving(true);
+    setError(void 0);
+    try {
+      const input = { mode };
+      if (mode === "manual") {
+        input.url = url;
+        input.username = username;
+        if (clearPassword) input.password = "";
+        else if (password !== "") input.password = password;
+      }
+      await window.kami.setProxy(input);
+      setPassword("");
+      await refresh();
+      flash();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "网络代理" }) }),
+    config === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取代理设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "代理模式" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          SelectField,
+          {
+            ariaLabel: "代理模式",
+            value: mode,
+            disabled: busy || saving,
+            options: Object.keys(PROXY_MODE_LABELS).map((option) => ({ value: option, label: PROXY_MODE_LABELS[option] })),
+            onChange: (value) => setMode(value)
+          }
+        )
+      ] }) }),
+      mode === "manual" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "key-input", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            "aria-label": "代理地址",
+            value: url,
+            autoComplete: "off",
+            placeholder: "http://127.0.0.1:7890",
+            onChange: (e) => setUrl(e.target.value)
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            "aria-label": "代理用户名",
+            value: username,
+            autoComplete: "off",
+            placeholder: "用户名（可选）",
+            onChange: (e) => setUsername(e.target.value)
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "password",
+            "aria-label": "代理密码",
+            value: password,
+            autoComplete: "off",
+            placeholder: hasPassword && !clearPassword ? "已设置，留空保持不变" : "密码（可选）",
+            onChange: (e) => {
+              setPassword(e.target.value);
+              setClearPassword(false);
+            }
+          }
+        ),
+        hasPassword && !clearPassword && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            disabled: saving,
+            onClick: () => {
+              setPassword("");
+              setClearPassword(true);
+            },
+            children: "清除密码"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "context-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "mini-btn",
+            disabled: busy || saving,
+            onClick: () => void save(),
+            children: saving ? "保存中…" : "保存代理设置"
+          }
+        ),
+        saved && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "update-phase", "data-phase": "downloaded", children: "已保存" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "代理会用于模型请求、更新检查与运行时下载；本地地址（127.0.0.1 / localhost）始终直连。修改后内核会自动重启以应用新配置，进行中的对话会被中断。暂不支持 SOCKS，请填写 HTTP 代理端口。" })
+    ] })
+  ] });
+}
 const THEME_LABELS = {
   light: "浅色",
   dark: "深色",
@@ -63409,6 +63562,8 @@ function GeneralSection({ busy }) {
     // 外观放通用分组第一位：主题是最高频的个性化设置（同类产品均置顶）。
     /* @__PURE__ */ jsxRuntimeExports.jsx(AppearanceSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(UpdatesSection, { busy }),
+    /* 代理紧跟更新：两者都是「联网方式」，读起来是同一组心智模型。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(ProxySection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingLevelSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(WebSearchSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(DefaultWorkspaceSection, { busy }),

@@ -386,6 +386,8 @@ const INVOKE = {
   /* ── 更新渠道与更新器（与 shared/ipc.js 手工同步的副本表） ────── */
   getUpdateChannel: "settings:get-update-channel",
   setUpdateChannel: "settings:set-update-channel",
+  getProxy: "settings:get-proxy",
+  setProxy: "settings:set-proxy",
   appVersion: "app:get-version",
   getUpdateState: "updates:get-state",
   checkForUpdates: "updates:check",
@@ -743,6 +745,8 @@ const bridge = {
   setPaletteMemory: (memory) => ipcRenderer.invoke(INVOKE.setPaletteMemory, memory),
   getUpdateChannel: () => ipcRenderer.invoke(INVOKE.getUpdateChannel),
   setUpdateChannel: (channel) => ipcRenderer.invoke(INVOKE.setUpdateChannel, channel),
+  getProxy: () => ipcRenderer.invoke(INVOKE.getProxy),
+  setProxy: (input) => ipcRenderer.invoke(INVOKE.setProxy, input),
   getUpdateState: () => ipcRenderer.invoke(INVOKE.getUpdateState),
   /*
    * 版本号是**同步**取值（不是 invoke）：侧栏品牌行在首帧就渲染，

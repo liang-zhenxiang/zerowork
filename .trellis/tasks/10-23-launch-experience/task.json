@@ -1,0 +1,30 @@
+{
+  "id": "launch-experience",
+  "name": "launch-experience",
+  "title": "启动体验三项改进：图标重设计 / 应用内更新 / 网络代理",
+  "description": "父任务：统一管理三项独立的启动与配置体验改进——应用图标重设计、macOS 应用内下载更新、设置通用页新增网络代理。各自为独立子任务、独立分支与 PR。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "liangzhenxiang",
+  "assignee": "liangzhenxiang",
+  "createdAt": "2026-10-23",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "10-23-app-icon-redesign",
+    "10-23-mac-in-app-update",
+    "10-23-network-proxy-settings"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

@@ -1,3 +1,6 @@
+// 必须排在最前：代理 dispatcher 要在任何内核代码发起网络请求之前装好。
+// 用静态 import + 模块体首行调用，保证它先于下面的会话/资源初始化执行。
+import { installProxyDispatcher } from "./network.js";
 import { ensureUserMemoryFiles } from "./memory.js";
 import { RunLedger } from "./ledger.js";
 import { isDaemonRequest } from "./session-state.js";
@@ -12,6 +15,8 @@ import {
 	start,
 	teamMessaging,
 } from "./session-files.js";
+
+installProxyDispatcher();
 
 ensureUserMemoryFiles();
 

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, delimiter, basename, extname } from "node:path";
+import { URL } from "node:url";
 import { app, Menu, BrowserWindow, session, ipcMain, shell, utilityProcess, globalShortcut, dialog, nativeTheme } from "electron";
 import {
   DEFAULT_GLOBAL_SHORTCUT,
@@ -152,6 +153,9 @@ const MAIN_HANDLED = [
   INVOKE.setThemePreference,
   // 更新渠道同款拆法：daemon 落盘 + autoUpdater 重配并立即检查。
   INVOKE.setUpdateChannel,
+  // 代理设置：daemon 校验与落盘，主进程还要应用到 Chromium session 并重启 daemon，
+  // 两件事必须在同一次 invoke 里完成，不能走批量转发（那只落盘）。
+  INVOKE.setProxy,
   // 更新器三通道是 main 直连（autoUpdater 住在主进程，daemon 不碰），
   // 不进批量转发表——转发给 daemon 只会得到「未知通道」。
   INVOKE.getUpdateState,
@@ -173,8 +177,125 @@ const pending = /* @__PURE__ */ new Map();
 function send(channel, payload) {
   if (window?.isDestroyed() === false) window.webContents.send(channel, payload);
 }
+/*
+ * ── 网络代理（spec: proxy-settings）─────────────────────────────────
+ * 主进程只负责「读出落盘值 → 应用到 Chromium session → 注入 daemon env」，
+ * 校验与写入都在 daemon（settings:set-proxy），避免两处都能写 preferences.json。
+ *
+ * 三处网络栈：
+ *   · 渲染层 / 更新器 → session.setProxy（Chromium）
+ *   · daemon 的 fetch（模型、MCP）→ env 注入，daemon 启动时建 undici dispatcher
+ *   · daemon 的运行时下载 → 同上下文的全局 dispatcher（见 runtimes.js）
+ */
+const proxyRuntime = {
+  /** 注入 daemon 的代理地址；空串表示直连。 */
+  daemonProxyUrl: "",
+  /** 正在重启 daemon 时为 true，避免并发重启把进程搞成两个。 */
+  restarting: false
+};
+
+function readProxyPreference() {
+  const override = process.env["ZEROWORK_CONFIG_DIR"];
+  const configDir = override !== void 0 && override !== "" ? override : join(homedir(), ".zerowork");
+  try {
+    const record = JSON.parse(readFileSync(join(configDir, "preferences.json"), "utf8"));
+    const proxy = record.proxy;
+    if (proxy?.mode === "manual" && typeof proxy.url === "string" && proxy.url !== "") {
+      return {
+        mode: "manual",
+        url: proxy.url,
+        username: typeof proxy.username === "string" ? proxy.username : "",
+        password: typeof proxy.password === "string" ? proxy.password : ""
+      };
+    }
+    if (proxy?.mode === "system") return { mode: "system" };
+  } catch {
+    // 文件不存在 / 损坏都是正常态（首启）；落到直连。
+  }
+  return { mode: "off" };
+}
+
+/** 手动模式的地址带上认证（密码只在内存里拼进 URL，不落日志）。 */
+function proxyUrlWithAuth(proxy) {
+  try {
+    const url = new URL(proxy.url);
+    if (proxy.username !== "") {
+      url.username = encodeURIComponent(proxy.username);
+      url.password = encodeURIComponent(proxy.password);
+    }
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 解析「实际生效的代理地址」。
+ *
+ * system 模式下用 Electron 的 resolveProxy —— 那是 Chromium 自己的解析结果，
+ * 比自己读 scutil / 注册表可靠得多。解析不出时退回环境变量（Linux 常见）。
+ */
+async function resolveProxyUrl(proxy) {
+  if (proxy.mode === "manual") return proxyUrlWithAuth(proxy);
+  if (proxy.mode !== "system") return "";
+  try {
+    const verdict = await session.defaultSession.resolveProxy("https://github.com");
+    const match = /PROXY\s+(\S+)/iu.exec(String(verdict));
+    if (match !== null) return `http://${match[1]}`;
+  } catch {
+    // 解析失败不阻断启动，继续看环境变量。
+  }
+  const envProxy =
+    process.env["HTTPS_PROXY"] ?? process.env["https_proxy"] ?? process.env["HTTP_PROXY"] ?? process.env["http_proxy"];
+  return typeof envProxy === "string" ? envProxy.trim() : "";
+}
+
+/** 应用到 Chromium（渲染层与更新器）。 */
+async function applyProxyToSession(proxy) {
+  if (proxy.mode === "manual") {
+    await session.defaultSession.setProxy({
+      proxyRules: proxy.url,
+      // 本地回环直连（与 daemon 侧的 NO_PROXY 同一口径）。
+      proxyBypassRules: "127.0.0.1,localhost,::1"
+    });
+    return;
+  }
+  if (proxy.mode === "system") {
+    await session.defaultSession.setProxy({ mode: "system" });
+    return;
+  }
+  await session.defaultSession.setProxy({ mode: "direct" });
+}
+
+/** 启动时应用一次（whenReady 后、startDaemon 前）。失败只记日志，不阻断启动。 */
+async function applyInitialProxy() {
+  const proxy = readProxyPreference();
+  try {
+    await applyProxyToSession(proxy);
+    proxyRuntime.daemonProxyUrl = await resolveProxyUrl(proxy);
+  } catch (error) {
+    console.error("[main] 应用代理设置失败，退回直连:", error);
+    proxyRuntime.daemonProxyUrl = "";
+  }
+}
+
 function daemonEnv() {
   const env = { ...process.env, ZEROWORK_APP_DIR: app.getAppPath() };
+  // ── 代理（spec: proxy-settings）──────────────────────────────────
+  // daemon 里的 pi 内核通过 undici 的 EnvHttpProxyAgent 读这两个变量
+  // （见 daemon/network.js）。直连时显式删掉：父进程环境里残留的代理变量
+  // 不该在用户选了「直连」之后仍然生效。
+  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"]) {
+    delete env[key];
+  }
+  if (proxyRuntime.daemonProxyUrl !== "") {
+    env["HTTP_PROXY"] = proxyRuntime.daemonProxyUrl;
+    env["HTTPS_PROXY"] = proxyRuntime.daemonProxyUrl;
+    env["ALL_PROXY"] = proxyRuntime.daemonProxyUrl;
+  }
+  // 本地回环永远直连：预览服务、测试 mock、daemon 自己的端口都不该被代理出去。
+  env["NO_PROXY"] = "127.0.0.1,localhost,::1";
+  env["no_proxy"] = "127.0.0.1,localhost,::1";
   if (!app.isPackaged) return env;
   const resourcesDir = join(process.resourcesPath, "resources");
   env.ZEROWORK_RESOURCES_DIR = resourcesDir;
@@ -230,6 +351,36 @@ function startDaemon() {
     pending.clear();
     send(PUSH.daemonDown, { reason });
   });
+}
+/**
+ * 重启 daemon。代理变更后需要重启：pi 内核的 undici dispatcher 在进程启动时
+ * 构造，没有热切换 API（见 network-proxy-settings 的 design.md §2）。
+ *
+ * 必须**等旧进程真的退出**再 fork：两个 daemon 同时活着会写同一份偏好与
+ * 会话文件，后果比短暂中断严重得多。
+ */
+async function restartDaemon() {
+  if (proxyRuntime.restarting) return;
+  const child = daemon;
+  if (child === undefined) {
+    startDaemon();
+    return;
+  }
+  proxyRuntime.restarting = true;
+  try {
+    const exited = new Promise((resolve) => {
+      child.once("exit", resolve);
+    });
+    try {
+      child.kill();
+    } catch {
+      // 已经退出：下面的 exit 等待会立刻返回。
+    }
+    await exited;
+    startDaemon();
+  } finally {
+    proxyRuntime.restarting = false;
+  }
 }
 function callDaemon(channel, args) {
   const child = daemon;
@@ -416,6 +567,16 @@ function registerIpc() {
     switchUpdateChannel(channel);
     return null;
   });
+  // 代理：先落盘（daemon 校验失败直接返回），再应用 Chromium、注入 env、重启 daemon。
+  // 顺序是「无效配置不进入运行态」—— 与 setThemePreference / setUpdateChannel 同一纪律。
+  ipcMain.handle(INVOKE.setProxy, async (_event, input) => {
+    await callDaemon(INVOKE.setProxy, [input]);
+    const proxy = readProxyPreference();
+    await applyProxyToSession(proxy);
+    proxyRuntime.daemonProxyUrl = await resolveProxyUrl(proxy);
+    await restartDaemon();
+    return { ok: true };
+  });
   ipcMain.handle(INVOKE.openArtifact, async (_event, path) => {
     const error = await shell.openPath(path);
     if (error !== "") throw new Error(error);
@@ -527,13 +688,16 @@ if (!app.requestSingleInstanceLock()) {
     if (window.isMinimized()) window.restore();
     window.focus();
   });
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // 与安装器对齐 Windows 的 Application User Model ID（见上方 APP_ID 的注释）。
     // 非 Windows 平台上这是 no-op —— Electron 的文档里标了 `@platform win32`。
     app.setAppUserModelId(APP_ID);
     installCsp(process.env["ELECTRON_RENDERER_URL"] !== void 0);
     // 建窗口前定主题：渲染层首帧的媒体查询取值由此决定（见 applyInitialTheme 注释）。
     applyInitialTheme();
+    // 代理先于 daemon 启动应用：daemonEnv() 会把解析结果注入内核，
+    // 晚了就只能等下一次重启才生效。
+    await applyInitialProxy();
     registerIpc();
     startDaemon();
     app.setAboutPanelOptions({
