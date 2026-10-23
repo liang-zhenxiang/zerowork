@@ -272,8 +272,22 @@ function rasterize(svgPath, size, outDir) {
 }
 
 function main() {
-	if (!readFileSync(SOURCE, "utf8").includes("<svg")) {
+	const svg = readFileSync(SOURCE, "utf8");
+	if (!svg.includes("<svg")) {
 		throw new Error(`${SOURCE} 看起来不是 SVG`);
+	}
+
+	// XML 注释里出现 `--` 是非法写法，而 qlmanage 遇到解析错误**不会失败**：
+	// 它会把一张「This page contains the following errors」的 HTML 错误页
+	// 光栅化成 PNG，图标就这样静默变成错误页（2026-10-23 真实踩到：注释里写了
+	// CSS 变量名）。这里在光栅化前直接拒绝，让问题在源头暴露。
+	for (const comment of svg.matchAll(/<!--([\s\S]*?)-->/gu)) {
+		if (comment[1].includes("--")) {
+			throw new Error(
+				`${SOURCE} 的 XML 注释里出现了连续两个减号（注释内容中不允许），` +
+					`qlmanage 会把它渲染成错误页。请改写那处注释（例如把 CSS 变量名写成文字描述）。`,
+			);
+		}
 	}
 
 	const scratch = mkdtempSync(join(tmpdir(), "zerowork-icons-"));

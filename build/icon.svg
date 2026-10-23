@@ -6,27 +6,43 @@
       build/icon.icns（macOS）/ build/icon.ico（Windows）/ build/icon.png（备用）
     改设计 = 改这个文件，然后 `npm run build:icons`。
 
-    两条硬性约定（违反会让生成脚本取到错的底色）：
-      1. **画布必须满幅平色**：尺寸 1024×1024，最底层背景铺满整个画布，
-         且是单一平色、无渐变、无纹理。macOS 与 Windows 都会自己给应用图标
-         套圆角遮罩，所以这里**不要**自己画圆角、不要留透明边。
+    三条硬性约定（违反会让产物在 Dock / 任务栏里显示错形状）：
+      1. **内容区是圆角矩形，四周留透明边距**：画布 1024×1024，
+         圆角矩形 824×824（x/y=100，rx=185），四角与边缘透明。
+         ⚠️ 2026-10-23 修正：旧版这里写的是「不要自己画圆角、系统会套遮罩」——
+         那是错的。macOS 的 `.icns` 不会自动套圆角（旧图标在 Dock 里是一个
+         白色直角方块），Windows 也按原样显示。圆角必须画进 SVG 里。
+         已实测 `qlmanage` 光栅化会保留透明通道，`iconutil` 与 ICO 编码也都保留。
       2. **标记之外不要放别的图形**：`build/` 目录里也不能再出现别的图片 ——
          electron-builder 会把该目录下每张图都当作候选图标，尺寸不足就报错。
+      3. **渐变与滤镜只用 SVG 基础能力**：`qlmanage` 只能可靠处理
+         linearGradient / radialGradient / 基础路径，不要外链字体或 CSS 变量。
 
-    视觉沿用既有品牌（`src/renderer/src/assets/logo.png`）：
-      底色 #F6F8FA、纯黑单线条、线宽约为画布的 2.9%。
-    圆环读作「0」，环内的折页读作「文档」——合起来是「把文档工作归零」。
+    视觉语言（docs/DESIGN.md §11「极光墨」）：
+      底色 #0D1418（深墨），圆环 = 数字「0」，圆环内的折页 = 文档，
+      合起来是「把文档工作归零」。圆环取品牌 teal #2DD4BF → 紫 #6366F1 的对角渐变，
+      与界面里的 aurora 背景变量呼应；文档纯白，折角回到 teal。
+      （注意：XML 注释里**不能出现连续两个减号**，写 CSS 变量名会被判为非法，
+       qlmanage 会静默把错误页渲染成 PNG。）
   -->
 
-  <!-- 满幅底色。不要改成圆角矩形，也不要在外面留透明区 -->
-  <rect width="1024" height="1024" fill="#F6F8FA"/>
+  <defs>
+    <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="0.55" stop-color="#14B8A6"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+  </defs>
 
-  <g stroke="#000000" stroke-width="30" fill="none" stroke-linejoin="round" stroke-linecap="round">
-    <!-- 外环：与 96px 版 logo 的环径比例一致（外径 ≈ 画布的 54.5%） -->
-    <circle cx="512" cy="512" r="264"/>
-    <!-- 文档：右上角留出折角 -->
-    <path d="M 392 640 L 392 430 Q 392 400 422 400 L 570 400 L 632 462 L 632 640 Z"/>
-  </g>
+  <!-- 圆角矩形本体：824×824，圆角半径按 Big Sur squircle 的比例（约 22.5%）。
+       四周 100px 留空是透明的，交给 Dock 显示为「浮起」的图标。 -->
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#0D1418"/>
+
+  <!-- 外环：读作「0」 -->
+  <circle cx="512" cy="512" r="230" fill="none" stroke="url(#ring)" stroke-width="52"/>
+
+  <!-- 文档：右上角留出折角 -->
+  <path d="M 417 622 L 417 436 Q 417 402 451 402 L 554 402 L 608 456 L 608 622 Z" fill="#F6F8FA"/>
   <!-- 折角本身填实，形成「被翻起的一页」 -->
-  <path d="M 570 400 L 632 462 L 570 462 Z" fill="#000000"/>
+  <path d="M 554 402 L 608 456 L 554 456 Z" fill="#14B8A6"/>
 </svg>
