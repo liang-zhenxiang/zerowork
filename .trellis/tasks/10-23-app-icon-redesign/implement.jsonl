@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/index.md", "reason": "跨层改动指南：图标属于构建产物，不碰运行时逻辑"}
+{"file": "docs/DESIGN.md", "reason": "极光墨设计系统的品牌色与渐变纪律"}
