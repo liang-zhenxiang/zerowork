@@ -1265,6 +1265,11 @@ textarea:focus-visible {
 .sidebar-nav {
 	display: flex;
 	flex-direction: column;
+	/* 短窗口下让导航区自己滚，而不是把任务区挤成 0 高（见 .sidebar-scroll 的注释）。 */
+	flex: 0 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	scrollbar-gutter: stable;
 }
 
 .nav-item,
@@ -1292,8 +1297,12 @@ textarea:focus-visible {
 /* 任务+空间滚动容器：导航项固定，只有这个区域滚动。
    滚动条细、常态透明、hover 才显色。 */
 .sidebar-scroll {
-	flex: 1;
-	min-height: 0;
+	flex: 1 1 auto;
+	/* 不能是 0：窗口压到应用自己的最小高度（600）时，上方 brand + 导航 + 分组标题
+	   正好把整栏吃掉，任务区会塌成 0 高 —— 列表、新建的任务、右键菜单全都在可视区
+	   之外（`tests/e2e/session-pin.mjs` ⑬ 就是这么红的：菜单项 y=542.74，而滚动容器
+	   top=bottom=542.35）。留 120 的下限，把「挤压」交给能自己滚的那个导航区。 */
+	min-height: 120px;
 	overflow-y: auto;
 	/* 滚动条常驻占位：列表从 5 条涨到 6 条时滚动条出现，否则会吃掉 6px 可用宽、
 	   标题跟着重排一次。取舍标准（为什么只有这 5 个容器加）见文末「滚动条基线」块。 */
@@ -14650,7 +14659,9 @@ html[data-focus="on"] {
 	--aurora-field:
 		radial-gradient(1200px 620px at 16% -10%, color-mix(in srgb, var(--aurora-1) 62%, transparent), transparent 62%),
 		radial-gradient(1000px 560px at 90% 2%, color-mix(in srgb, var(--aurora-2) 58%, transparent), transparent 60%),
-		radial-gradient(900px 560px at 46% 112%, color-mix(in srgb, var(--aurora-3) 32%, transparent), transparent 66%);
+		/* 橙团原本写在 46% / 112%（圆心在视口下方），实测像素里根本看不见 ——
+		   底部只剩青绿。改到 46% / 96% 并放大，让它在最底部露一条暖边。 */
+		radial-gradient(1100px 620px at 46% 96%, color-mix(in srgb, var(--aurora-3) 34%, transparent), transparent 68%);
 	/* 极光只活在顶上四分之一，而 --canvas-floor（底光）从 46% 开始压到最底：
 	   正文所在的垂直中段实测比画布还黑（#06090f），上暖下死。专注模式把底光收到
 	   .28，橙色留在底部 —— 「同一组 --aurora-*，换个强度」不违反 §12.5。 */
@@ -14701,12 +14712,20 @@ html[data-focus="on"] .app .chat .chat-header {
 	padding-left: 112px;
 }
 
-html[data-focus="on"] :is(.panel-toggle-group, .turn-nav, .session-stats, .entry-toolbar) {
-	/* 页眉之外还有四处常驻的操作 chrome：右上两个浮标（不在 .chat-header 里，
-	   那条排除法规则专门把它们摘出去了，所以「卸玻璃」够不到）、右侧的轮次导航、
-	   底部遥测行、每条消息的操作行。读的时候它们都不是内容 —— 降到 0.4，
-	   hover / 键盘聚焦时回到 1（不许 display:none：那样鼠标用户就再也拿不回来）。 */
+html[data-focus="on"] :is(.panel-toggle-group, .session-stats) {
+	/* 页眉之外还有四处常驻的操作 chrome：右上浮标组（不在 .chat-header 里，那条
+	   排除法规则专门把它摘出去了，所以「卸玻璃」够不到）、右侧轮次导航、底部遥测行、
+	   每条消息的操作行。它们读的时候都不是内容，但不该一律按同一个强度降。
+	   这两类只是**状态与视图切换**，读到的时候不指望它们可见 —— 0.4。
+	   hover / 键盘聚焦回到 1（不许 display:none：那样鼠标用户就再也拿不回来）。 */
 	opacity: 0.4;
+	transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+html[data-focus="on"] :is(.turn-nav, .entry-toolbar) {
+	/* 这两类降过 0.4，实测有效对比只剩 2.1:1（暗）/ 1.8:1（浅）—— 首屏几乎看不见
+	   「复制」「重试」，等于把常用动作藏了。所以给 0.55：存在感压低，但一眼还在。 */
+	opacity: 0.55;
 	transition: opacity var(--dur-fast) var(--ease-out);
 }
 
