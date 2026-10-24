@@ -13328,7 +13328,9 @@ function Sidebar({
   onOpenProjects,
   onAssignProject,
   projects,
-  onOpenPalette
+  onOpenPalette,
+  focusMode,
+  onToggleFocus
 }) {
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
@@ -13929,6 +13931,13 @@ function Sidebar({
       /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 16 }),
       "搜索或跳转",
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "nav-hint", children: `${PALETTE_MOD}+K` })
+    ] }),
+    // 专注模式的常驻入口（prd R1）：快捷键不能是唯一入口。aria-pressed 让
+    // 读屏用户知道这是一个「开关」，而不是一次性动作。
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "new-task", "aria-pressed": focusMode === true, onClick: onToggleFocus, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(IconFocus, { size: 16 }),
+      "专注模式",
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "nav-hint", children: `${PALETTE_MOD}+⇧F` })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "sidebar-nav", children: [
       NAV_ITEMS$1.filter((item) => item.ready).map(renderNavItem),
@@ -30082,6 +30091,7 @@ function gfm(options) {
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
 import { rankEntries, matchRank, KIND_WEIGHT } from "./command-palette-core.js";
+import { applyFocus, focusContentWidth, persistFocus, readFocus, toggleFocus } from "./focus-mode-core.js";
 // 命令面板的「记忆」（收藏 + 常用分）同样是纯逻辑，单测直接 import 它 ——
 // 排序位置（frecency 不能压匹配质量）与衰减规则都在那边钉死，组件只管画。
 import {
@@ -32828,6 +32838,7 @@ function QuickPromptChips({
 }
 const BOTTOM_THRESHOLD_PX = 40;
 function ChatView({
+  focusMode,
   conversation,
   ready,
   lastError,
@@ -33391,7 +33402,7 @@ function ChatView({
     {
       className: "chat",
       ref: chatRef,
-      style: { "--chat-content-width": `${contentWidth}px` },
+      style: { "--chat-content-width": `${focusMode === true ? focusContentWidth(contentWidth) : contentWidth}px` },
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "chat-header", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回首页", onClick: onBack, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
@@ -70342,6 +70353,14 @@ function IconPanelLeft({ size = 16 }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5.5 2.5v11" })
   ] });
 }
+function IconFocus({ size = 16 }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { width: size, height: size, viewBox: "0 0 16 16", fill: "none", stroke: "currentColor", strokeWidth: "1.5", strokeLinecap: "round", strokeLinejoin: "round", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M2 5.5V3.2c0-.66.54-1.2 1.2-1.2H5.5" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M10.5 2h2.3c.66 0 1.2.54 1.2 1.2v2.3" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 10.5v2.3c0 .66-.54 1.2-1.2 1.2h-2.3" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5.5 14H3.2c-.66 0-1.2-.54-1.2-1.2v-2.3" })
+  ] });
+}
 function taskTitle(text2) {
   const oneLine = text2.replace(/\s+/g, " ").trim();
   return oneLine.length > TITLE_MAX ? `${oneLine.slice(0, TITLE_MAX)}…` : oneLine;
@@ -71578,6 +71597,37 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  /*
+   * 专注模式（⌘⇧F / Ctrl+Shift+F）：把会话从「工具界面」切成「一页纸」。
+   *
+   * 三个约束决定了写法：
+   * ① 首屏不能闪变 —— 初值直接读 localStorage，再在效果里写到 <html> 上；
+   *    CSS 只认 html[data-focus="on"]，所以第一次绘制前属性就已经就位。
+   * ② Esc 只在本模式生效，且不抢输入框里的 Esc（那里是「放弃编辑」）。
+   * ③ 状态走 localStorage 而不是 preferences.json：专注模式是「此刻的姿势」，
+   *    不是跨设备偏好；换机器不该跟着走。
+   */
+  const [focusMode, setFocusMode] = reactExports.useState(() => readFocus(window.localStorage));
+  reactExports.useEffect(() => {
+    applyFocus(document.documentElement, focusMode);
+    persistFocus(window.localStorage, focusMode);
+  }, [focusMode]);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key.toLowerCase() === "f" && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+        event.preventDefault();
+        setFocusMode((value) => toggleFocus(value));
+        return;
+      }
+      if (event.key === "Escape" && focusMode) {
+        const target = event.target;
+        const editing = target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+        if (!editing) setFocusMode(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusMode]);
   const openPreview2 = reactExports.useCallback((sel) => {
     setPreviewTabs((tabs) => {
       if (tabs.some((t) => sameSelection(t, sel))) return tabs;
@@ -72371,7 +72421,7 @@ function App() {
       }
     )
   ] });
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "app", "data-sidebar": sidebarOpen ? "open" : "collapsed", "data-resizing": windowResizing, children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "app", "data-sidebar": sidebarOpen ? "open" : "collapsed", "data-resizing": windowResizing, "data-focus": focusMode ? "on" : "off", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(TitleBar, {}),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       Sidebar,
@@ -72408,7 +72458,9 @@ function App() {
         onOpenProjects: openProjects,
         onAssignProject: assignProjectSession,
         projects,
-        onOpenPalette: () => setPaletteOpen(true)
+        onOpenPalette: () => setPaletteOpen(true),
+        focusMode,
+        onToggleFocus: () => setFocusMode((value) => toggleFocus(value))
       }
     ),
     view === "home" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -72469,6 +72521,7 @@ function App() {
         onInteractionChange: changeInteraction,
         turnFoldCache: turnFoldCacheRef,
         focusEntry: searchFocus,
+        focusMode,
         onFocusHandled: handleSearchFocusResult,
         memberView: memberFocus === void 0 ? void 0 : { name: memberFocus.name },
         onFocusMember: focusMember,
@@ -72705,6 +72758,20 @@ function App() {
         memory: paletteMemory,
         onRun: recordPaletteUse,
         onToggleFavorite: togglePaletteFavorite
+      }
+    ),
+    focusMode === true && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        className: "focus-exit",
+        onClick: () => setFocusMode(false),
+        "aria-label": "退出专注模式（Esc）",
+        title: "退出专注模式（Esc）",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconFocus, { size: 14 }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "退出专注" })
+        ]
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts })

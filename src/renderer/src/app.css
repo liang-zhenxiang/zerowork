@@ -14618,3 +14618,86 @@ select:focus-visible,
 	text-decoration: none;
 	white-space: nowrap;
 }
+
+/* ══ §13 专注模式 ═══════════════════════════════════════════════════
+   把会话从「工具界面」切成「一页纸」。入口：侧栏「专注模式」或 ⌘⇧F；
+   退出：右下角胶囊或 Esc。规范见 docs/DESIGN.md §13。
+
+   这一节只做三件事：收掉操作界面、给正文更好的阅读度量、把极光压到几乎看不见。
+   刻意**不做**的事：不隐藏输入卡（读完往往要接着问）、不隐藏标题栏
+   （它是窗口拖拽区，藏了就没法拖动窗口，只降它的视觉权重）。
+   ───────────────────────────────────────────────────────────────── */
+html[data-focus="on"] .sidebar {
+	display: none;
+}
+
+html[data-focus="on"] .titlebar {
+	/* 保留拖拽区，只让它退到背景里：读的时候它不该抢注意力。 */
+	opacity: 0.55;
+}
+
+html[data-focus="on"] .app {
+	/* 极光降到「几乎不可见」：读长文时它是干扰，但仍要留住这套语言的余温，
+	   所以不是撤掉，而是把同一组极光色混到 45% 再叠在画布渐变上。 */
+	background:
+		radial-gradient(900px 520px at 8% -10%, color-mix(in srgb, var(--aurora-1) 45%, transparent), transparent 62%),
+		linear-gradient(180deg, var(--canvas) 0%, var(--canvas-deep) 100%);
+}
+
+html[data-focus="on"] .home-main {
+	/* 撤掉英雄区那团光晕：它固定在内容列上，换掉页面底色后会留下一个
+	   矩形色块的硬边（径向渐变的 transparent 端点在浅底上会泛灰）。
+	   读的时候这团光也没有信息量。 */
+	background-image: none;
+}
+
+html[data-focus="on"] .home-inner {
+	/* 阅读列宽：832 → 720。一行中文约 34–38 字，接近「一行不超过 80 字符」的
+	   排版经验值；这是本模式**唯一真正改变读感**的地方。 */
+	max-width: 720px;
+}
+
+html[data-focus="on"] .chat {
+	/* 正文升一档：14 → 15（复用 --text-emphasis，不新造档位）。 */
+	--text-body: var(--text-emphasis);
+}
+
+.focus-exit {
+	position: fixed;
+	right: var(--space-6);
+	bottom: var(--space-6);
+	z-index: 60;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: 30px;
+	padding: 0 var(--space-4);
+	/* 低干扰：平时半透明，hover/聚焦才实心。读的时候它不该像一块补丁。 */
+	color: var(--text-secondary);
+	background: var(--glass-bg);
+	-webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+	backdrop-filter: blur(var(--glass-blur)) saturate(140%);
+	border: 1px solid var(--glass-border);
+	border-radius: var(--radius-full);
+	font-size: var(--text-meta);
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		color var(--dur-fast) var(--ease-out),
+		background-color var(--dur-fast) var(--ease-out),
+		opacity var(--dur-fast) var(--ease-out);
+	opacity: 0.72;
+}
+
+.focus-exit:hover,
+.focus-exit:focus-visible {
+	opacity: 1;
+	color: var(--text);
+	background: var(--bg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.focus-exit {
+		transition: none;
+	}
+}
