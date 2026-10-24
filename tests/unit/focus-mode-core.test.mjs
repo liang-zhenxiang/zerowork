@@ -5,7 +5,7 @@
  * 存储里是坏值、隐私模式写不进、窄窗口下不该加宽。
  */
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import {
 	FOCUS_ATTR,
 	FOCUS_CONTENT_WIDTH,
