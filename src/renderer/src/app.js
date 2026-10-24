@@ -72233,6 +72233,7 @@ function App() {
     });
   }, [showToast]);
   const toggleSidebar = reactExports.useCallback(() => {
+    if (document.documentElement.getAttribute("data-focus") === "on") return;
     setSidebarOpen((value) => !value);
   }, []);
   const checkForUpdates = reactExports.useCallback(() => {

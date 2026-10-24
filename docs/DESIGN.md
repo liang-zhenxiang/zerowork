@@ -519,6 +519,25 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 首页才真的是一页纸。**代价写在明处：专注模式下首页不再承担引导职责**，
 要案例按 `Esc` 出来。
 
+**2026-10-24 二轮修正（设计师复核 + 真实截图各抓到一处）：**
+
+1. **胶囊必须验「落在哪」**，不是只验「在哪一边」。第一版把退出胶囊搬到左上后，
+   它完整盖住了返回键（css 22…50）与标题前三个字 —— 位置对、结果错。
+   `.chat-header` 的右让写在 `html[data-focus="on"] .app .chat .chat-header` 上，
+   因为 `.sidebar~.chat .chat-header`（(0,3,0)）比 `html[data-focus="on"] .chat-header`
+   （(0,2,1)）高，短选择器会被静默盖掉。测试里对应一条**矩形不相交**断言，
+   不许再用 `top < 120` 这种恒真判据。
+2. **页眉之外还有四处常驻操作 chrome**：右上浮标组（`.panel-toggle-group`，它被
+   「卸玻璃」的排除法专门摘出去了，够不到）、右侧轮次导航（`.turn-nav`）、底部遥测行
+   （`.session-stats`）、消息操作行（`.entry-toolbar`）。专注态统一降到 `opacity: 0.4`，
+   hover / `:focus-within` 回到 1 —— **不许用 `display: none`**：鼠标用户会永远拿不回来。
+3. **暗色的底光要一起收**：极光只活在顶上四分之一，而 `--canvas-floor` 从 46% 压到最底，
+   正文所在的垂直中段实测比画布还黑（`#06090f`）。专注态设 `--canvas-floor: .28`，
+   并让橙（`--aurora-3` 32%）留在底部 —— 换的是同一组 `--aurora-*` 的强度，不违反 §12.5。
+4. **专注态下「折叠侧栏」不再生效**：`⌘.` 与命令面板那条会改 `data-sidebar`，
+   而 `.app[data-sidebar="collapsed"] .chat .chat-header` 会把页眉右移 32px ——
+   一次按键一个看不见的后果。`toggleSidebar` 在 `data-focus="on"` 时直接返回。
+
 ### §12.3 阅读度量（本模式唯一真正改变读感的地方）
 
 - 列宽：首页 `900 → 720`（内容盒 852 → 672），会话 `832 → 720`（正文可用宽 696）。

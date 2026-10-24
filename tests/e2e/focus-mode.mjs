@@ -343,6 +343,10 @@ await h.check("会话页：普通 vs 专注的读感是量出来的，不是看�
 					const pill = document.querySelector(".focus-exit");
 					return pill === null ? null : pill.getBoundingClientRect().toJSON();
 				})(),
+				// 胶囊搬去左上之后**必须验它落在哪**：第一版搬过去就压住了返回键与标题前三个字。
+				headerBoxes: [
+					...document.querySelectorAll('.chat-header [aria-label="返回首页"], .chat-header button, .chat-header .chat-title')
+				].map((el) => ({ cls: String(el.className).slice(0, 24), rect: el.getBoundingClientRect().toJSON() })),
 				sendBox: (() => {
 					const send = document.querySelector(".chat-composer .send-btn, .send-btn");
 					return send === null ? null : send.getBoundingClientRect().toJSON();
@@ -369,22 +373,29 @@ await h.check("会话页：普通 vs 专注的读感是量出来的，不是看�
 		focused.paragraphWidth <= 696,
 		`阅读列宽应收在 720 以内（正文可用宽约 696），实测段落 ${focused.paragraphWidth}`
 	);
-	// 列宽是「只收不扩」：窗口本来就比 720 窄时保持原值（否则窄窗口直接出横向滚动条）。
-	// 所以这里断言的是「不会变宽」，只有普通模式确实超过 720 时才要求真的收窄 ——
-	// CI 的窗口比本机小，第一版无条件断言在 CI 上必红。
+	// 列宽**不能**用「比普通模式窄」来断言：侧栏一收就多出 264px 的横向空间，
+	// 窄窗口下普通模式本来只有 665，专注模式反而会放宽到上限 696（CI 上就是这么红的）。
+	// 真正的契约是「专注模式的阅读列不超过 720（正文可用 696）」——上面那条已经锁住。
 	assert.ok(
-		focused.paragraphWidth <= plain.paragraphWidth,
-		`专注模式不许把阅读列放宽（普通 ${plain.paragraphWidth} → 专注 ${focused.paragraphWidth}）`
+		focused.paragraphWidth <= plain.paragraphWidth + 40,
+		`专注模式的阅读列不该比普通模式宽出一大截（普通 ${plain.paragraphWidth} → 专注 ${focused.paragraphWidth}）`
 	);
-	if (plain.paragraphWidth > 720) {
-		assert.ok(
-			focused.paragraphWidth < plain.paragraphWidth,
-			`普通模式列宽 ${plain.paragraphWidth} 超过 720 时，专注模式必须收窄`
-		);
-	}
 	if (focused.pillBox !== null && focused.sendBox !== null) {
 		const gap = focused.sendBox.left - (focused.pillBox.left + focused.pillBox.width);
 		assert.ok(Boolean(gap >= 0) || focused.pillBox.top < 120, `退出胶囊不应压在发送键上（gap=${Math.round(gap)}）`);
+	}
+	// 矩形不相交：胶囊不许盖住页眉里的任何一个控件或标题。
+	if (focused.pillBox !== null) {
+		const pill = focused.pillBox;
+		for (const item of focused.headerBoxes) {
+			if (item.rect.width === 0) continue;
+			const overlapX = Math.min(pill.left + pill.width, item.rect.left + item.rect.width) - Math.max(pill.left, item.rect.left);
+			const overlapY = Math.min(pill.top + pill.height, item.rect.top + item.rect.height) - Math.max(pill.top, item.rect.top);
+			assert.ok(
+				overlapX <= 0 || overlapY <= 0,
+				`退出胶囊压住了页眉里的「${item.cls}」：重叠 ${Math.round(overlapX)}×${Math.round(overlapY)}px`
+			);
+		}
 	}
 
 	// 暗色会话：同一套版式，换肤后还要能读

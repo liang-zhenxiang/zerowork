@@ -14645,12 +14645,16 @@ html[data-focus="on"] {
 
 [data-theme="dark"][data-focus="on"] {
 	/* 同样的百分比在暗背景上的视觉振幅只有浅色的一半上下：实测 45% 在暗色里只剩
-	   2~3 个色阶，等于「关灯」。所以暗色单独给 62% / 58%，并且保留青 + 紫两团
-	   —— 橙（0.05）在暗色里本来就不可见，撤掉不损失；紫必须留，否则「极光墨」
-	   就退化成一片青色渐变。 */
+	   2~3 个色阶，等于「关灯」。所以暗色单独给 62% / 58% / 32%，并且保留青 + 紫
+	   —— 紫必须留，否则「极光墨」就退化成一片青色渐变。 */
 	--aurora-field:
 		radial-gradient(1200px 620px at 16% -10%, color-mix(in srgb, var(--aurora-1) 62%, transparent), transparent 62%),
-		radial-gradient(1000px 560px at 90% 2%, color-mix(in srgb, var(--aurora-2) 58%, transparent), transparent 60%);
+		radial-gradient(1000px 560px at 90% 2%, color-mix(in srgb, var(--aurora-2) 58%, transparent), transparent 60%),
+		radial-gradient(900px 560px at 46% 112%, color-mix(in srgb, var(--aurora-3) 32%, transparent), transparent 66%);
+	/* 极光只活在顶上四分之一，而 --canvas-floor（底光）从 46% 开始压到最底：
+	   正文所在的垂直中段实测比画布还黑（#06090f），上暖下死。专注模式把底光收到
+	   .28，橙色留在底部 —— 「同一组 --aurora-*，换个强度」不违反 §12.5。 */
+	--canvas-floor: .28;
 }
 
 /* 左上角那个开关在专注模式下是**死控件**：`.sidebar` 已 display:none，点它只改
@@ -14661,8 +14665,8 @@ html[data-focus="on"] .sidebar-toggle-btn {
 }
 
 html[data-focus="on"] .home-inner {
-	/* 阅读列宽：832 → 720。一行中文约 34–38 字，接近「一行不超过 80 字符」的
-	   排版经验值；这是本模式**唯一真正改变读感**的地方。 */
+	/* 首页阅读列宽：900 → 720（内容盒 852 → 672）。一行中文约 45 字（672 ÷ 15），
+	   数字与 docs/DESIGN.md §12.3 一致 —— 注释会进构建产物，两边不许打架。 */
 	max-width: 720px;
 }
 
@@ -14685,6 +14689,30 @@ html[data-focus="on"] .chat-header {
 
 html[data-focus="on"] .chat-header .chat-title {
 	color: var(--text-secondary);
+}
+
+/* 选择器为什么写得这么长：`.sidebar~.chat .chat-header`（三处分量 (0,3,0)）会给
+   页眉一个 `padding-left: var(--space-4)`，比 `html[data-focus="on"] .chat-header`
+   的 (0,2,1) 高 —— 第一版右让就是被它盖掉的，胶囊因此完整压住返回键（22…50）
+   与标题前三个字。这里加到 (0,4,1) 才真的生效。 */
+html[data-focus="on"] .app .chat .chat-header {
+	/* 左上角住着退出胶囊（8…105），页眉要给它的宽度让路。
+	   112 = 6（视图卡边距）+ 8（胶囊左）+ 97（胶囊宽）+ 1 的呼吸。 */
+	padding-left: 112px;
+}
+
+html[data-focus="on"] :is(.panel-toggle-group, .turn-nav, .session-stats, .entry-toolbar) {
+	/* 页眉之外还有四处常驻的操作 chrome：右上两个浮标（不在 .chat-header 里，
+	   那条排除法规则专门把它们摘出去了，所以「卸玻璃」够不到）、右侧的轮次导航、
+	   底部遥测行、每条消息的操作行。读的时候它们都不是内容 —— 降到 0.4，
+	   hover / 键盘聚焦时回到 1（不许 display:none：那样鼠标用户就再也拿不回来）。 */
+	opacity: 0.4;
+	transition: opacity var(--dur-fast) var(--ease-out);
+}
+
+html[data-focus="on"] :is(.panel-toggle-group, .turn-nav, .session-stats, .entry-toolbar):hover,
+html[data-focus="on"] :is(.panel-toggle-group, .turn-nav, .session-stats, .entry-toolbar):focus-within {
+	opacity: 1;
 }
 
 html[data-focus="on"] .cases {
@@ -14771,5 +14799,9 @@ html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
 	/* 新增动画必须登记进关停清单（§10.3.1）：入场位移与淡入一起停。 */
 	html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
 		animation: none;
+	}
+
+	html[data-focus="on"] :is(.panel-toggle-group, .turn-nav, .session-stats, .entry-toolbar) {
+		transition: none;
 	}
 }
