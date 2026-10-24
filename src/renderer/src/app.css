@@ -14621,7 +14621,7 @@ select:focus-visible,
 
 /* ══ §13 专注模式 ═══════════════════════════════════════════════════
    把会话从「工具界面」切成「一页纸」。入口：侧栏「专注模式」或 ⌘⇧F；
-   退出：右下角胶囊或 Esc。规范见 docs/DESIGN.md §13。
+   退出：左上角胶囊或 Esc。规范见 docs/DESIGN.md §12。
 
    这一节只做三件事：收掉操作界面、给正文更好的阅读度量、把极光压到几乎看不见。
    刻意**不做**的事：不隐藏输入卡（读完往往要接着问）、不隐藏标题栏
@@ -14631,24 +14631,33 @@ html[data-focus="on"] .sidebar {
 	display: none;
 }
 
-html[data-focus="on"] .titlebar {
-	/* 保留拖拽区，只让它退到背景里：读的时候它不该抢注意力。 */
-	opacity: 0.55;
+html[data-focus="on"] {
+	/* 极光降档**只改 token、不改层**。
+	   教训（2026-10-24 设计师评审实测）：第一版把 45% 写在 `.app` 的 background 上，
+	   而真正画极光的是视图卡那条 (0,7,1) 的排除法规则（见上文的注释），它整条盖住
+	   `.app` —— 于是屏幕上仍是 100%，而 e2e 因为读的是 `.app` 的计算背景反而变绿。
+	   改层永远会被下一层的特异性打回来，token 才是唯一入口。 */
+	--aurora-field:
+		radial-gradient(1200px 620px at 16% -10%, color-mix(in srgb, var(--aurora-1) 45%, transparent), transparent 62%),
+		radial-gradient(1000px 560px at 90% 2%, color-mix(in srgb, var(--aurora-2) 45%, transparent), transparent 60%),
+		radial-gradient(820px 480px at 64% 112%, color-mix(in srgb, var(--aurora-3) 45%, transparent), transparent 64%);
 }
 
-html[data-focus="on"] .app {
-	/* 极光降到「几乎不可见」：读长文时它是干扰，但仍要留住这套语言的余温，
-	   所以不是撤掉，而是把同一组极光色混到 45% 再叠在画布渐变上。 */
-	background:
-		radial-gradient(900px 520px at 8% -10%, color-mix(in srgb, var(--aurora-1) 45%, transparent), transparent 62%),
-		linear-gradient(180deg, var(--canvas) 0%, var(--canvas-deep) 100%);
+[data-theme="dark"][data-focus="on"] {
+	/* 同样的百分比在暗背景上的视觉振幅只有浅色的一半上下：实测 45% 在暗色里只剩
+	   2~3 个色阶，等于「关灯」。所以暗色单独给 62% / 58%，并且保留青 + 紫两团
+	   —— 橙（0.05）在暗色里本来就不可见，撤掉不损失；紫必须留，否则「极光墨」
+	   就退化成一片青色渐变。 */
+	--aurora-field:
+		radial-gradient(1200px 620px at 16% -10%, color-mix(in srgb, var(--aurora-1) 62%, transparent), transparent 62%),
+		radial-gradient(1000px 560px at 90% 2%, color-mix(in srgb, var(--aurora-2) 58%, transparent), transparent 60%);
 }
 
-html[data-focus="on"] .home-main {
-	/* 撤掉英雄区那团光晕：它固定在内容列上，换掉页面底色后会留下一个
-	   矩形色块的硬边（径向渐变的 transparent 端点在浅底上会泛灰）。
-	   读的时候这团光也没有信息量。 */
-	background-image: none;
+/* 左上角那个开关在专注模式下是**死控件**：`.sidebar` 已 display:none，点它只改
+   sidebarOpen 状态，屏幕上毫无反应 —— 而它不吃 `.titlebar` 的降权，是暗色截图里
+   最亮的像素（纯白）。这块位置让给退出胶囊（见文档 §12.1）。 */
+html[data-focus="on"] .sidebar-toggle-btn {
+	display: none;
 }
 
 html[data-focus="on"] .home-inner {
@@ -14657,41 +14666,99 @@ html[data-focus="on"] .home-inner {
 	max-width: 720px;
 }
 
-html[data-focus="on"] .chat {
-	/* 正文升一档：14 → 15（复用 --text-emphasis，不新造档位）。 */
-	--text-body: var(--text-emphasis);
+html[data-focus="on"] .entry.assistant {
+	/* 正文升一档：14 → 15（复用 --text-emphasis，不新造档位）。
+	   **只给正文**，不给 `.chat` 整体：作用域级改 `--text-body` 会把工具行、表格、
+	   todo、task-agent 一起顶到 15，正文与「过程信息」的字号差被抹平，
+	   长会话里过程块反而更抢戏 —— 与专注模式的目标相反。 */
+	font-size: var(--text-emphasis);
+}
+
+html[data-focus="on"] .chat-header {
+	/* 页眉从「工具栏」降为「页标题」：卸掉雾面玻璃与那条通栏横线。
+	   保留页眉本身（它带会话标题与返回键），只让它不再像一条工具带。 */
+	background: transparent;
+	-webkit-backdrop-filter: none;
+	backdrop-filter: none;
+	border-bottom-color: transparent;
+}
+
+html[data-focus="on"] .chat-header .chat-title {
+	color: var(--text-secondary);
+}
+
+html[data-focus="on"] .cases {
+	/* 案例区在专注模式下**整块撤掉**，并把 `.home-main` 为它预留的 252px 归还。
+	   这不是审美选择，是量出来的必然：`.cases` 是绝对定位、`.home-main` 用
+	   `padding-bottom: 252px` 为它留位（见 1942 附近的两条注释）。把案例改成两列
+	   只会让它从 220px 长到 478px，实测压到输入卡上 27px（`.cases` y=324 对上
+	   `.composer-zone` 232–583）。
+	   而案例区本来只是「不知道做什么」的启动器：专注模式的语义是**少被打断**，
+	   四张封面是首页最亮的四块矩形，正好和这个语义相反。要它就按 Esc 出来。
+	   代价明确：专注模式下首页不再承担引导职责。 */
+	display: none;
+}
+
+html[data-focus="on"] .home-main {
+	/* 撤掉英雄区那团光晕：它固定在内容列上，换掉页面底色后会留下一个矩形色块的
+	   硬边（径向渐变的 transparent 端点在浅底上会泛灰）；读的时候也没有信息量。 */
+	background-image: none;
+	/* 案例区撤掉后，把只属于它的底部预留（252px）还回来 —— 否则英雄区会悬在偏上
+	   的位置，下方留出一大片没有内容的空白。 */
+	padding-bottom: var(--space-6);
+}
+
+html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
+	/* 入场：像翻到下一页，而不是侧栏被 0ms 抽走 264px（同一个「侧栏让位」动作在
+	   普通模式是有过渡的，见 §5 受控例外 ④）。只做一次入场，离场不做。 */
+	animation: focus-page-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes focus-page-in {
+	from {
+		opacity: 0.78;
+		transform: translateY(3px);
+	}
+
+	to {
+		opacity: 1;
+		transform: none;
+	}
 }
 
 .focus-exit {
 	position: fixed;
-	right: var(--space-6);
-	bottom: var(--space-6);
+	/* 左上，不占主操作角：右下角是发送按钮的家（900 最小窗宽下两者会擦边）。
+	   入口（侧栏里的「专注模式」）与出口同侧、位置记忆成立；「离开沉浸态」在
+	   阅读器里普遍在左上，正是 Escape 的视觉对应物。 */
+	top: var(--space-3);
+	left: var(--space-3);
 	z-index: 60;
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-2);
 	height: 30px;
 	padding: 0 var(--space-4);
-	/* 低干扰：平时半透明，hover/聚焦才实心。读的时候它不该像一块补丁。 */
+	/* 它是**唯一的鼠标出口**（Esc 在输入框里被刻意豁免），所以不许做成「看不出来
+	   的克制」：实测第一版 12px + opacity .72 只有浅色 3.45:1 / 暗色 3.80:1，
+	   低于 12px 文本的 4.5:1。现在 13px + opacity 1 ≈ 6.4:1 / 6.3:1。 */
 	color: var(--text-secondary);
 	background: var(--glass-bg);
 	-webkit-backdrop-filter: blur(var(--glass-blur)) saturate(140%);
 	backdrop-filter: blur(var(--glass-blur)) saturate(140%);
-	border: 1px solid var(--glass-border);
+	border: 1px solid var(--border);
 	border-radius: var(--radius-full);
-	font-size: var(--text-meta);
+	box-shadow: var(--shadow-sm);
+	font-size: var(--text-list);
 	line-height: 1;
 	cursor: pointer;
 	transition:
 		color var(--dur-fast) var(--ease-out),
-		background-color var(--dur-fast) var(--ease-out),
-		opacity var(--dur-fast) var(--ease-out);
-	opacity: 0.72;
+		background-color var(--dur-fast) var(--ease-out);
 }
 
 .focus-exit:hover,
 .focus-exit:focus-visible {
-	opacity: 1;
 	color: var(--text);
 	background: var(--bg);
 }
@@ -14699,5 +14766,10 @@ html[data-focus="on"] .chat {
 @media (prefers-reduced-motion: reduce) {
 	.focus-exit {
 		transition: none;
+	}
+
+	/* 新增动画必须登记进关停清单（§10.3.1）：入场位移与淡入一起停。 */
+	html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
+		animation: none;
 	}
 }

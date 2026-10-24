@@ -71614,12 +71614,16 @@ function App() {
   }, [focusMode]);
   reactExports.useEffect(() => {
     const onKey = (event) => {
-      if (event.key.toLowerCase() === "f" && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
+      // 用 event.code 而不是 event.key：中文输入法或非拉丁键盘布局下 key 不是 "f"，
+      // ⌘⇧F 会静默失效。快捷键该匹配的是**物理键位**。
+      if (event.code === "KeyF" && (event.metaKey || event.ctrlKey) && event.shiftKey && !event.altKey) {
         event.preventDefault();
         setFocusMode((value) => toggleFocus(value));
         return;
       }
       if (event.key === "Escape" && focusMode) {
+        // 一次按键一个后果：模态/命令面板开着时，Esc 归它们，专注模式不抢。
+        if (document.querySelector(".modal-backdrop") !== null) return;
         const target = event.target;
         const editing = target instanceof HTMLElement && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
         if (!editing) setFocusMode(false);
@@ -72774,6 +72778,7 @@ function App() {
         ]
       }
     ),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "sr-only", role: "status", "aria-live": "polite", children: focusMode === true ? "已进入专注模式，按 Esc 退出" : "" }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts })
   ] });
 }
