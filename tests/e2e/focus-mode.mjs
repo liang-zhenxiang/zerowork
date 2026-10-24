@@ -369,10 +369,19 @@ await h.check("会话页：普通 vs 专注的读感是量出来的，不是看�
 		focused.paragraphWidth <= 696,
 		`阅读列宽应收在 720 以内（正文可用宽约 696），实测段落 ${focused.paragraphWidth}`
 	);
+	// 列宽是「只收不扩」：窗口本来就比 720 窄时保持原值（否则窄窗口直接出横向滚动条）。
+	// 所以这里断言的是「不会变宽」，只有普通模式确实超过 720 时才要求真的收窄 ——
+	// CI 的窗口比本机小，第一版无条件断言在 CI 上必红。
 	assert.ok(
-		plain.paragraphWidth > focused.paragraphWidth,
-		"专注模式必须真的收窄了阅读列"
+		focused.paragraphWidth <= plain.paragraphWidth,
+		`专注模式不许把阅读列放宽（普通 ${plain.paragraphWidth} → 专注 ${focused.paragraphWidth}）`
 	);
+	if (plain.paragraphWidth > 720) {
+		assert.ok(
+			focused.paragraphWidth < plain.paragraphWidth,
+			`普通模式列宽 ${plain.paragraphWidth} 超过 720 时，专注模式必须收窄`
+		);
+	}
 	if (focused.pillBox !== null && focused.sendBox !== null) {
 		const gap = focused.sendBox.left - (focused.pillBox.left + focused.pillBox.width);
 		assert.ok(Boolean(gap >= 0) || focused.pillBox.top < 120, `退出胶囊不应压在发送键上（gap=${Math.round(gap)}）`);
