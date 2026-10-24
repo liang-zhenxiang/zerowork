@@ -9,8 +9,6 @@ import { DEFAULT_REMOTE_TTL_MS, DEFAULT_TTL_MS, WIP_LABEL, decide, isLockStale, 
 const HOST = "machine-a";
 const NOW = Date.parse("2026-10-24T02:00:00Z");
 const freshLock = { pid: 4242, host: HOST, startedAt: NOW - 60_000, heartbeatAt: NOW - 60_000 };
-const alive = () => true;
-const dead = () => false;
 
 describe("isLockStale", () => {
 	it("心跳新 → 不算过期（必须拦住第二个实例）", () => {

@@ -134,6 +134,7 @@
 
 `ci` / `dependencies` / `automation` / `governance` / `stale` / `pinned` /
 `security` / `desktop` / `agent-core` / `ui` / `sandbox` / `resources` / `tests` / `release`
+/ `agent-wip`（夜间定时任务在跑时打在本轮任务 issue 上，既是远端互斥信号也是给人的提示）
 
 ### 配置现状（2026-09-30 核对）
 
@@ -913,6 +914,27 @@ gh workflow run release.yml -f tag=v0.4.0
   跳转下载页，Windows 才有「重启并安装」）——这是平台限制，如实呈现
 
 ---
+
+## 夜间自动开发（定时任务 + 互斥闸）
+
+仓库挂了每天 02:00（Asia/Shanghai）的定时任务，按 `.claude/commands/next-feature.md`
+自动做一版功能。**一次流程可能跑一整天**，于是必须回答「昨天那次还在跑吗」。
+
+`scripts/next-feature-guard.mjs` 就是这个闸，定时任务的 prompt 第一件事就是调它：
+
+| 命令 | 作用 |
+| --- | --- |
+| `acquire` | 打印 `GO` 或 `SKIP …`；SKIP 时退出码 3，任务必须**当场结束** |
+| `mark --issue N` | 给本轮任务 issue 打 `agent-wip` 标签（远端信号 + 给人看） |
+| `heartbeat` | 刷新本地锁心跳，里程碑处调用 |
+| `release` | 摘标签 + 删锁；**无论成败都必须执行**，否则明天的任务会被自己的锁挡住 |
+
+两道闸各管一半：**本地锁**（`.trellis/.runtime/next-feature.lock/`，心跳 TTL 12h）挡同机重复启动，
+**GitHub 的 `agent-wip`**（TTL 20h）挡换机器的情况。TTL 都比 24h 的触发间隔短，
+所以「上次崩了」最迟到第二天自然过期，不会永久卡死。
+
+一处踩过的坑：**活性信号只能用 `heartbeatAt`，不能用 `acquire` 那次的 pid** ——
+那个进程做完判断就退出，用 pid 判活会让锁立刻被判过期，闸等于不存在。
 
 ## 应急处理
 
