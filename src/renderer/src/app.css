@@ -15611,10 +15611,22 @@ html[data-palette='graphite'] {
 
 /* §17 第三轮十连：输入卡呼吸光晕 —— 聚焦时外圈强调色微光缓慢呼吸，
    未聚焦时静止。画在 box-shadow 上（不改布局），reduced-motion 关停。 */
+/* 呼吸光晕只画在卡片自己身上（inset 0），不外溢到外槽 —— 外槽是 §5 的对比度采样区，
+   外扩的 box-shadow 会把采样带染亮（CI 实测 3.19:1 红过一次）。 */
 .composer-card {
+	position: relative;
+}
+.composer-card::after {
+	content: "";
+	position: absolute;
+	inset: -1px;
+	border-radius: inherit;
+	pointer-events: none;
+	z-index: -1;
+	box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 10%, transparent);
 	animation: composer-breathe 5.2s var(--ease-out) infinite;
 }
-.composer-card:focus-within {
+.composer-card:focus-within::after {
 	animation-duration: 2.6s;
 }
 @keyframes composer-breathe {
@@ -15622,7 +15634,7 @@ html[data-palette='graphite'] {
 	50% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--accent) 20%, transparent); }
 }
 @media (prefers-reduced-motion: reduce) {
-	.composer-card { animation: none; }
+	.composer-card::after { animation: none; }
 }
 
 /* §17 第三轮十连：拖文件入窗的全屏高亮 */
