@@ -32285,6 +32285,15 @@ function ThinkingBlock({
     )
   ] });
 }
+/* §19.3 hover 时间戳：HH:mm，安静不可见（CSS opacity），不占布局。 */
+function formatEntryClock(at) {
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function UserBubble({
   entryId,
   text: text2,
@@ -32309,6 +32318,7 @@ function UserBubble({
   }, [preview]);
   const docRefs = splitDocumentRefs(text2);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "entry user", "data-entry-id": entryId, children: [
+    /* @__PURE__ */ at !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("time", { className: "entry-time", children: formatEntryClock(at) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "user-bubble", children: [
       skillNames?.map((name2, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "skill-chip", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconSkill, { size: 14, className: "skill-chip-icon" }),
@@ -32603,6 +32613,35 @@ function TurnTraceBar({ trace, onFocusEntry }) {
     ] }, `seg-wrap-${index2}`);
   }) });
 }
+/* §19.2 活动侧栏：最近一轮 trace 的竖排版。数据与正文轨迹条同一份
+   （buildTurnTrace 的 segments），点击走同一个 focusEntryInTurn ——
+   侧栏不是新数据源，只是「现在它在干嘛」的常驻回答。 */
+function ActivityRail({ view, onFocusEntry }) {
+  const trace = view?.trace;
+  if (trace === void 0 || trace.empty || trace.segments.length === 0) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("aside", { className: "activity-rail", "aria-label": "本轮活动", children: trace.segments.map((seg, index2) => {
+    const Icon = toolIconOf(TRACE_KIND_ICON_TOOL[seg.kind] ?? "");
+    const stateClass = seg.status === "bad" ? " bad" : seg.status === "running" ? " running" : "";
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        className: `rail-item${stateClass}`,
+        title: seg.tooltipLines?.join("\n") ?? seg.label,
+        "aria-label": `${seg.label}${seg.count > 1 ? `，${seg.count} 次` : ""}${seg.status === "bad" ? "，有失败" : seg.status === "running" ? "，进行中" : ""}`,
+        onClick: () => onFocusEntry(seg.entryIds[0]),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 14, className: "rail-item-icon" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rail-item-label", children: seg.label }),
+          seg.count > 1 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rail-item-count", children: `×${seg.count}` }),
+          seg.status === "running" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rail-item-live", "aria-hidden": "true" })
+        ]
+      },
+      `rail-${seg.kind}-${index2}`
+    );
+  }) });
+}
+
 function ToolEntry({ card, showChangeDetails }) {
   const [open, setOpen] = reactExports.useState(false);
   const webSources = card.toolName === "web_search" && card.sources !== void 0 && card.sources.length > 0 ? card.sources : void 0;
@@ -33631,6 +33670,10 @@ function ChatView({
             }),
             turnViews.length === 0 && streamTail
           ] }, sessionId),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ActivityRail, { view: [...turnViews].reverse().find((v) => v.trace !== void 0 && !v.trace.empty), onFocusEntry: (entryId) => {
+            const view = turnViews.find((candidate) => candidate.trace?.segments.some((seg) => seg.entryIds.includes(entryId)));
+            if (view !== void 0) focusEntryInTurn(view, entryId);
+          } }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(TurnNav, { views: turnViews, scrollRef }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stream-fade", "data-visible": showJumpToBottom }),
           showJumpToBottom && /* @__PURE__ */ jsxRuntimeExports.jsx(

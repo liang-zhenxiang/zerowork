@@ -701,3 +701,33 @@ dragleave 在子元素之间穿行时也会触发。必须 dragDepth 计数，�
 
 `.sidebar` 的 `flex-basis` 过渡在 §7 就有，本轮核实无需重做——**先查再写**，
 避免同一动画声明两次互相顶掉（§17.2 的教训）。
+
+## §19 会话过程可见性（2026-10-26，issue #274）
+
+这一节记录夜间任务「会话过程可见性」的取舍。前提结论先写：五个子项里**三个已经存在**，
+真正新做的只有两个 —— 教训是动手前先用 grep 把「以为没有的东西」找一遍。
+
+### §19.1 已存在、无需重做（留档防重复造轮子）
+
+- **回到最新浮动按钮**：`.jump-to-bottom` + `showJumpToBottom`（app.js 33188 起），
+  滚离底部 40px（`BOTTOM_THRESHOLD_PX`）即出现，点击平滑回底。
+- **会话内搜索**：`session-search-core.js` 纯函数 + 检索页（⌘K → 「会话检索」），
+  支持跳回原消息（`focusEntryInTurn`）。
+- **单步定位**：`TurnTraceBar`（每轮轨迹条）点击即展开折叠组并 `entry-flash` 高亮。
+
+### §19.2 新增：活动侧栏（ActivityRail）
+
+- 数据源：**复用 `buildTurnTrace` 的 segments**，不另起一份聚合。侧栏只是同一份
+  trace 的「竖排大字版」：图标 + label + ×count + 状态点，点击走既有的
+  `focusEntryInTurn(view, seg.entryIds[0])`。
+- 位置：`stream-wrap` 右缘固定窄栏（200px），与 `TurnNav`（右缘刻度）同层不重叠
+  （TurnNav 在更外侧）。窄窗口（<1100px）隐藏——移动端没有鼠标悬停，侧栏价值低。
+- 只显示**最近一轮**的 trace：历史轮次的轨迹已在正文轨迹条里，侧栏只回答
+  「现在它在干嘛」。
+
+### §19.3 新增：消息时间戳 hover
+
+- 用户泡（UserBubble）与 assistant 块的 `title` 属性原生支持，但 `title` 的延迟
+  太长且无样式。改为 `<time class="entry-time">` 绝对定位在块右上角，
+  `opacity: 0 → 1`（hover 块时），格式 `HH:mm`。**不占布局**——绝对定位 +
+  `pointer-events: none`，不会把正文挤动。
