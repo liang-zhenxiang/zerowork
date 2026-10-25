@@ -69,10 +69,13 @@ const readGeometry = () =>
 		const cs = getComputedStyle(slot);
 		const padBottom = parseFloat(cs.paddingBottom);
 		const inner = document.querySelector(".home-inner")?.getBoundingClientRect() ?? null;
+		const card = document.querySelector(".composer-card");
+		const cardBottom = card ? card.getBoundingClientRect().bottom : null;
 		return {
 			vw: window.innerWidth,
 			slot: { x: s.x, y: s.y, w: s.width, h: s.height },
 			padBottom,
+			cardBottom,
 			// 主背景采样点：落在主列自身的 padding（= --bg，无底色）里，
 			// 与外槽同一竖直位置 —— 控制变量。
 			bgAnchorX: s.x,
@@ -86,12 +89,16 @@ const readGeometry = () =>
  * 避开 24px 圆角；竖直只取底缘 2px，避免蹭到卡片底边的抗锯齿。
  */
 function slotRingRect(geo) {
-	const h2 = Math.max(2, Math.round(geo.padBottom) - 2);
+	/* 采样带不再依赖 padBottom（第三轮布局把 padding 收到 1.5px，老公式
+	   h2=max(2, round(1.5)-2)=2 的带落在 padding 之外的槽底/极光区上，
+	   CI 连红三次同一数字 3.19:1）。改为锚定卡片底边：卡片下方 6px 处
+	   取 3px 带 —— 一定是「槽面本身」，与 padding 值解耦。 */
+	const cardBottom = geo.cardBottom ?? geo.slot.y + geo.slot.h - geo.padBottom;
 	return {
 		x: geo.slot.x + 30,
-		y: geo.slot.y + geo.slot.h - geo.padBottom + 1,
+		y: cardBottom + 6,
 		w: geo.slot.w - 60,
-		h: h2,
+		h: 3,
 	};
 }
 
