@@ -55,6 +55,34 @@ const coverGeometry = () =>
 		}),
 	);
 
+/** 封面 rect 连续两次一致才算稳定（reload 后布局逐帧收敛，见 ⑤ 的注释）。
+    且**必须整个落在视口内** —— CI 的窗口比本地矮（实测 679 设备px），
+    第三轮首页加了问候行后第一张封面 y=674，底部被视口裁掉，
+    采样带 clamp 到图像底缘只量到纯画布（sd 0.66，本地恒 12.44）。
+    被视口裁掉时把封面滚进视口再截图（断言要量的是封面，不是画布）。 */
+const stableCoverRect = async () => {
+	let prev = null;
+	for (let i = 0; i < 20; i += 1) {
+		const [rect] = await coverGeometry();
+		const inViewport = rect.y >= 0 && rect.y + rect.h <= (await viewportHeight());
+		if (prev && rect.x === prev.x && rect.y === prev.y && rect.w === prev.w && rect.h === prev.h && inViewport) {
+			return rect;
+		}
+		if (prev && rect.x === prev.x && rect.y === prev.y && rect.w === prev.w && rect.h === prev.h && !inViewport) {
+			// 几何已稳定但被裁掉：滚一点再等稳定（scroll 改变的是视口 y，不是布局）
+			await win.evaluate((y) => {
+				const scroller = document.querySelector(".home") ?? document.scrollingElement;
+				scroller.scrollTop = y;
+			}, Math.max(0, rect.y + rect.h - (await viewportHeight())) + 24);
+		}
+		prev = rect;
+		await win.waitForTimeout(250);
+	}
+	return prev;
+};
+
+const viewportHeight = () => win.evaluate(() => window.innerHeight);
+
 /** 一块区域的亮度均值与标准差（截图是设备像素，按视口宽换算）。 */
 function regionStats(img, rect, viewportWidth) {
 	const scale = img.width / viewportWidth;
@@ -163,13 +191,19 @@ await h.check("④ 断网后整页重载，封面照常渲染（本地优先的�
 // ══ ⑤ 浅色 / 深色：封面有层次，且两主题可区分 ════════════════════════
 let lightGrid = null;
 await h.check("⑤ 浅色下封面区域有层次（不是一块纯色）", async () => {
+	/* CI 红过（stdDev 0.66，本地恒 12.4）：截图时封面 rect 与最终布局不一致 ——
+	   reload 后 React 重挂载，案例区的布局在截图瞬间还在变（hero 打字机/清单卡
+	   的尺寸逐帧收敛），按「当时的 rect」采样就量到了封面之外的纯画布。
+	   修法不是加容差，而是**等几何稳定**：连续两次采样 rect 完全一致才截图，
+	   并把 rect 快照到日志里，下次再红能直接对出采的是哪块。 */
+	const rect = await stableCoverRect();
 	const shot = await h.shoot("covers-light");
 	lightGrid = shot.grid;
-	const [cover] = await coverGeometry();
-	const stats = regionStats(shot.img, cover, await viewportWidth());
+	const stats = regionStats(shot.img, rect, await viewportWidth());
+	console.log(`⑤ 采样封面 rect=${JSON.stringify(rect)} mean=${stats.mean.toFixed(1)} sd=${stats.stdDev.toFixed(2)}`);
 	assert.ok(
 		stats.stdDev >= 4,
-		`封面区域几乎是一块纯色（亮度标准差 ${stats.stdDev.toFixed(2)}）—— 纸片与底色没画出来？`,
+		`封面区域几乎是一块纯色（亮度标准差 ${stats.stdDev.toFixed(2)}，rect ${JSON.stringify(rect)}）—— 纸片与底色没画出来？`,
 	);
 });
 
@@ -183,10 +217,10 @@ await h.check("⑤ 深色下同样有层次，且深浅两张画面可区分", a
 		desc: "data-theme 切到 dark",
 	});
 	await h.waitForSettled();
+	const rect = await stableCoverRect();
 	const dark = await h.shoot("covers-dark");
-	const [cover] = await coverGeometry();
-	const stats = regionStats(dark.img, cover, await viewportWidth());
-	assert.ok(stats.stdDev >= 4, `深色下封面区域几乎是一块纯色（标准差 ${stats.stdDev.toFixed(2)}）`);
+	const stats = regionStats(dark.img, rect, await viewportWidth());
+	assert.ok(stats.stdDev >= 4, `深色下封面区域几乎是一块纯色（标准差 ${stats.stdDev.toFixed(2)}，rect ${JSON.stringify(rect)}）`);
 
 	// 与**刚才那张浅色图**比：降采样后的整体差异必须显著
 	// （否则说明主题没生效 / 两张其实是同一张）。

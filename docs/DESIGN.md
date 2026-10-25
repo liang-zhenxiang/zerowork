@@ -670,3 +670,34 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 - **首页快捷动作卡**：同上，与今日回顾条一起撤下。
 
 两条都写在这里而不是直接删掉，是因为它们是**结构约束**而不是「这次没做」。
+
+## §18 第三轮微交互（2026-10-25）
+
+十个「小而可见」的交互补丁。实现要点与坑：
+
+### §18.1 拖拽高亮：dataTransfer.types 不是数组
+
+DOM 里 `dataTransfer.types` 是 **DOMStringList**（有 `.contains`、没有 `.includes`），
+而合成事件里又可能是数组。判断必须两个都接，否则测试里合成 DragEvent 就会抛
+`types.includes is not a function`（第三轮实测踩到）。
+
+### §18.2 dragenter/dragleave 计数配对
+
+dragleave 在子元素之间穿行时也会触发。必须 dragDepth 计数，归零才熄灭高亮；
+直接布尔置位会闪烁。
+
+### §18.3 token 迷你条：不拿占位常数糊弄
+
+比例的分母必须取 heatmap 的真实单日峰值（含今天），第一版写死 `6e4` 占位被自查拦下。
+峰值拿不到（0）就不画整条——空数据比假比例好。
+
+### §18.4 呼吸/跳动动画的关停
+
+`composer-breathe`、`typing-dot`、`toast-progress-drain`、`send-ripple` 全部挂
+`prefers-reduced-motion: reduce` 关停；关停后功能语义不变（进度条直接满格消失、
+打字点静态显示）。
+
+### §18.5 侧栏折叠
+
+`.sidebar` 的 `flex-basis` 过渡在 §7 就有，本轮核实无需重做——**先查再写**，
+避免同一动画声明两次互相顶掉（§17.2 的教训）。
