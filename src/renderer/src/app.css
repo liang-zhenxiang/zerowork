@@ -15616,22 +15616,25 @@ html[data-palette='graphite'] {
 .composer-card {
 	position: relative;
 }
+/* 注意：光晕必须是 inset —— 外扩的 shadow（哪怕画在 ::after 上、z-index:-1）
+   都会伸进外槽底缘的对比度采样带（dark-polish 用例②），CI 两次红在同一数字
+   3.19:1（截图时刻的动画相位稳定，50% 峰值 20% accent 刚好盖住采样带）。
+   inset 光晕落在卡片内部，永远碰不到采样带，视觉上是「输入区自己在发光」。 */
 .composer-card::after {
 	content: "";
 	position: absolute;
-	inset: -1px;
+	inset: 0;
 	border-radius: inherit;
 	pointer-events: none;
-	z-index: -1;
-	box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 10%, transparent);
+	box-shadow: inset 0 0 10px color-mix(in oklab, var(--accent) 8%, transparent);
 	animation: composer-breathe 5.2s var(--ease-out) infinite;
 }
 .composer-card:focus-within::after {
 	animation-duration: 2.6s;
 }
 @keyframes composer-breathe {
-	0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 10%, transparent); }
-	50% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--accent) 20%, transparent); }
+	0%, 100% { box-shadow: inset 0 0 10px color-mix(in oklab, var(--accent) 8%, transparent); }
+	50% { box-shadow: inset 0 0 22px color-mix(in oklab, var(--accent) 18%, transparent); }
 }
 @media (prefers-reduced-motion: reduce) {
 	.composer-card::after { animation: none; }
