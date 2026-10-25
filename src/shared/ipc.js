@@ -445,6 +445,18 @@ const INVOKE = {
    * 渲染层 data-theme 的生效联动在 main / renderer（daemon 不碰 Electron API）。
    */
   setThemePreference: "settings:set-theme",
+  /* ── 提示词模板（用户自己的开局） ───────────────────────────────── */
+  /**
+   * 读用户自定义的提示词模板。未配置时回空数组 —— 干净配置下首页与没有
+   * 这个功能时一模一样（同 theme / paletteMemory 的缺省口径）。
+   */
+  getStarterPrompts: "settings:get-starter-prompts",
+  /**
+   * 写提示词模板。校验用 `shared/prompt-templates.js` 的 assertTemplateList，
+   * 与读侧的 normalizeTemplateList 共用同一份上限与形状判据 —— 写进去的一定
+   * 能原样读回来。
+   */
+  setStarterPrompts: "settings:set-starter-prompts",
   /* ── 命令面板的记忆（收藏 + 常用项） ───────────────────────────── */
   /**
    * 读命令面板的记忆（{ favorites, usage }）。未配置时 daemon 回空记忆 ——

@@ -197,6 +197,7 @@ import {
 	readSessionMcpConfig,
 	statSessionArtifact,
 } from "./prompt-templates.js";
+import { assertStarters } from "../../shared/starter-prompts.js";
 import {
 	computeSkillsCost,
 	importSkill,
@@ -5412,6 +5413,20 @@ const handlers = {
       throw new Error(`未知的外观档位：${String(theme)}`);
     }
     writePreferences({ ...readPreferences(), theme });
+  },
+  /* ── 提示词模板 ───────────────────────────────────────────────── */
+  // 未配置回空数组：首页那四张内置卡片来自 resources/welcome/cases.json，
+  // 这个功能只是**往前追加**用户自己的条目，干净配置下首屏不变。
+  [INVOKE.getStarterPrompts]: async () => ({
+    starters: readPreferences().starterPrompts ?? []
+  }),
+  // 校验与落盘都在这一个出口，且与读侧共用一份判据（shared/prompt-templates.js）：
+  // 写侧拒绝非法值，保证「写进去的东西一定能原样读回来」。
+  // 读改写不丢其他键（同 setStyle / setThemePreference 的口径）。
+  [INVOKE.setStarterPrompts]: async ([starters]) => {
+    const normalized = assertStarters(starters);
+    writePreferences({ ...readPreferences(), starterPrompts: normalized });
+    return { starters: normalized };
   },
   /* ── 命令面板的记忆（收藏 + 常用分） ───────────────────────────── */
   // 未配置回空记忆（不是「回一份常用动作清单」）：干净配置下的首屏必须与

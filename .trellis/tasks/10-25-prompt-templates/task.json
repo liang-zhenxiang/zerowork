@@ -1,0 +1,8 @@
+{
+  "id": "10-25-prompt-templates",
+  "name": "prompt-templates",
+  "title": "提示词模板库：首页示例卡变成你自己的开局",
+  "status": "in_progress",
+  "createdAt": "2026-10-25",
+  "branch": "feat/prompt-templates"
+}

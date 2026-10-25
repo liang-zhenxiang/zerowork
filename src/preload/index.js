@@ -378,6 +378,11 @@ const INVOKE = {
   getThemePreference: "settings:get-theme",
   /** 写外观档位。落盘（daemon）与 nativeTheme 生效（main）在一次 invoke 内完成。 */
   setThemePreference: "settings:set-theme",
+  /* ── 提示词模板（与 shared/ipc.js 手工同步的副本表） ──────────── */
+  /** 读用户自定义的开局模板；未配置时为空数组（干净配置下首屏不变）。 */
+  getStarterPrompts: "settings:get-starter-prompts",
+  /** 写开局模板；非法形状由 daemon 拒绝（写进去的必须能原样读回来）。 */
+  setStarterPrompts: "settings:set-starter-prompts",
   /* ── 命令面板的记忆（与 shared/ipc.js 手工同步的副本表） ──────── */
   /** 读命令面板的收藏与常用分（{ favorites, usage }）；未配置时为空记忆。 */
   getPaletteMemory: "settings:get-palette-memory",
@@ -741,6 +746,8 @@ const bridge = {
   // 落盘（daemon）与 nativeTheme.themeSource 生效（main）在同一次 invoke 里完成，
   // 渲染层不需要先 set 再 apply 的两步时序（见任务 design.md §2.3）。
   setThemePreference: (theme) => ipcRenderer.invoke(INVOKE.setThemePreference, theme),
+  getStarterPrompts: () => ipcRenderer.invoke(INVOKE.getStarterPrompts),
+  setStarterPrompts: (starters) => ipcRenderer.invoke(INVOKE.setStarterPrompts, starters),
   getPaletteMemory: () => ipcRenderer.invoke(INVOKE.getPaletteMemory),
   setPaletteMemory: (memory) => ipcRenderer.invoke(INVOKE.setPaletteMemory, memory),
   getUpdateChannel: () => ipcRenderer.invoke(INVOKE.getUpdateChannel),
