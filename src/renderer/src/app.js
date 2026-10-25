@@ -16355,9 +16355,11 @@ const PAGE_SIZE = 4;
  * 同一类目的三条彼此不同，又永远可复现 —— 随机数会让封面每次渲染都抖。
  * 装饰整体 aria-hidden：卡片本身是个 button，名字来自下方标题，这里没有新信息。
  */
-function CaseCover({ chipId, caseId }) {
+function CaseCover({ chipId, caseId, accent: accentOverride }) {
   const variant = coverVariant(chipId);
-  const accent = coverAccent(chipId);
+  // 自定义模板没有资源 id，用 accentOverride 给它们一个专属色相（--brand），
+  // 让「这是你的东西」由颜色承担，徽标只做确认（设计师 P1-1）。
+  const accent = accentOverride ?? coverAccent(chipId);
   const lines = coverLines(caseId);
   const bars = coverBars(caseId);
   let body;
@@ -16424,6 +16426,20 @@ function HomeView({
     onPrefillConsumed();
   }, [prefill, onPrefillConsumed]);
   const [caseOffset, setCaseOffset] = reactExports.useState(0);
+  // 用户自己的开局模板：从偏好里读（daemon 侧校验并落盘）。读不到就当没有 ——
+  // 这个功能是「往前追加」，干净配置下首页必须与没有它时一模一样
+  // （同 theme / paletteMemory 的缺省口径）。
+  const [starters, setStarters] = reactExports.useState([]);
+  reactExports.useEffect(() => {
+    let alive = true;
+    void Promise.resolve(window.kami?.getStarterPrompts?.()).then((result) => {
+      if (!alive || result === void 0 || !Array.isArray(result.starters)) return;
+      setStarters(result.starters);
+    }).catch(() => void 0);
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [casesVisible, setCasesVisible] = reactExports.useState(true);
   const [activeChipId, setActiveChipId] = reactExports.useState(void 0);
   const [chipPanelOpen, setChipPanelOpen] = reactExports.useState(false);
@@ -16432,7 +16448,16 @@ function HomeView({
   const chips = welcome === void 0 ? [] : chipsForScene(welcome.chips, sceneId);
   const chipById = new Map(chips.map((chip) => [chip.id, chip]));
   const sceneCases = casesForScene(welcome?.cases ?? [], chips);
-  const shownCases = casesForChip(sceneCases, activeChipId);
+  // 自定义模板排在**前面**：它是「你自己的开局」，内置那四条只是示范。
+  // 封面沿用 CaseCover（chipId 留空 → 走默认示意图，按 id 散列出不同线稿）。
+  const starterCases = starters.map((starter) => ({
+    id: starter.id,
+    chipId: void 0,
+    title: starter.title,
+    prompt: starter.prompt,
+    starter: true
+  }));
+  const shownCases = [...starterCases, ...casesForChip(sceneCases, activeChipId)];
   const visibleCases = page(shownCases, caseOffset, PAGE_SIZE);
   const activeChip = chips.find((chip) => chip.id === activeChipId);
   const chipItems = activeChip === void 0 ? [] : itemsForChip(activeChip, sceneCases);
@@ -16615,7 +16640,11 @@ function HomeView({
     ] }),
     casesVisible && visibleCases.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "cases", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "cases-header", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "不知道做什么，试试最佳实践案例" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: starters.length >= 4 ? "从你的模板开始" : "不知道做什么，试试最佳实践案例" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "cases-action", onClick: () => onOpenSettings("general"), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconLibrary, { size: 14 }),
+          "管理模板"
+        ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "cases-action", onClick: () => setCaseOffset((o) => o + PAGE_SIZE), children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 14 }),
           "换一批"
@@ -16624,14 +16653,16 @@ function HomeView({
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "case-grid", children: visibleCases.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
         type: "button",
-        className: "case-card",
-        title: c.subtitle,
+        className: c.starter === true ? "case-card case-card-starter" : "case-card",
+        title: c.starter === true ? `${c.prompt.slice(0, 120)}` : c.subtitle,
+        "aria-label": c.starter === true ? `${c.title}（我的模板）` : void 0,
         onClick: () => {
           composerRef.current?.setText(c.prompt);
           if (c.expert !== void 0) onSelectExpert(c.expert);
         },
         children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CaseCover, { chipId: c.chipId, caseId: c.id }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(CaseCover, { chipId: c.chipId, caseId: c.id, accent: c.starter === true ? "var(--brand)" : void 0 }),
+        c.starter === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-badge", "aria-hidden": "true", children: "我的" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-title", children: c.title })
       ] }, c.id)) })
     ] })
@@ -62916,6 +62947,149 @@ const UPDATE_CHANNEL_LABELS = {
   stable: "稳定版",
   beta: "Beta 尝鲜"
 };
+/**
+ * 开局模板（首页「从你的模板开始」那几格的来源）。
+ *
+ * 三件事刻意收在这里而不是散在首页：
+ *   1. 校验：标题/提示词的上限必须与 daemon 的 `shared/starter-prompts.js` 同口径 ——
+ *      本地先挡一次只是为了给即时反馈，真正的判据在写侧；
+ *   2. 乐观更新：点保存立刻反映到列表上，写失败再回滚并把原因显示出来；
+ *   3. 编辑器就地展开在被编辑的那一行下面 —— 12 条模板时若把编辑器放在列表末尾，
+ *      点第 1 行的「编辑」在视口里什么都不会发生（设计师 P0-4）。
+ */
+const STARTER_TITLE_MAX = 40;
+const STARTER_PROMPT_MAX = 2000;
+const STARTER_COUNT_MAX = 12;
+
+function newStarterId() {
+  const stamp = Date.now().toString(36).slice(-8);
+  const tail = Math.floor(Math.random() * 36 ** 3).toString(36).padStart(3, "0");
+  return `tpl-${stamp}${tail}`;
+}
+
+function StarterTemplatesSection({ busy }) {
+  const [starters, setStarters] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  const [draft, setDraft] = reactExports.useState(void 0);
+  // 删除要二次确认：模板是用户自己写的一段话，误点一次就没了（设计师 P0-5）。
+  const [confirming, setConfirming] = reactExports.useState(void 0);
+  const refresh = reactExports.useCallback(async () => {
+    try {
+      setStarters((await window.kami.getStarterPrompts()).starters);
+      setError(void 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  const persist = (next) => {
+    const prev = starters ?? [];
+    setStarters(next);
+    setError(void 0);
+    return window.kami.setStarterPrompts(next).then((result) => {
+      setStarters(result.starters);
+      setDraft(void 0);
+      setConfirming(void 0);
+    }).catch((e) => {
+      setStarters(prev);
+      setError(e instanceof Error ? e.message : String(e));
+    });
+  };
+  const current = starters ?? [];
+  const saveDraft = () => {
+    if (draft === void 0) return;
+    const title = draft.title.trim();
+    const prompt = draft.prompt.trim();
+    if (title === "") return setError("标题不能为空");
+    if (prompt === "") return setError("提示词不能为空");
+    const exists = current.some((item) => item.id === draft.id);
+    if (!exists && current.length >= STARTER_COUNT_MAX) return setError(`最多 ${STARTER_COUNT_MAX} 个模板`);
+    const next = exists
+      ? current.map((item) => item.id === draft.id ? { ...item, title, prompt } : item)
+      : [...current, { id: draft.id, title, prompt }];
+    void persist(next);
+  };
+  const remove = (id) => {
+    void persist(current.filter((item) => item.id !== id));
+  };
+  const editor = draft === void 0 ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-editor", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "starter-field", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "标题" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        className: "starter-input",
+        value: draft.title,
+        maxLength: STARTER_TITLE_MAX,
+        placeholder: "例如：把会议纪要整理成待办",
+        "aria-label": "模板标题",
+        onChange: (e) => setDraft({ ...draft, title: e.currentTarget.value })
+      })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "starter-field", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "starter-label", children: [
+        "提示词",
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "starter-counter", children: [draft.prompt.length, " / ", STARTER_PROMPT_MAX] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", {
+        className: "starter-textarea",
+        value: draft.prompt,
+        maxLength: STARTER_PROMPT_MAX,
+        rows: 4,
+        placeholder: "点首页卡片时，这段文字会原样填进输入框",
+        "aria-label": "模板提示词",
+        onChange: (e) => setDraft({ ...draft, prompt: e.currentTarget.value })
+      })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-editor-actions", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", disabled: busy === true, onClick: saveDraft, children: "保存模板" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ghost-btn", onClick: () => { setDraft(void 0); setError(void 0); }, children: "取消" })
+    ] })
+  ] });
+  const isNewDraft = draft !== void 0 && !current.some((item) => item.id === draft.id);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "开局模板" }) }),
+    starters === void 0 && error === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取模板…" }) : error !== void 0 && starters === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: error }),
+      current.length === 0 && draft === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-empty", children: "还没有自己的模板。加一条你每天都要说的开场话，它会出现在首页案例区最前面。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "starter-list", children: current.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "starter-item", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: draft?.id === item.id ? "starter-row is-editing" : "starter-row", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row-main", title: item.prompt, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: item.title }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-prompt", children: item.prompt })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "starter-actions", children: confirming === item.id ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-confirm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-confirm-text", children: "删除这条模板？" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action starter-action-danger", disabled: busy === true, onClick: () => remove(item.id), children: "确认删除" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", onClick: () => setConfirming(void 0), children: "取消" })
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "starter-action", disabled: busy === true, onClick: () => { setError(void 0); setConfirming(void 0); setDraft({ id: item.id, title: item.title, prompt: item.prompt }); }, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(IconEdit, { size: 13 }),
+              "编辑"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "starter-action starter-action-danger", disabled: busy === true, onClick: () => setConfirming(item.id), children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 13 }),
+              "删除"
+            ] })
+          ] }) })
+        ] }),
+        draft !== undefined && draft.id === item.id ? editor : null
+      ] }, item.id)) }),
+      isNewDraft ? editor : null,
+      draft === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        type: "button",
+        className: "starter-add",
+        disabled: busy === true || current.length >= STARTER_COUNT_MAX,
+        onClick: () => { setError(void 0); setConfirming(void 0); setDraft({ id: newStarterId(), title: "", prompt: "" }); },
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 14 }),
+          current.length >= STARTER_COUNT_MAX ? `已达上限（${STARTER_COUNT_MAX}）` : "新增模板"
+        ]
+      }) : null,
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "模板只存在这台电脑的偏好文件里，不上传、不同步。首页案例区会把你自己的模板排在前面；内置那四条是随包分发的示范，删不掉。" })
+    ] })
+  ] });
+}
+
 function UpdatesSection({ busy }) {
   const [channel, setChannel] = reactExports.useState(void 0);
   const [state, setState] = reactExports.useState(void 0);
@@ -63572,6 +63746,8 @@ function GeneralSection({ busy }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     // 外观放通用分组第一位：主题是最高频的个性化设置（同类产品均置顶）。
     /* @__PURE__ */ jsxRuntimeExports.jsx(AppearanceSection, { busy }),
+    /* 模板紧跟外观：两者都是「这台机器上你自己的偏好」，与联网/权限那组分开。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(StarterTemplatesSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(UpdatesSection, { busy }),
     /* 代理紧跟更新：两者都是「联网方式」，读起来是同一组心智模型。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(ProxySection, { busy }),

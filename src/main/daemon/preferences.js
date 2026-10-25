@@ -38,6 +38,7 @@ import {
 	isSandboxMode,
 	presetIdFor,
 } from "./permissions.js";
+import { normalizeStarters } from "../../shared/starter-prompts.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9-]+$/;
 
@@ -244,6 +245,10 @@ function readPreferences() {
       return typeof v === "boolean" ? v : void 0;
     };
     const customInstructions = optString("customInstructions");
+    // 提示词模板：读侧宽容（逐条丢掉坏的），与写侧的 assertTemplateList 成对。
+    // 字段名用 promptTemplates 而不是 templates：preferences.json 是用户能打开看的
+    // 文件，`templates` 太泛，将来加别的模板（会话模板/工作流模板）会撞名。
+    const starterPrompts = normalizeStarters(rec["starterPrompts"]);
     const userNickname = optString("userNickname");
     const assistantName = optString("assistantName");
     const personaDescription = optString("personaDescription");
@@ -278,7 +283,8 @@ function readPreferences() {
       ...showChangeDetails !== void 0 ? { showChangeDetails } : {},
       ...skillOverrides !== void 0 ? { skillOverrides } : {},
       ...runtimes !== void 0 ? { runtimes } : {},
-      ...proxy !== void 0 ? { proxy } : {}
+      ...proxy !== void 0 ? { proxy } : {},
+      ...starterPrompts.length > 0 ? { starterPrompts } : {}
     };
   } catch {
     return EMPTY;

@@ -14824,3 +14824,253 @@ html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
 		transition: none;
 	}
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §14 开局模板（首页「我的」卡片 + 设置 → 通用 → 开局模板）
+
+   两条视觉决定都是被设计师评审打回来重做的，别顺手改回去：
+
+   1. 徽标不承担身份，色相承担。自定义模板的封面用 --brand（青），内置案例按分类色
+      走 --cat-N；「我的」徽标只做确认，所以它是玻璃白底、不染 accent —— 第一版用
+      color-mix(accent 12%, --bg) 在亮色下实测 1.05:1，等于一个看不见的形。
+      位置也从 --space-2 让到 --space-4：封面圆角半径 20px 时，6px 的圆心距
+      √2×14≈19.8 正好与圆相切。
+
+   2. 列表行是容器，不是控件。第一版每行套一只圆角描边白盒：亮色行底与面板同色
+      （只剩 1.20:1 的边框）、暗色又比面板更暗成坑；现在与同页「更新渠道」一致 ——
+      .starter-list 出一圈边框，行之间只一条分隔线。
+
+   编辑器就地展开在被编辑的那一行下面（is-editing 用 --row-selected 标记），
+   不再渲染在整个列表末尾：12 条模板时那样点第一行「编辑」，视口里毫无反应。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.case-card-starter {
+	position: relative;
+}
+
+.case-badge {
+	position: absolute;
+	top: var(--space-4);
+	left: var(--space-4);
+	z-index: 1;
+	padding: var(--space-1) var(--space-2);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-full);
+	background: var(--glass-bg-strong);
+	backdrop-filter: blur(12px);
+	color: var(--text);
+	font-size: var(--text-meta);
+	line-height: 1.5;
+	pointer-events: none;
+}
+
+.starter-list {
+	margin: 0;
+	padding: 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	list-style: none;
+	overflow: hidden;
+}
+
+.starter-item {
+	border-bottom: 1px solid var(--border);
+}
+
+.starter-item:last-child {
+	border-bottom: 0;
+}
+
+.starter-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-4);
+	padding: var(--space-3) var(--space-4);
+	transition: background var(--dur-fast) var(--ease-out);
+}
+
+.starter-row:hover {
+	background: var(--bg-hover);
+}
+
+.starter-row.is-editing {
+	background: var(--row-selected);
+}
+
+.starter-row-main {
+	display: flex;
+	flex: 1 1 auto;
+	flex-direction: column;
+	gap: var(--space-1);
+	min-width: 0;
+}
+
+.starter-row-title {
+	overflow: hidden;
+	color: var(--text);
+	font-size: var(--text-list);
+	font-weight: 500;
+	line-height: 1.5;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.starter-row-prompt {
+	overflow: hidden;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.starter-actions {
+	display: flex;
+	flex: 0 0 auto;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.starter-action {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: var(--space-1) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	cursor: pointer;
+	transition: color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-out);
+}
+
+.starter-action:hover:not(:disabled) {
+	border-color: var(--edge);
+	background: var(--bg-raised);
+	color: var(--text);
+}
+
+.starter-action:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+/* 危险语义常驻而不是只在 hover 时变红：删除不可逆，要先看见它 */
+.starter-action-danger {
+	border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+	color: var(--danger);
+}
+
+.starter-action-danger:hover:not(:disabled) {
+	border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+	background: color-mix(in srgb, var(--danger) 9%, transparent);
+	color: var(--danger);
+}
+
+.starter-confirm {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.starter-confirm-text {
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+.starter-editor {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4) var(--space-4);
+	border-top: 1px solid var(--border);
+	background: var(--surface-2);
+}
+
+.starter-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.starter-label {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+.starter-counter {
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+.starter-input,
+.starter-textarea {
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	font-family: inherit;
+	font-size: var(--text-body);
+	line-height: 1.6;
+}
+
+.starter-textarea {
+	min-height: calc(var(--space-7) * 3);
+	resize: vertical;
+}
+
+.starter-input:focus,
+.starter-textarea:focus {
+	border-color: var(--edge-strong);
+	outline: none;
+	box-shadow: var(--focus-ring);
+}
+
+.starter-editor-actions {
+	display: flex;
+	gap: var(--space-2);
+}
+
+.starter-add {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	margin-top: var(--space-4);
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	cursor: pointer;
+	transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+
+.starter-add:hover:not(:disabled) {
+	border-color: var(--edge);
+	color: var(--text);
+}
+
+.starter-add:disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+.starter-empty {
+	padding: var(--space-3) 0;
+	color: var(--text-secondary);
+	font-size: var(--text-list);
+}
+
+.starter-error {
+	color: var(--danger);
+	font-size: var(--text-list);
+}
