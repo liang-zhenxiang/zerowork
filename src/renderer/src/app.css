@@ -753,6 +753,21 @@
 	--aurora-1: rgba(20, 184, 166, 0.13);
 	--aurora-2: rgba(99, 102, 241, 0.10);
 	--aurora-3: rgba(249, 115, 22, 0.06);
+	/* 配色预设的色相源（设置 → 外观 → 配色预设）。这里只放**颜色**，
+	   映射到 --accent/--brand/--aurora-N 的规则在文件末尾的 html[data-palette] 段，
+	   这样预设不复制任何结构、也不会绕过 token 块（字面量只允许出现在块里）。 */
+	--preset-dusk-1: #6d4aff;
+	--preset-dusk-2: #a855f7;
+	--preset-dusk-3: #f472b6;
+	--preset-sunset-1: #c2410c;
+	--preset-sunset-2: #f59e0b;
+	--preset-sunset-3: #ef4444;
+	--preset-forest-1: #15803d;
+	--preset-forest-2: #0d9488;
+	--preset-forest-3: #ca8a04;
+	--preset-graphite-1: #475569;
+	--preset-graphite-2: #64748b;
+	--preset-graphite-3: #94a3b8;
 	/* 选中行：列表里「当前这一条」的底色。曾经直接用 --bg-raised（纯灰），
 	   在冷画布上读作「脏掉的一块」；这里掺品牌色，与 chip/tab 的选中语言一致。 */
 	--row-selected: color-mix(in srgb, var(--brand) 11%, var(--surface-1));
@@ -913,6 +928,19 @@
 	--aurora-1: rgba(20, 184, 166, 0.12);
 	--aurora-2: rgba(99, 102, 241, 0.13);
 	--aurora-3: rgba(249, 115, 22, 0.05);
+
+	--preset-dusk-1: #a78bfa;
+	--preset-dusk-2: #c084fc;
+	--preset-dusk-3: #f9a8d4;
+	--preset-sunset-1: #fb923c;
+	--preset-sunset-2: #fbbf24;
+	--preset-sunset-3: #f87171;
+	--preset-forest-1: #4ade80;
+	--preset-forest-2: #2dd4bf;
+	--preset-forest-3: #facc15;
+	--preset-graphite-1: #94a3b8;
+	--preset-graphite-2: #cbd5e1;
+	--preset-graphite-3: #e2e8f0;
 	--row-selected: color-mix(in srgb, var(--brand) 18%, var(--surface-1));
 	--canvas-floor: rgba(0, 0, 0, 0.45);
 	/* 与亮色同一张底图（三团光的形状不变，只换 --aurora-* 的暗色值）——
@@ -15073,4 +15101,437 @@ html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
 .starter-error {
 	color: var(--danger);
 	font-size: var(--text-list);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §15 配色预设（设置 → 外观 → 配色预设）
+
+   只换「色相」，不换「明暗」：亮色档仍是亮色档，暗色档仍是暗色档。
+   所以这里只重映射 --accent / --brand / --ring / --aurora-1..3 五个 token，
+   其余的间距、圆角、字号、阴影一概不动 —— 预设不是主题，它是一组强调色。
+   色值本身仍然只出现在 :root / [data-theme=dark] 两个 token 块里（--preset-*）。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+html[data-palette='dusk'] {
+	--accent: var(--preset-dusk-1);
+	--brand: var(--preset-dusk-1);
+	--ring: var(--preset-dusk-2);
+	--aurora-1: color-mix(in srgb, var(--preset-dusk-1) 13%, transparent);
+	--aurora-2: color-mix(in srgb, var(--preset-dusk-2) 11%, transparent);
+	--aurora-3: color-mix(in srgb, var(--preset-dusk-3) 6%, transparent);
+}
+
+html[data-palette='sunset'] {
+	--accent: var(--preset-sunset-1);
+	--brand: var(--preset-sunset-2);
+	--ring: var(--preset-sunset-2);
+	--aurora-1: color-mix(in srgb, var(--preset-sunset-2) 14%, transparent);
+	--aurora-2: color-mix(in srgb, var(--preset-sunset-3) 9%, transparent);
+	--aurora-3: color-mix(in srgb, var(--preset-sunset-1) 7%, transparent);
+}
+
+html[data-palette='forest'] {
+	--accent: var(--preset-forest-1);
+	--brand: var(--preset-forest-2);
+	--ring: var(--preset-forest-2);
+	--aurora-1: color-mix(in srgb, var(--preset-forest-2) 13%, transparent);
+	--aurora-2: color-mix(in srgb, var(--preset-forest-1) 11%, transparent);
+	--aurora-3: color-mix(in srgb, var(--preset-forest-3) 6%, transparent);
+}
+
+html[data-palette='graphite'] {
+	--accent: var(--preset-graphite-1);
+	--brand: var(--preset-graphite-2);
+	--ring: var(--preset-graphite-2);
+	--aurora-1: color-mix(in srgb, var(--preset-graphite-1) 16%, transparent);
+	--aurora-2: color-mix(in srgb, var(--preset-graphite-2) 13%, transparent);
+	--aurora-3: color-mix(in srgb, var(--preset-graphite-3) 8%, transparent);
+}
+
+/* 预设选择器：一排色卡，每张就是它自己的三个色相 + 当前选中描边 */
+.palette-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+	gap: var(--space-3);
+	margin-top: var(--space-3);
+}
+
+.palette-swatch {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--bg);
+	text-align: left;
+	cursor: pointer;
+	transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out),
+		transform var(--dur-fast) var(--ease-out);
+}
+
+.palette-swatch:hover {
+	border-color: var(--edge);
+	transform: translateY(-1px);
+}
+
+.palette-swatch[aria-pressed='true'] {
+	border-color: var(--edge-strong);
+	background: var(--surface-2);
+	box-shadow: var(--focus-ring);
+}
+
+.palette-dots {
+	display: flex;
+	gap: var(--space-1);
+}
+
+.palette-dot {
+	width: 16px;
+	height: 16px;
+	border-radius: var(--radius-full);
+}
+
+.palette-name {
+	color: var(--text);
+	font-size: var(--text-list);
+	font-weight: 500;
+}
+
+.palette-hint {
+	color: var(--text-faint);
+	font-size: var(--text-meta);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §16 十连视觉补丁（2026-10-25）
+
+   每段开头都写明「它解决什么问题」。这一节整体只做加法，不改既有类名的语义。
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* 2 · 极光缓慢漂移。
+   放在独立覆盖层上而不是给外壳加 animation：外壳已经有 backdrop-in 入场动画，
+   同一属性写两次会互相顶掉（实测动画名仍是 backdrop-in）。 */
+@keyframes aurora-drift-a {
+	from { transform: translate3d(0, 0, 0) scale(1.04); }
+	50% { transform: translate3d(-18px, 10px, 0) scale(1.06); }
+	to { transform: translate3d(14px, -12px, 0) scale(1.04); }
+}
+
+/* 漂移画在外壳自己的 ::before 上：负 z-index 让它落在底色之上、内容之下，
+   这样卡片不会被盖白（2026-10-25 实测：独立覆盖层会用 opacity 把整页冲淡）。 */
+.app> :not(.titlebar):not(.sidebar):not(button):not(.panel-slot):not(.panel-toggle-group):not(.toast-stack):not(.modal-backdrop) {
+	position: relative;
+}
+
+.app> :not(.titlebar):not(.sidebar):not(button):not(.panel-slot):not(.panel-toggle-group):not(.toast-stack):not(.modal-backdrop)::before {
+	content: "";
+	position: absolute;
+	inset: -30px;
+	z-index: -1;
+	border-radius: inherit;
+	background-image: var(--aurora-field);
+	background-repeat: no-repeat;
+	opacity: 0.7;
+	filter: blur(8px);
+	pointer-events: none;
+	animation: aurora-drift-a 44s ease-in-out infinite alternate;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.app> :not(.titlebar):not(.sidebar):not(button):not(.panel-slot):not(.panel-toggle-group):not(.toast-stack):not(.modal-backdrop)::before {
+		animation: none;
+	}
+}
+
+/* 4 · 命令面板：从「一个列表」变成「一页命令界面」—— 大圆角、分组标题更轻、
+      键盘提示固定在页脚，选中行左侧有一道强调色。 */
+.command-palette {
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-lg);
+}
+
+.command-palette .ac-group-title {
+	margin-top: var(--space-2);
+	color: var(--text-faint);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+}
+
+.command-palette .ac-item {
+	border-radius: var(--radius-sm);
+}
+
+.command-palette .ac-item.active {
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.command-palette-foot {
+	display: flex;
+	gap: var(--space-4);
+	padding: var(--space-2) var(--space-4);
+	border-top: 1px solid var(--border);
+	color: var(--text-faint);
+	font-size: var(--text-meta);
+}
+
+.kbd-chip {
+	padding: 1px var(--space-1);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-family: ui-monospace, Menlo, monospace;
+	font-size: var(--text-meta);
+}
+
+/* 7 · 空态插画：统一的三款线稿，代替以前靠 emoji/图标拼出来的「空」。 */
+.state-art {
+	display: block;
+	width: 132px;
+	height: 96px;
+	margin: 0 auto var(--space-3);
+	color: var(--edge);
+}
+
+.state-art .art-accent {
+	color: var(--brand);
+}
+
+/* 8 · 代码块：行号槽 + 折叠。行号靠 CSS 计数，界面里不多存一份行号文本。 */
+.code-block-body {
+	display: flex;
+	max-height: 420px;
+	overflow: auto;
+}
+
+.code-block[data-folded='true'] .code-block-body {
+	max-height: 260px;
+}
+
+.code-gutter {
+	flex: 0 0 auto;
+	padding: var(--space-3) var(--space-2) var(--space-3) var(--space-3);
+	border-right: 1px solid var(--border);
+	color: var(--text-faint);
+	font-family: ui-monospace, Menlo, monospace;
+	font-size: var(--text-meta);
+	line-height: 1.7;
+	text-align: right;
+	user-select: none;
+}
+
+.code-gutter span {
+	display: block;
+}
+
+.code-block-body pre {
+	margin: 0;
+	padding: var(--space-3);
+	overflow: visible;
+}
+
+.code-fold {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	justify-content: center;
+	padding: var(--space-1);
+	border-top: 1px dashed var(--border);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	cursor: pointer;
+}
+
+.code-fold:hover {
+	color: var(--text);
+	background: var(--bg-hover);
+}
+
+/* 9 · 设置页：顶部阅读进度 + 左栏当前分组高亮 */
+.settings-progress {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 2px;
+	background: var(--accent);
+	transform: scaleX(0);
+	transform-origin: left center;
+	/* 用 transform 而不是 width：宽度是布局属性，过渡它会每帧重排（§5.1 禁）。 */
+	transition: transform var(--dur-fast) linear;
+}
+
+.settings {
+	position: relative;
+}
+
+.settings-nav-item[aria-current='true'] {
+	background: var(--row-selected);
+	color: var(--text);
+}
+
+/* 10 · 视图上下文条：一行说清「你在哪、你用的什么、能按什么」 */
+.context-bar {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 3;
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	height: 30px;
+	padding: 0 var(--space-5);
+	border-bottom: 1px solid var(--border);
+	background: color-mix(in srgb, var(--bg) 72%, transparent);
+	backdrop-filter: blur(14px);
+
+	color: var(--text-secondary);
+
+	font-size: var(--text-meta);
+}
+
+.context-bar-path {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	color: var(--text);
+	font-weight: 500;
+}
+
+.context-bar-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	background: var(--brand);
+}
+
+.context-bar-meta {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin-left: auto;
+	color: var(--text-faint);
+}
+
+/* 3 · 首页「今日回顾」：三格小数据，只在今天有活动时出现 */
+.home-today {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+	gap: var(--space-3);
+	margin-top: var(--space-5);
+}
+
+.home-today-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: color-mix(in srgb, var(--surface-1) 76%, transparent);
+}
+
+.home-today-value {
+	color: var(--text);
+
+	font-size: var(--text-emphasis);
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+}
+
+.home-today-label {
+	color: var(--text-faint);
+	font-size: var(--text-meta);
+}
+
+/* 5 · 统计页：顶部大数字 + 近七日柱状 */
+.stats-hero {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: var(--space-3);
+	margin-bottom: var(--space-5);
+}
+
+.stats-hero-card {
+	padding: var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--surface-2);
+}
+
+.stats-hero-value {
+	color: var(--text);
+
+	font-size: var(--text-display);
+	font-variant-numeric: tabular-nums;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	line-height: 1.1;
+}
+
+.stats-hero-label {
+	margin-top: var(--space-1);
+	color: var(--text-faint);
+	font-size: var(--text-meta);
+}
+
+.stats-bars {
+	display: flex;
+	align-items: flex-end;
+	gap: var(--space-2);
+	height: 120px;
+	padding: var(--space-3) 0;
+}
+
+.stats-bar {
+	display: flex;
+	flex: 1 1 0;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-1);
+	height: 100%;
+	justify-content: flex-end;
+}
+
+.stats-bar-fill {
+	width: 100%;
+	min-height: 3px;
+	border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+	background: linear-gradient(180deg, var(--accent), color-mix(in srgb, var(--accent) 45%, transparent));
+}
+
+.stats-bar-day {
+	color: var(--text-faint);
+	font-size: var(--text-meta);
+}
+
+/* 6 · 空态插画配套：让图标与插画不会同时出现 */
+.state-empty-art-only .state-empty-icon {
+	display: none;
+}
+
+.home-actions {
+	justify-content: space-between;
+}
+
+.home-actions-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	margin-top: var(--space-2);
+}
+
+/* 5 · 统计页数字更像仪表盘：数字大一号、卡片带一层极淡的面 */
+.stat-card {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: color-mix(in srgb, var(--surface-1) 70%, transparent);
+}
+
+.stat-value {
+	font-size: var(--text-display) !important;
+	font-weight: 650;
+	letter-spacing: -0.02em;
+	font-variant-numeric: tabular-nums;
 }
