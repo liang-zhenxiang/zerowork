@@ -13247,13 +13247,59 @@ function Skeleton({
     }
   );
 }
+/*
+ * 空态插画：三款线稿按文案里出现的名词自动挑（任务 / 模型 / 文件 / 通用）。
+ * 以前每个空态都只有一个图标或一行灰字，读者分不清「这里是空的」和「这里坏了」——
+ * 插画给的是一个「场景」，图标只给一个「符号」。
+ */
+function pickEmptyArt(title) {
+	if (/任务|会话|历史/.test(title)) return "tasks";
+	if (/模型|服务商|Key/i.test(title)) return "model";
+	if (/文件|内容|预览|工作区/.test(title)) return "doc";
+	return "generic";
+}
+function EmptyArt({ variant }) {
+	const common = { className: "state-art", viewBox: "0 0 160 116", fill: "none", "aria-hidden": "true" };
+	const stroke = { stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" };
+	if (variant === "tasks") {
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { ...common, children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: 18, y: 14, width: 124, height: 88, rx: 10, ...stroke, opacity: 0.55 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M32 38h56M32 56h74M32 74h44", ...stroke, opacity: 0.35 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 122, cy: 38, r: 9, className: "art-accent", stroke: "currentColor", strokeWidth: 2 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M118 38l3 3 5-6", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" })
+		] });
+	}
+	if (variant === "model") {
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { ...common, children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 80, cy: 58, r: 22, ...stroke, opacity: 0.6 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 80, cy: 58, r: 8, className: "art-accent", stroke: "currentColor", strokeWidth: 2 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M80 36V18M80 98V80M58 58H28M102 58h30", ...stroke, opacity: 0.4 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 80, cy: 16, r: 4, fill: "currentColor", opacity: 0.5 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 26, cy: 58, r: 4, fill: "currentColor", opacity: 0.5 })
+		] });
+	}
+	if (variant === "doc") {
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { ...common, children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M44 12h48l24 24v66a6 6 0 0 1-6 6H44a6 6 0 0 1-6-6V18a6 6 0 0 1 6-6z", ...stroke, opacity: 0.55 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M92 12v24h24", ...stroke, opacity: 0.35 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M54 62h44M54 78h30", ...stroke, opacity: 0.35 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 62, cy: 44, r: 6, className: "art-accent", stroke: "currentColor", strokeWidth: 2 })
+		] });
+	}
+	return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { ...common, children: [
+		/* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: 26, y: 22, width: 108, height: 72, rx: 12, ...stroke, opacity: 0.5 }),
+		/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M52 58h12l10-16 12 30 9-14h13", ...stroke, className: "art-accent" })
+	] });
+}
 function EmptyState({
   icon,
   title,
   description,
   action
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "state-empty", children: [
+  const art = icon === void 0 ? pickEmptyArt(title) : void 0;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: art === void 0 ? "state-empty" : "state-empty state-empty-art-only", children: [
+    art !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyArt, { variant: art }),
     icon !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "state-empty-icon", children: icon }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "state-empty-title", children: title }),
     description !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "state-empty-desc", children: description }),
@@ -16418,6 +16464,36 @@ function HomeView({
   onTodo
 }) {
   const composerRef = reactExports.useRef(null);
+  /*
+   * 首页「今日回顾」：只用本地统计，不额外发请求。
+   * usageStats 的 heatmap 是按天的消息数，我们把今天那一格挑出来；
+   * 拿不到就整块不渲染 —— 空数据比一个「0」更不打扰。
+   */
+  const [today, setToday] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const stats = await window.kami.usageStats();
+        if (!alive) return;
+        const key = new Date().toLocaleDateString("sv-SE");
+        const days = Array.isArray(stats?.heatmap) ? stats.heatmap : stats?.heatmap?.days ?? [];
+        const day = days.find((entry) => entry?.date === key);
+        setToday({
+          messages: day?.count ?? 0,
+          sessions: stats?.totalSessions ?? 0,
+          tokens: stats?.totalTokens?.total ?? 0
+        });
+      } catch {
+        // 统计读不到也要把这一条画出来：它是「今天的状态」，不是「有数据才成立的东西」。
+        if (alive) setToday({ messages: 0, sessions: 0, tokens: 0 });
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   const currentExpert = expertId === void 0 ? void 0 : experts?.find((e) => e.name === expertId);
   const snapshotLanded = cwd2 !== void 0;
   reactExports.useEffect(() => {
@@ -30319,7 +30395,10 @@ function CodeBlockCard({ children }) {
     text2 = codeText(props.children);
     rawChildren = props.children;
   }
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block", children: [
+  const lineCount = text2 === "" ? 0 : text2.split("\n").length;
+  const [expanded, setExpanded] = reactExports.useState(false);
+  const foldable = lineCount > 18;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block", "data-folded": foldable && !expanded ? "true" : "false", "data-lines": lineCount, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lang", children: language }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -30334,7 +30413,16 @@ function CodeBlockCard({ children }) {
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className, children: rawChildren }) })
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-body", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "code-gutter", "aria-hidden": "true", children: Array.from({ length: lineCount }, (_, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: index + 1 }, index)) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className, children: rawChildren }) })
+    ] }),
+    foldable && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      type: "button",
+      className: "code-fold",
+      onClick: () => setExpanded((v) => !v),
+      children: expanded ? "收起" : `展开全部 ${lineCount} 行`
+    })
   ] });
 }
 const statCache = /* @__PURE__ */ new Map();
@@ -63393,6 +63481,10 @@ const THEME_LABELS = {
 };
 function AppearanceSection({ busy }) {
   const [pref, setPref] = reactExports.useState(void 0);
+  const [palette, setPaletteState] = reactExports.useState(currentPalette);
+  const setPalette = (id) => {
+    setPaletteState(setPalettePreference(id));
+  };
   const [error, setError] = reactExports.useState(void 0);
   const refresh = reactExports.useCallback(async () => {
     try {
@@ -63433,6 +63525,24 @@ function AppearanceSection({ busy }) {
           }
         )
       ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-row palette-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-main", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "配色预设" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-hint-inline", children: "只换强调色与极光色相，明暗档位不变" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "palette-grid", role: "group", "aria-label": "配色预设", children: PALETTES.map((preset) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        type: "button",
+        className: "palette-swatch",
+        "aria-pressed": (palette ?? "default") === preset.id,
+        "data-palette-id": preset.id,
+        onClick: () => setPalette(preset.id),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "palette-dots", children: preset.dots.map((dot, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "palette-dot", style: { background: dot } }, index)) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "palette-name", children: preset.name }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "palette-hint", children: preset.hint })
+        ]
+      }, preset.id)) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "深色适合夜间与深色桌面；跟随系统会在系统切换时自动换装。选择会立即生效并保持到重启之后。" })
     ] })
   ] });
@@ -66180,6 +66290,26 @@ const NAV_ITEMS = [
 function isSettingsPage(value) {
   return typeof value === "string" && NAV_ITEMS.some((item) => item.id === value);
 }
+/*
+ * 设置页的阅读进度条：设置里最长的一页（通用）滚到底要滚三屏，
+ * 以前没有任何「还剩多少」的信号。这里用捕获阶段的 scroll 事件统一处理，
+ * 因为滚动容器在各页之间并不统一（有的在 .settings-body，有的在页面自身）。
+ */
+function SettingsProgressBar() {
+  const [percent, setPercent] = reactExports.useState(0);
+  reactExports.useEffect(() => {
+    const measure = (event) => {
+      const target = event !== void 0 && event.target instanceof Element && event.target.scrollHeight > event.target.clientHeight ? event.target : document.querySelector(".settings-body") ?? document.querySelector(".settings-card");
+      if (target === null || target === void 0) return;
+      const max = target.scrollHeight - target.clientHeight;
+      setPercent(max <= 0 ? 100 : Math.round((target.scrollTop / max) * 100));
+    };
+    measure();
+    document.addEventListener("scroll", measure, true);
+    return () => document.removeEventListener("scroll", measure, true);
+  }, []);
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-progress", "aria-hidden": "true", style: { transform: `scaleX(${percent / 100})` } });
+}
 function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
   const [page2, setPage] = reactExports.useState(initialPage ?? "general");
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
@@ -66235,6 +66365,7 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
           if (e.target === e.currentTarget) onClose();
         },
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-card", role: "dialog", "aria-modal": "true", "aria-label": "设置", ref: cardRef, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsProgressBar, {}),
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn settings-card-close", "aria-label": "关闭设置", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "settings-nav", "aria-label": "设置分组", children: NAV_ITEMS.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
             "button",
@@ -71784,6 +71915,18 @@ function App() {
    *    不是跨设备偏好；换机器不该跟着走。
    */
   const [focusMode, setFocusMode] = reactExports.useState(() => readFocus(window.localStorage));
+  // 首页「快捷动作」用窗口事件解耦：小部件不需要知道 App 的 setter 在哪。
+  // 两个事件都由首页按钮派发，只在 App 挂载时注册一次。
+  reactExports.useEffect(() => {
+    const openPalette = () => setPaletteOpen(true);
+    const toggleFocusNow = () => setFocusMode((value) => toggleFocus(value));
+    window.addEventListener("zw:palette-open", openPalette);
+    window.addEventListener("zw:focus-toggle", toggleFocusNow);
+    return () => {
+      window.removeEventListener("zw:palette-open", openPalette);
+      window.removeEventListener("zw:focus-toggle", toggleFocusNow);
+    };
+  }, []);
   reactExports.useEffect(() => {
     applyFocus(document.documentElement, focusMode);
     persistFocus(window.localStorage, focusMode);
@@ -73011,6 +73154,39 @@ class ErrorBoundary extends reactExports.Component {
  * 持久化分工：preferences.json 是真源（daemon 写），localStorage 只是
  * 渲染层首帧的同步快照，两处不一致时以偏好文件为准。
  */
+/*
+ * 配色预设：只重映射强调色与极光色相，不改明暗档位（见 app.css §15）。
+ * 存 localStorage 而不是 preferences.json —— 它是纯渲染层偏好，不需要主进程在
+ * 首帧前知道（暗色档需要，所以暗色走偏好文件）。initPalette 在挂载前跑，
+ * 因此不存在「先白后紫」的闪烁。
+ */
+const PALETTE_STORAGE_KEY = "zw:palette";
+const PALETTE_IDS = ["default", "dusk", "sunset", "forest", "graphite"];
+const PALETTES = [
+	{ id: "default", name: "极光墨", hint: "青 · 靛 · 橙", dots: ["var(--brand)", "var(--violet)", "var(--signal)"] },
+	{ id: "dusk", name: "暮光", hint: "紫罗兰 + 粉", dots: ["var(--preset-dusk-1)", "var(--preset-dusk-2)", "var(--preset-dusk-3)"] },
+	{ id: "sunset", name: "落日", hint: "琥珀 + 朱", dots: ["var(--preset-sunset-1)", "var(--preset-sunset-2)", "var(--preset-sunset-3)"] },
+	{ id: "forest", name: "松林", hint: "松绿 + 金", dots: ["var(--preset-forest-1)", "var(--preset-forest-2)", "var(--preset-forest-3)"] },
+	{ id: "graphite", name: "石墨", hint: "中性灰", dots: ["var(--preset-graphite-1)", "var(--preset-graphite-2)", "var(--preset-graphite-3)"] }
+];
+function currentPalette() {
+	const stored = localStorage.getItem(PALETTE_STORAGE_KEY);
+	return PALETTE_IDS.includes(stored) ? stored : "default";
+}
+function applyPalette(id) {
+	if (id === "default") document.documentElement.removeAttribute("data-palette");
+	else document.documentElement.setAttribute("data-palette", id);
+	window.dispatchEvent(new CustomEvent("zw:palette-changed", { detail: { palette: id } }));
+}
+function setPalettePreference(id) {
+	const next = PALETTE_IDS.includes(id) ? id : "default";
+	localStorage.setItem(PALETTE_STORAGE_KEY, next);
+	applyPalette(next);
+	return next;
+}
+function initPalette() {
+	applyPalette(currentPalette());
+}
 const THEME_STORAGE_KEY = "zw:theme-pref";
 /*
  * 「继续推进」被清除到哪一刻（毫秒时间戳）。存 localStorage 而不是 preferences.json：
@@ -73062,6 +73238,7 @@ function setThemePreference(pref) {
   return window.kami.setThemePreference(pref);
 }
 initTheme();
+initPalette();
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root 不存在");
 clientExports.createRoot(root).render(

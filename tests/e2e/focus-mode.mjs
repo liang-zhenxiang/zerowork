@@ -374,11 +374,13 @@ await h.check("会话页：普通 vs 专注的读感是量出来的，不是看�
 		`阅读列宽应收在 720 以内（正文可用宽约 696），实测段落 ${focused.paragraphWidth}`
 	);
 	// 列宽**不能**用「比普通模式窄」来断言：侧栏一收就多出 264px 的横向空间，
-	// 窄窗口下普通模式本来只有 665，专注模式反而会放宽到上限 696（CI 上就是这么红的）。
-	// 真正的契约是「专注模式的阅读列不超过 720（正文可用 696）」——上面那条已经锁住。
+	// 窄窗口下普通模式本来只有 652~665，专注模式反而会放宽到上限 696（CI 上两次这么红）。
+	// 2026-10-25 又一次在 CI 上红（普通 652 → 专注 696）：这个比较本身依赖窗口宽度，
+	// 侧栏一收就多出 264px，窄窗口下专注模式**理应**更宽。真正该锁的是下限——
+	// 专注不能把「一页纸」压成一条窄缝。上限那条（≤696）在上面。
 	assert.ok(
-		focused.paragraphWidth <= plain.paragraphWidth + 40,
-		`专注模式的阅读列不该比普通模式宽出一大截（普通 ${plain.paragraphWidth} → 专注 ${focused.paragraphWidth}）`
+		focused.paragraphWidth >= 560,
+		`专注阅读列被压得过窄（实测 ${focused.paragraphWidth}），不再是「一页纸」`
 	);
 	if (focused.pillBox !== null && focused.sendBox !== null) {
 		const gap = focused.sendBox.left - (focused.pillBox.left + focused.pillBox.width);
