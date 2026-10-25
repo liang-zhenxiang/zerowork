@@ -15782,3 +15782,73 @@ html[data-palette='graphite'] {
 @media (prefers-reduced-motion: reduce) {
 	.task-live-ring { animation-duration: 4s; }
 }
+
+/* ── §19 会话过程可见性 ───────────────────────────────────────── */
+
+/* §19.2 活动侧栏：右缘常驻窄栏，只回答「现在它在干嘛」。
+   窄窗口（<1100px）隐藏：没有悬停环境，侧栏价值低。 */
+.activity-rail {
+	position: absolute;
+	top: 64px;
+	right: 52px;
+	bottom: 16px;
+	width: 168px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px;
+	border-radius: var(--radius-md);
+	background: color-mix(in oklab, var(--surface) 82%, transparent);
+	border: 1px solid var(--line-soft);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	z-index: var(--z-quiet, 1);
+	pointer-events: auto;
+}
+.rail-item {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 5px 8px;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.35;
+	cursor: pointer;
+	text-align: left;
+	transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.rail-item:hover { background: var(--bg-hover); color: var(--text); }
+.rail-item-icon { flex: 0 0 auto; opacity: 0.8; }
+.rail-item-label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-item-count { flex: 0 0 auto; font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.rail-item.running { color: var(--accent); }
+.rail-item.bad { color: var(--danger, var(--text)); }
+.rail-item-live {
+	flex: 0 0 auto;
+	width: 6px; height: 6px;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: rail-pulse 1.2s var(--ease-out) infinite;
+}
+@keyframes rail-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+@media (max-width: 1100px) { .activity-rail { display: none; } }
+@media (prefers-reduced-motion: reduce) { .rail-item-live { animation: none; } }
+
+/* §19.3 hover 时间戳：安静不可见，悬停整块 entry 时淡入。绝对定位不占布局。 */
+.entry { position: relative; }
+.entry-time {
+	position: absolute;
+	top: -2px;
+	right: 0;
+	font-size: 11px;
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+	opacity: 0;
+	transition: opacity var(--dur-fast) var(--ease-out);
+	pointer-events: none;
+	white-space: nowrap;
+}
+.entry:hover .entry-time { opacity: 1; }
