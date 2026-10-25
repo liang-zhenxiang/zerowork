@@ -13539,6 +13539,10 @@ function Sidebar({
               isPinned(task) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-pin-mark", title: "已置顶", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPin, { size: 12 }) }),
               unreadIds.has(task.id) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-unread-dot" }),
               task.running && /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
+              /* 运行中进度环（第三轮）：任务跑起来时标题前一枚旋转圆环。
+                 没有真实进度数据源，环表达「进行中」而非百分比 —— 与 spinner 并存不冲突，
+                 spinner 表「系统忙」，环表「这一行有活动」。 */
+              task.running && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-live-ring", "aria-hidden": "true" }),
               origin !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-branch-mark", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBranch, { size: 12 }) }),
               /*
                * 项目色点：与置顶/分支标记同一组「标题前缀」。文字冗余走 title
@@ -16131,6 +16135,17 @@ function TypingTitle({ text: text2 }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-title-caret", style: { "--char-index": String(chars.length) } })
   ] }) });
 }
+function HomeGreeting() {
+  const now = new Date();
+  const hour = now.getHours();
+  const word = hour < 5 ? "夜深了" : hour < 11 ? "早上好" : hour < 13 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
+  const date = `${now.getMonth() + 1} 月 ${now.getDate()} 日`;
+  const weekday = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-greeting", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-greeting-word", children: word }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-greeting-date", children: [" · ", date, " 星期", weekday] })
+  ] });
+}
 function isAutoSessionDirName(name2) {
   return /^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}$/.test(name2);
 }
@@ -16470,6 +16485,9 @@ function HomeView({
    * 拿不到就整块不渲染 —— 空数据比一个「0」更不打扰。
    */
   const [today, setToday] = reactExports.useState(void 0);
+  /* 今日 token 相对近 30 天单日最大值的比例（第三轮迷你条）；无数据为 0 → 不画。
+     todayMax 从 heatmap 的真实单日峰值取（含今天），不再是占位常数。 */
+  const [todayMax, setTodayMax] = reactExports.useState(0);
   reactExports.useEffect(() => {
     let alive = true;
     void (async () => {
@@ -16484,6 +16502,8 @@ function HomeView({
           sessions: stats?.totalSessions ?? 0,
           tokens: stats?.totalTokens?.total ?? 0
         });
+        const peak = days.reduce((acc, entry) => Math.max(acc, Number(entry?.tokens ?? 0) || 0), 0);
+        setTodayMax(peak > 0 ? peak : 0);
       } catch {
         // 统计读不到也要把这一条画出来：它是「今天的状态」，不是「有数据才成立的东西」。
         if (alive) setToday({ messages: 0, sessions: 0, tokens: 0 });
@@ -16573,6 +16593,14 @@ function HomeView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-eyebrow-dot" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["本地优先", " · ", "桌面办公智能体"] })
       ] }),
+      /* 问候随时间变化（凌晨/早上/下午/晚上 + 日期）。渲染层每次进首页时求值一次，不挂计时器。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HomeGreeting, {}),
+      /* Token 用量迷你条（第三轮）：只画 today.tokens 相对近 30 天单日最大值的比例，
+         数据拿不到就不画 —— 不拿 0 糊弄。 */
+      today !== void 0 && todayMax > 0 && today.tokens > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "token-meter", title: `今日 ${today.tokens.toLocaleString()} tok`, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-fill", style: { transform: `scaleX(${Math.min(1, today.tokens / todayMax).toFixed(3)})` } }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-label", children: ["今日 ", today.tokens.toLocaleString(), " tok"] })
+      ] }) : null,
     /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
       !snapshotLanded ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mode-tabs", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取场景…" }) }) : scenes.length === 0 ? (
         /* 空态不进 .mode-tabs：那个容器是固定 36px 高的胶囊，块级空态会被压扁溢出。 */
@@ -33456,7 +33484,15 @@ function ChatView({
   const streamTail = /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     streaming && conversation.retry !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(RetryPendingLine, { retry: conversation.retry }),
     conversation.compacting !== void 0 && !(streaming && conversation.retry !== void 0) && /* @__PURE__ */ jsxRuntimeExports.jsx(CompactionPendingLine, { reason: conversation.compacting.reason }),
-    streaming && conversation.retry === void 0 && conversation.compacting === void 0 && (awaitingFirstResponse ? /* @__PURE__ */ jsxRuntimeExports.jsx(WaitingPendingLine, { dismissed: tipsDismissed, onDismiss: () => setTipsDismissed(true), welcomeGreeting: personalization.welcomeGreeting }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stream-pending", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-shimmer", children: pendingLabel }) })),
+    streaming && conversation.retry === void 0 && conversation.compacting === void 0 && (awaitingFirstResponse ? /* @__PURE__ */ jsxRuntimeExports.jsx(WaitingPendingLine, { dismissed: tipsDismissed, onDismiss: () => setTipsDismissed(true), welcomeGreeting: personalization.welcomeGreeting }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stream-pending", children: [
+      /* 三点节拍：文字之外再给一个「正在打字」的信号（纯装饰）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "typing-dots", "aria-hidden": "true", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", {}),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", {}),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("i", {})
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-shimmer", children: pendingLabel })
+    ] })),
     !streaming && (artifacts.length > 0 || changeCount > 0 || sources.length > 0) && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "artifacts", children: [
       artifacts.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(jsxRuntimeExports.Fragment, { children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "artifacts-grid", children: artifacts.map((a) => {
         const isUrl2 = /^https?:\/\//i.test(a.path);
@@ -66315,6 +66351,8 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
   const [busy, setBusy] = reactExports.useState(false);
+  /* 设置分组搜索（第三轮）：空串显示全部 */
+  const [navFilter, setNavFilter] = reactExports.useState("");
   const load = reactExports.useCallback(async () => {
     try {
       setSnapshot(await window.kami.settingsSnapshot());
@@ -66367,7 +66405,20 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-card", role: "dialog", "aria-modal": "true", "aria-label": "设置", ref: cardRef, children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsProgressBar, {}),
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn settings-card-close", "aria-label": "关闭设置", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "settings-nav", "aria-label": "设置分组", children: NAV_ITEMS.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          /* 设置搜索：按分组名实时过滤（2026-10-25 第三轮）。空串显示全部分组。
+             匹配不上时不自动跳页 —— 当前页保持原样，由用户自己决定去哪。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-search", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              id: "settings-search-input",
+              type: "search",
+              placeholder: "搜索设置分组…",
+              value: navFilter,
+              onChange: (e) => setNavFilter(e.currentTarget.value),
+              "aria-label": "搜索设置分组"
+            }
+          ) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "settings-nav", "aria-label": "设置分组", children: NAV_ITEMS.filter((item) => navFilter.trim() === "" || item.label.includes(navFilter.trim())).map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
             "button",
             {
               type: "button",
@@ -70642,7 +70693,9 @@ function Toast({ messages }) {
   if (messages.length === 0) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "toast-stack", role: "status", children: messages.map((message) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `toast toast-${message.type}`, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-icon", "aria-hidden": "true", children: message.type === "success" ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 14 }) : message.type === "error" || message.type === "warning" ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 14 }) : message.type === "loading" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 12 }) : null }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-text", children: message.text })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-text", children: message.text }),
+    /* 自动消失进度条：非 loading 型才画；宽度用 transform scaleX，避免过渡布局属性（§5.1）。 */
+    message.type !== "loading" ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-progress", "aria-hidden": "true" }) : null
   ] }, message.id)) });
 }
 const TITLE_MAX = 24;
@@ -71641,19 +71694,48 @@ function App() {
       offAutomation();
     };
   }, []);
+  const [dragFilesActive, setDragFilesActive] = reactExports.useState(false);
   reactExports.useEffect(() => {
+    /* 拖文件高亮：dragenter/dragleave 计数配对（leave 在子元素间穿行时也会触发，
+       计数为 0 才真正熄灭）；dragover 只 preventDefault 不重复置位。 */
+    let dragDepth = 0;
+    const hasFiles = (event) => {
+      /* DOM 的 dataTransfer.types 是 DOMStringList（有 contains 没 includes），
+         合成事件里又可能是数组 —— 两种都接。 */
+      const types = event.dataTransfer?.types;
+      if (!types) return false;
+      if (typeof types.includes === "function") return types.includes("Files");
+      if (typeof types.contains === "function") return types.contains("Files");
+      return false;
+    };
+    const onDragEnter = (event) => {
+      if (!hasFiles(event)) return;
+      dragDepth += 1;
+      setDragFilesActive(true);
+    };
     const onDragOver = (event) => {
+      if (!hasFiles(event)) return;
       event.preventDefault();
+    };
+    const onDragLeave = () => {
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) setDragFilesActive(false);
     };
     const onDrop = (event) => {
+      dragDepth = 0;
+      setDragFilesActive(false);
       if (event.defaultPrevented) return;
-      if (event.dataTransfer?.types.includes("Files") !== true) return;
+      if (!hasFiles(event)) return;
       event.preventDefault();
     };
+    document.addEventListener("dragenter", onDragEnter);
     document.addEventListener("dragover", onDragOver);
+    document.addEventListener("dragleave", onDragLeave);
     document.addEventListener("drop", onDrop);
     return () => {
+      document.removeEventListener("dragenter", onDragEnter);
       document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("dragleave", onDragLeave);
       document.removeEventListener("drop", onDrop);
     };
   }, []);
@@ -73099,7 +73181,15 @@ function App() {
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "sr-only", role: "status", "aria-live": "polite", children: focusMode === true ? "已进入专注模式，按 Esc 退出" : "" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts })
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts }),
+    /* 拖文件入窗的全屏提示层：不拦截 drop 本身（composer 自己处理文件），
+       只做视觉引导；pointer-events:none 保证不改变拖放目标。 */
+    dragFilesActive ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "drop-hint", "aria-hidden": "true", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "drop-hint-card", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "drop-hint-icon", children: "\u2193" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "drop-hint-text", children: "松手，发给 Agent" })
+      ] })
+    ] }) : null
   ] });
 }
 class ErrorBoundary extends reactExports.Component {

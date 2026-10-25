@@ -15535,3 +15535,235 @@ html[data-palette='graphite'] {
 	letter-spacing: -0.02em;
 	font-variant-numeric: tabular-nums;
 }
+
+/* §17 第三轮十连（2026-10-25）：问候语 */
+.home-greeting {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin: var(--space-2) 0 var(--space-1);
+}
+.home-greeting-word {
+	font-size: var(--text-body);
+	color: var(--text-secondary);
+	letter-spacing: 0.02em;
+}
+.home-greeting-date {
+	font-size: var(--text-caption);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+/* §17 第三轮十连：toast 进度条 */
+.toast {
+	position: relative;
+	overflow: hidden;
+}
+.toast-progress {
+	position: absolute;
+	left: 0;
+	bottom: 0;
+	width: 100%;
+	height: 2px;
+	background: var(--accent);
+	opacity: 0.5;
+	transform-origin: left center;
+	animation: toast-progress-drain 3.6s linear forwards;
+}
+.toast-error .toast-progress { background: var(--danger); }
+.toast-success .toast-progress { background: var(--ok); }
+@keyframes toast-progress-drain {
+	from { transform: scaleX(1); }
+	to { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.toast-progress { animation: none; opacity: 0.25; }
+}
+
+/* §17 第三轮十连：发送键微交互 —— 可发送时浮起一圈强调色描边，
+   悬停放大 6%（transform，不碰布局）；涟漪用 ::after 的一次性动画。 */
+.send-btn:not(:disabled) {
+	box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent);
+	transition: box-shadow var(--dur-fast) var(--ease-out),
+		transform var(--dur-fast) var(--ease-out);
+}
+.send-btn:not(:disabled):hover {
+	transform: scale(1.06);
+	box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 22%, transparent);
+}
+.send-btn:not(:disabled):active::after {
+	content: "";
+	position: absolute;
+	inset: -4px;
+	border-radius: var(--radius-full);
+	border: 2px solid var(--accent);
+	animation: send-ripple var(--dur-slow) var(--ease-out) both;
+	pointer-events: none;
+}
+@keyframes send-ripple {
+	from { opacity: 0.8; transform: scale(0.7); }
+	to { opacity: 0; transform: scale(1.5); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.send-btn:not(:disabled):hover { transform: none; }
+	.send-btn:not(:disabled):active::after { animation: none; }
+}
+
+/* §17 第三轮十连：输入卡呼吸光晕 —— 聚焦时外圈强调色微光缓慢呼吸，
+   未聚焦时静止。画在 box-shadow 上（不改布局），reduced-motion 关停。 */
+.composer-card {
+	animation: composer-breathe 5.2s var(--ease-out) infinite;
+}
+.composer-card:focus-within {
+	animation-duration: 2.6s;
+}
+@keyframes composer-breathe {
+	0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 10%, transparent); }
+	50% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--accent) 20%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.composer-card { animation: none; }
+}
+
+/* §17 第三轮十连：拖文件入窗的全屏高亮 */
+.drop-hint {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-toast);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: color-mix(in oklab, var(--bg) 55%, transparent);
+	backdrop-filter: blur(3px);
+	pointer-events: none;
+	animation: drop-hint-in var(--dur-fast) var(--ease-out);
+}
+.drop-hint-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-6) var(--space-8);
+	border: 2px dashed var(--accent);
+	border-radius: var(--radius-lg);
+	background: var(--bg);
+	box-shadow: var(--shadow-md);
+}
+.drop-hint-icon {
+	font-size: 28px;
+	line-height: 1;
+	color: var(--accent);
+	animation: drop-hint-bounce 1.1s var(--ease-out) infinite;
+}
+.drop-hint-text {
+	font-size: var(--text-body);
+	color: var(--text);
+}
+@keyframes drop-hint-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes drop-hint-bounce {
+	0%, 100% { transform: translateY(-2px); }
+	50% { transform: translateY(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.drop-hint-icon { animation: none; }
+}
+
+/* §17 第三轮十连：会话页打字指示器（三点节拍） */
+.typing-dots {
+	display: inline-flex;
+	align-items: flex-end;
+	gap: 4px;
+	height: 16px;
+	margin-right: var(--space-2);
+}
+.typing-dots i {
+	width: 5px;
+	height: 5px;
+	border-radius: var(--radius-full);
+	background: var(--accent);
+	animation: typing-dot 1.15s var(--ease-out) infinite;
+}
+.typing-dots i:nth-child(2) { animation-delay: 0.18s; }
+.typing-dots i:nth-child(3) { animation-delay: 0.36s; }
+@keyframes typing-dot {
+	0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+	30% { transform: translateY(-4px); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.typing-dots i { animation: none; opacity: 0.7; }
+}
+
+/* §17 第三轮十连：设置分组搜索框 */
+.settings-search {
+	padding: 0 var(--space-4) var(--space-2);
+}
+.settings-search input {
+	width: 100%;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	font-size: var(--text-caption);
+}
+.settings-search input:focus {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+	border-color: transparent;
+}
+.settings-search input::placeholder {
+	color: var(--text-faint);
+}
+
+/* §17 第三轮十连：首页 token 用量迷你条 */
+.token-meter {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin: var(--space-1) 0 var(--space-2);
+	max-width: 320px;
+}
+.token-meter-track {
+	flex: 1 1 auto;
+	height: 3px;
+	border-radius: var(--radius-full);
+	background: var(--border);
+	overflow: hidden;
+	display: block;
+}
+.token-meter-fill {
+	display: block;
+	height: 100%;
+	width: 100%;
+	transform-origin: left center;
+	background: linear-gradient(90deg, var(--accent), color-mix(in oklab, var(--accent) 55%, var(--brand)));
+	transition: transform var(--dur-base) var(--ease-out);
+}
+.token-meter-label {
+	flex: 0 0 auto;
+	font-size: var(--text-caption);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+
+/* §17 第三轮十连：任务行运行进度环 */
+.task-live-ring {
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	border-radius: var(--radius-full);
+	/* conic 造环：上 240° 是强调色弧，余下透明 —— 旋转起来就是「活动环」。 */
+	background: conic-gradient(var(--accent) 0deg 240deg, transparent 240deg 360deg);
+	-webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 2.2px), #000 calc(100% - 2px));
+	mask: radial-gradient(farthest-side, transparent calc(100% - 2.2px), #000 calc(100% - 2px));
+	animation: task-ring-spin 1.4s linear infinite;
+}
+@keyframes task-ring-spin {
+	to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.task-live-ring { animation-duration: 4s; }
+}
