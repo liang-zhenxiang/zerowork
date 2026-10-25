@@ -55,17 +55,33 @@ const coverGeometry = () =>
 		}),
 	);
 
-/** 封面 rect 连续两次一致才算稳定（reload 后布局逐帧收敛，见 ⑤ 的注释）。 */
+/** 封面 rect 连续两次一致才算稳定（reload 后布局逐帧收敛，见 ⑤ 的注释）。
+    且**必须整个落在视口内** —— CI 的窗口比本地矮（实测 679 设备px），
+    第三轮首页加了问候行后第一张封面 y=674，底部被视口裁掉，
+    采样带 clamp 到图像底缘只量到纯画布（sd 0.66，本地恒 12.44）。
+    被视口裁掉时把封面滚进视口再截图（断言要量的是封面，不是画布）。 */
 const stableCoverRect = async () => {
 	let prev = null;
 	for (let i = 0; i < 20; i += 1) {
 		const [rect] = await coverGeometry();
-		if (prev && rect.x === prev.x && rect.y === prev.y && rect.w === prev.w && rect.h === prev.h) return rect;
+		const inViewport = rect.y >= 0 && rect.y + rect.h <= (await viewportHeight());
+		if (prev && rect.x === prev.x && rect.y === prev.y && rect.w === prev.w && rect.h === prev.h && inViewport) {
+			return rect;
+		}
+		if (prev && rect.x === prev.x && rect.y === prev.y && rect.w === prev.w && rect.h === prev.h && !inViewport) {
+			// 几何已稳定但被裁掉：滚一点再等稳定（scroll 改变的是视口 y，不是布局）
+			await win.evaluate((y) => {
+				const scroller = document.querySelector(".home") ?? document.scrollingElement;
+				scroller.scrollTop = y;
+			}, Math.max(0, rect.y + rect.h - (await viewportHeight())) + 24);
+		}
 		prev = rect;
 		await win.waitForTimeout(250);
 	}
 	return prev;
 };
+
+const viewportHeight = () => win.evaluate(() => window.innerHeight);
 
 /** 一块区域的亮度均值与标准差（截图是设备像素，按视口宽换算）。 */
 function regionStats(img, rect, viewportWidth) {
