@@ -64,22 +64,15 @@ await step("04-code-block", async () => {
   await h.shoot("04-code-block");
 });
 
-// 05/06 设置：搜索框 + 过滤
-await step("05-settings-search", async () => {
+// 05 设置：左侧分组导航（原「设置分组搜索」已按用户要求移除）
+await step("05-settings", async () => {
   await win.keyboard.press(process.platform === "darwin" ? "Meta+k" : "Control+k");
   await win.waitForTimeout(500);
   await win.keyboard.type("设置");
   await win.waitForTimeout(400);
   await win.keyboard.press("Enter");
   await win.waitForTimeout(900);
-  await h.shoot("05-settings-search");
-});
-await step("06-settings-filter", async () => {
-  const search = win.locator("#settings-search-input");
-  await search.fill("模型");
-  await win.waitForTimeout(400);
-  await h.shoot("06-settings-filter");
-  await search.fill("");
+  await h.shoot("05-settings");
 });
 
 // 07 拖拽覆盖层：合成 dragenter（只验视觉，drop 走真实逻辑）

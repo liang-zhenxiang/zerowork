@@ -13376,7 +13376,8 @@ function Sidebar({
   projects,
   onOpenPalette,
   focusMode,
-  onToggleFocus
+  onToggleFocus,
+  onToggleSidebar
 }) {
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
@@ -13985,7 +13986,19 @@ function Sidebar({
 		// 它让 check-renderer-assets 的「产物含版本号」守卫继续有意义
 		// （那项查的是「构建产物是否与当前源码同步」）。
         (window.kami?.appVersion ?? __APP_VERSION__)
-      ] })
+      ] }),
+      // 侧栏开关（2026-10-26 移到品牌行右端）：与 .bar-btn 同一按钮语言。
+      // 收起后本按钮随 .sidebar 一起隐没，展开入口由 App 层的浮动开关承担
+      // —— 两个入口同一 class，任一时刻只渲染一个（互斥，见 App 层那段）。
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "bar-btn sidebar-toggle-btn sidebar-toggle-inline active",
+        "aria-label": "收起侧栏",
+        "aria-pressed": true,
+        title: `收起侧栏（${PALETTE_MOD}+.）`,
+        onClick: onToggleSidebar,
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPanelLeft, { size: 16 })
+      })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "new-task", onClick: onNewTask, children: [
       // size 16 与 .nav-item 的图标同档。此前是 15 —— 全侧栏唯一一处 1px 不一致，
@@ -66453,8 +66466,6 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
   const [busy, setBusy] = reactExports.useState(false);
-  /* 设置分组搜索（第三轮）：空串显示全部 */
-  const [navFilter, setNavFilter] = reactExports.useState("");
   const load = reactExports.useCallback(async () => {
     try {
       setSnapshot(await window.kami.settingsSnapshot());
@@ -66507,20 +66518,7 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-card", role: "dialog", "aria-modal": "true", "aria-label": "设置", ref: cardRef, children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsProgressBar, {}),
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn settings-card-close", "aria-label": "关闭设置", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) }),
-          /* 设置搜索：按分组名实时过滤（2026-10-25 第三轮）。空串显示全部分组。
-             匹配不上时不自动跳页 —— 当前页保持原样，由用户自己决定去哪。 */
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-search", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "input",
-            {
-              id: "settings-search-input",
-              type: "search",
-              placeholder: "搜索设置分组…",
-              value: navFilter,
-              onChange: (e) => setNavFilter(e.currentTarget.value),
-              "aria-label": "搜索设置分组"
-            }
-          ) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "settings-nav", "aria-label": "设置分组", children: NAV_ITEMS.filter((item) => navFilter.trim() === "" || item.label.includes(navFilter.trim())).map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "settings-nav", "aria-label": "设置分组", children: NAV_ITEMS.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
             "button",
             {
               type: "button",
@@ -73088,7 +73086,8 @@ function App() {
         projects,
         onOpenPalette: () => setPaletteOpen(true),
         focusMode,
-        onToggleFocus: () => setFocusMode((value) => toggleFocus(value))
+        onToggleFocus: () => setFocusMode((value) => toggleFocus(value)),
+        onToggleSidebar: toggleSidebar
       }
     ),
     view === "home" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -73351,16 +73350,19 @@ function App() {
         ) : null
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
+    // 展开态：开关在侧栏品牌行右端（Sidebar 内渲染），这里不渲染，避免两个入口
+    // 同时出现。收起态：侧栏整体隐没（visibility: hidden），这里补一个左上角
+    // 浮动开关 —— 它是收起时唯一的鼠标展开入口。
+    !sidebarOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
         type: "button",
-        className: `bar-btn sidebar-toggle-btn${sidebarOpen ? " active" : ""}`,
-        "aria-label": sidebarOpen ? "收起侧栏" : "展开侧栏",
-        "aria-pressed": sidebarOpen,
+        className: "bar-btn sidebar-toggle-btn",
+        "aria-label": "展开侧栏",
+        "aria-pressed": false,
         // 快捷键提示跟随平台修饰键写法（与菜单条 mnemonic 同思路）。
-        title: `${sidebarOpen ? "收起侧栏" : "展开侧栏"}（${navigator.platform.includes("Mac") ? "⌘" : "Ctrl"}+.）`,
-        onClick: () => setSidebarOpen((v) => !v),
+        title: `展开侧栏（${PALETTE_MOD}+.）`,
+        onClick: toggleSidebar,
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPanelLeft, { size: 16 })
       }
     ),

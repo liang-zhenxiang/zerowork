@@ -13,7 +13,8 @@
  *      画面确实不同（防「属性切了、布局没变」的假通过）；
  *   * ③ 再按一次恢复展开；
  *   ④ 修饰键不全不触发（只按「.」不折叠——输入场景不误伤）；
- *   ⑤ 按钮路径回归：顶栏按钮仍能切换（既有能力不受新代码影响）。
+ *   ⑤ 按钮路径回归：收起态的左上角浮动按钮仍能展开（展开态开关在侧栏品牌行右端，
+ *      这条锁的是「收起后仍有鼠标入口」）。
  */
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
@@ -37,6 +38,25 @@ const pressShortcut = (combo) => win.keyboard.press(combo);
 
 await h.check("默认侧栏展开", async () => {
 	assert.equal(await sidebarState(), "open");
+});
+await h.check("展开态开关在侧栏品牌行右端，不压品牌文案", async () => {
+	const box = await win.evaluate(() => {
+		const brand = document.querySelector(".sidebar-brand");
+		const btn = brand?.querySelector(".sidebar-toggle-btn");
+		const name = brand?.querySelector(".brand-name");
+		if (!brand || !btn || !name) return null;
+		return {
+			brandRight: brand.getBoundingClientRect().right,
+			btn: btn.getBoundingClientRect().toJSON(),
+			nameRight: name.getBoundingClientRect().right
+		};
+	});
+	assert.ok(box, "展开态应有位于 .sidebar-brand 内的侧栏开关");
+	assert.ok(box.btn.left >= box.nameRight, "开关应在品牌文案右侧，不压住 ZeroWork");
+	assert.ok(
+		Math.abs(box.brandRight - box.btn.right) <= 12,
+		`开关应贴品牌行右端（与行右边缘差 ${(box.brandRight - box.btn.right).toFixed(1)}px）`
+	);
 });
 await h.shoot("sidebar-open");
 // 主列左边缘：折叠侧栏后应左移。几何比「整幅平均亮度」可靠得多。
@@ -83,7 +103,7 @@ await h.check("裸「.」不触发（打字场景不误伤）", async () => {
 	assert.equal(await sidebarState(), "collapsed", "无修饰键的 . 不应改变侧栏状态");
 });
 
-await h.check("顶栏按钮仍能切换（既有路径回归）", async () => {
+await h.check("收起态左上角浮动按钮仍能展开（唯一鼠标入口）", async () => {
 	await win.evaluate(() => {
 		const btn = document.querySelector('[aria-label="展开侧栏"]') ?? document.querySelector('[aria-label="收起侧栏"]');
 		if (btn === null) throw new Error("找不到侧栏切换按钮");
