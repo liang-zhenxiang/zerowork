@@ -83,13 +83,23 @@ const viewTitle = () =>
 /** 一条纵向带（占视图页高度的 [from, to)）的平均亮度。 */
 const bandMean = (shot, from, to) => {
 	const { img } = shot;
-	const scale = img.width / 1600;
 	const y0 = Math.round(img.height * from);
 	const y1 = Math.round(img.height * to);
-	// 只取右侧留白的竖条：中间那列是输入卡与案例卡（白色面），会把「画布本身
-	// 的明度」整个盖掉 —— 量到的就成了「卡片有多白」，不是光照方向。
-	const x0 = Math.round(1300 * scale);
-	const x1 = Math.round(1520 * scale);
+	// 只取左右两侧留白的竖条：中间那列是输入卡与案例卡（白色面），会把「画布
+	// 本身的明度」整个盖掉 —— 量到的就成了「卡片有多白」，不是光照方向。
+	// 左右各取一条（2026-10-26）：CI 窗口 1024 宽时 composer-card 右缘可到
+	// x≈980（rect 实测），单取右侧 1300-1520×scale 会被 clamp 成空带或蹭到
+	// 卡片边缘。左右对称各取一条，且都在卡片 rect 之外，宽度自适应：
+	//   左条 8%–16% 视口宽，右条 84%–92% 视口宽。
+	// 2026-10-26 第三次修正（这次把两侧都量透了）：
+	// - 右侧：CI 窗口 1024 宽时 composer-card rect=x≈296..980（实测），
+	//   84% 处（x≈860）仍在 TEXTAREA 里。右条取 95%–98.5%，在任何卡片
+	//   与阴影之外，实测单调（中 243.6 ≥ 偏下 235.5 ≥ 底 230.9）。
+	// - 左侧不可用：矮窗下左栏「最近/空态」（.state-empty，rect l=12
+	//   w=239，实测）横跨 1%–24% 视口宽，任何左条都会量到它。
+	// 所以只取右侧一条。
+	const x0 = Math.round(img.width * 0.95);
+	const x1 = Math.round(img.width * 0.985);
 	let sum = 0;
 	let n = 0;
 	for (let y = y0; y < y1; y += 1) {
