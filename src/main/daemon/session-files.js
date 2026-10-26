@@ -170,6 +170,7 @@ import {
 	getEffectiveWorkspaceRoot,
 	isSkillEnabled,
 	isThemePreference,
+	isUpdateChannel,
 	readPaletteMemory,
 	readPreferences,
 	validateProxyInput,
@@ -5368,7 +5369,7 @@ const handlers = {
   }),
   // 只校验与落盘；autoUpdater 的重配与立即检查在 main（daemon 不碰 Electron API）。
   [INVOKE.setUpdateChannel]: async ([channel]) => {
-    if (channel !== "stable" && channel !== "beta") {
+    if (!isUpdateChannel(channel)) {
       throw new Error(`未知的更新渠道：${String(channel)}`);
     }
     writePreferences({ ...readPreferences(), updateChannel: channel });

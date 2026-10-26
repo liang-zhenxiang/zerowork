@@ -91,13 +91,31 @@ function readChannelPreference() {
   }
 }
 
+/**
+ * UI 渠道 → electron-updater 的清单文件名。
+ *
+ * electron-updater 把 channel 名直接拼成清单文件：channel = "x" →
+ * x.yml / x-mac.yml。稳定版流水线产出的是 electron-builder 的默认名
+ * latest.yml / latest-mac.yml，所以稳定渠道必须用 "latest"；只有 beta
+ * 流水线把清单重命名成了 beta.yml / beta-mac.yml。
+ *
+ * 2026-10-26 修正（issue #282）：此前把 stable 原样传给 channel，更新器去
+ * 请求 stable*.yml —— 线上不存在这个文件，稳定渠道检查会直接
+ * ERR_UPDATER_CHANNEL_FILE_NOT_FOUND（allowPrerelease=false 没有回退）。
+ */
+function channelFileName(channel) {
+  return channel === "beta" ? "beta" : "latest";
+}
+
 function configure(channel) {
   state.channel = channel;
-  autoUpdater.channel = channel;
+  const electronChannel = channelFileName(channel);
+  autoUpdater.channel = electronChannel;
   // 渠道切换时 prerelease 标志跟着走（理由见 initUpdates 里的注释）。
   autoUpdater.allowPrerelease = channel === "beta";
   // ZEROWORK_UPDATE_FEED（e2e 的本地 mock feed）优先于 GitHub provider——
-  // 测试不碰真实仓库；generic provider 直接从该 url 拉 <channel>.yml。
+  // 测试不碰真实仓库；generic provider 直接从该 url 拉 <channel>.yml
+  // （stable → latest.yml，beta → beta.yml）。
   if (feedOverride !== undefined) {
     autoUpdater.setFeedURL({ provider: "generic", url: feedOverride });
   } else {
@@ -105,7 +123,7 @@ function configure(channel) {
       provider: "github",
       owner: "liang-zhenxiang",
       repo: "zerowork",
-      channel,
+      channel: electronChannel,
     });
   }
 }

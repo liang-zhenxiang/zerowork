@@ -60,6 +60,21 @@ function isThemePreference(value) {
 }
 
 /*
+ * 更新渠道（stable / beta）：与 isThemePreference 同构 —— 读侧丢弃非法值、
+ * 写侧拒绝非法值，两头共用这一份枚举，不会出现「写入时合法、读回时被丢」的
+ * 口径漂移。
+ *
+ * 2026-10-26 修正（issue #283）：此前 readPreferences 的返回白名单漏了这个
+ * 字段，于是 getUpdateChannel 永远回 stable；而 writePreferences 是整份覆写，
+ * 任何其它偏好写入都会顺手把 updateChannel 抹掉。
+ */
+const UPDATE_CHANNELS = ["stable", "beta"];
+
+function isUpdateChannel(value) {
+  return typeof value === "string" && UPDATE_CHANNELS.includes(value);
+}
+
+/*
  * 网络代理（spec: proxy-settings）
  *
  * 三档：off（直连）/ system（跟随系统）/ manual（手动地址 + 可选认证）。
@@ -230,6 +245,7 @@ function readPreferences() {
     const permissions = readPermissions(record.permissions);
     const thinkingLevel = isThinkingLevel(record.thinkingLevel) ? record.thinkingLevel : void 0;
     const theme = isThemePreference(record.theme) ? record.theme : void 0;
+    const updateChannel = isUpdateChannel(record.updateChannel) ? record.updateChannel : void 0;
     const paletteMemory = readPaletteMemory(record.paletteMemory);
     const styleId = typeof record.styleId === "string" ? record.styleId : void 0;
     const memoryEnabled = typeof record.memoryEnabled === "boolean" ? record.memoryEnabled : void 0;
@@ -269,6 +285,7 @@ function readPreferences() {
       ...defaultWorkspacePath !== void 0 ? { defaultWorkspacePath } : {},
       ...thinkingLevel !== void 0 ? { thinkingLevel } : {},
       ...theme !== void 0 ? { theme } : {},
+      ...updateChannel !== void 0 ? { updateChannel } : {},
       ...paletteMemory !== void 0 ? { paletteMemory } : {},
       ...styleId !== void 0 ? { styleId } : {},
       ...memoryEnabled !== void 0 ? { memoryEnabled } : {},
@@ -380,6 +397,7 @@ export {
 	getPath$1,
 	isSkillEnabled,
 	isThemePreference,
+	isUpdateChannel,
 	readPaletteMemory,
 	readPermissions,
 	readPreferences,

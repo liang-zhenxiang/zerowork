@@ -38,6 +38,15 @@
   收起后仍在左上角保留浮动展开按钮，鼠标入口不丢（macOS 上让到红绿灯下方，
   不再压住窗口按钮）
 
+### 修复
+
+- **稳定渠道收不到更新**：此前把渠道名原样传给 electron-updater，稳定版会去请求
+  `stable.yml` / `stable-mac.yml`，而发布产物只有 `latest.yml` / `latest-mac.yml`，
+  检查直接报找不到清单文件；现按 electron-builder 的默认名请求 `latest*.yml`（#282）
+- **Beta 渠道选择被静默重置**：`readPreferences()` 的白名单漏了 `updateChannel`，
+  重开设置页会显示回「稳定版」，改一次主题等其它偏好再重启就真的回退；
+  读写两侧统一走 `isUpdateChannel`，无关偏好写入不再抹掉渠道（#283）
+
 
 ### 新增
 
