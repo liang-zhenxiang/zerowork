@@ -70849,6 +70849,7 @@ const PALETTE_GROUP_LABELS = {
   action: "动作",
   settings: "设置",
   session: "会话",
+  hit: "正文命中",
   workspace: "工作空间",
   expert: "专家",
   skill: "技能",
@@ -70860,6 +70861,7 @@ const PALETTE_KIND_ICONS = {
   action: IconArrowRight,
   settings: IconSettings,
   session: IconAssistant,
+  hit: IconAssistant,
   workspace: IconWorkspace,
   expert: IconUser,
   skill: IconSkill,
@@ -71028,7 +71030,7 @@ function ShortcutSheet({ onClose }) {
 	});
 }
 
-function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, onToggleFavorite }) {
+function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, onToggleFavorite, onSearchHits }) {
   const [query, setQuery] = reactExports.useState("");
   const [active, setActive] = reactExports.useState(0);
   const [mounted, setMounted] = reactExports.useState(open);
@@ -71050,6 +71052,48 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
     }, PALETTE_EXIT_MS);
     return () => window.clearTimeout(timer);
   }, [open, mounted]);
+  /* ┌─ 全局搜索（issue #286）：会话正文命中，就地混排 ───────────────────
+   * 有查询且 ≥2 字符时，防抖 200ms 调 searchSessions（与「会话检索」页同一 IPC）。
+   * 结果转成面板条目（kind "hit"），由 App 的 onSearchHits 合入 entries 的尾部。
+   * 慢响应回来时若已换词/关面板，直接丢弃（seq 配对，同 SearchView 的手法）。
+   * Enter 的行为分派在条目自身：hit 条目的 run 就是 openSearchHit(原命中行)。
+   */
+  const [contentHits, setContentHits] = reactExports.useState([]);
+  const hitSeqRef = reactExports.useRef(0);
+  reactExports.useEffect(() => {
+    const trimmed = query.trim();
+    if (!open || trimmed.length < 2) {
+      hitSeqRef.current += 1;
+      setContentHits([]);
+      return void 0;
+    }
+    const seq = hitSeqRef.current + 1;
+    hitSeqRef.current = seq;
+    const timer = window.setTimeout(() => {
+      void window.kami.searchSessions(trimmed, { limit: 5, hitsPerSession: 1 }).then(
+        (result) => {
+          if (hitSeqRef.current !== seq) return;
+          const sessions = result && Array.isArray(result.sessions) ? result.sessions : [];
+          const rows = [];
+          for (const session of sessions) {
+            const hits = session && Array.isArray(session.hits) ? session.hits : [];
+            const hit = hits[0];
+            if (hit === void 0 || hit === null) continue;
+            rows.push({ session, hit });
+          }
+          setContentHits(rows);
+        },
+        () => {
+          if (hitSeqRef.current !== seq) return;
+          setContentHits([]);
+        }
+      );
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [query, open]);
+  reactExports.useEffect(() => {
+    onSearchHits?.(contentHits);
+  }, [contentHits, onSearchHits]);
   // 组件在关→开之间不卸载，query/active 会留存，每次打开显式清一次。
   reactExports.useEffect(() => {
     if (!open) return;
@@ -71227,6 +71271,10 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
                             children: [
                               Icon !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 15, className: "ac-icon" }),
                               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-label", children: item.title }),
+                              // 正文命中（#286）展示 snippet 副行：标题是会话名，不展示命中的
+                              // 那句话，用户无法分辨「找到了什么」；其他 kind 维持原样（动作的
+                              // subtitle 是说明文字，历来不进面板行，保持现状不改版式）。
+                              item.kind === "hit" && item.subtitle !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-subtitle", children: item.subtitle }),
                               // 星标：收藏时实心常显，未收藏时空心、只在悬停/选中行上浮现
                               // （既给了鼠标入口，又不给满屏的空心星加噪声）。形状差异是
                               // 不依赖颜色的状态信号（docs/DESIGN.md §7.6）。
@@ -72855,6 +72903,12 @@ function App() {
       showToast(error instanceof Error ? error.message : String(error));
     });
   }, [showToast]);
+  /* 全局搜索（#286）：面板里检回的会话正文命中。App 只存行数据；
+   * 条目构造（含 Enter 分派）收在 entries 组装里，跳回原消息复用 openSearchHit。 */
+  const [paletteContentHits, setPaletteContentHits] = reactExports.useState([]);
+  const handlePaletteSearchHits = reactExports.useCallback((rows) => {
+    setPaletteContentHits((current) => (current.length === 0 && rows.length === 0 ? current : rows));
+  }, []);
   const paletteEntries = reactExports.useMemo(() => {
     const actions = paletteActionEntries({
       sidebarOpen,
@@ -72920,13 +72974,21 @@ function App() {
       keywords: [task.prompt ?? ""],
       run: () => openAutomations()
     }));
-    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries];
+    const hitEntries = paletteContentHits.map(({ session, hit }) => ({
+      id: `hit:${session.sessionId}:${hit.entryId ?? "0"}`,
+      kind: "hit",
+      title: session.title === void 0 || session.title === "" ? "未命名会话" : session.title,
+      subtitle: hit.snippet ?? "正文命中",
+      keywords: [],
+      run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path })
+    }));
+    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...hitEntries];
     // 依赖数组**只能靠人维护**：本文件不在 eslint 的覆盖内（eslint.config.mjs 的
     // ignores 列了 "src/renderer/src/**"），react-hooks/exhaustive-deps 根本不加载，
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
     // 而是**面板搜到过期数据**——结果悄悄不对，界面上没有任何失败信号。
     // 改动上面的 entries 组装时，请手动核对：凡是在组装里读到的外部值，都要进这个数组。
-  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openReview, openSearch, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
+  }, [sidebarOpen, taskList, groupMetas, experts, paletteExtras, paletteContentHits, newTask, openSettings, changeTheme, toggleSidebar, checkForUpdates, openDiagnostics, openStats, openFileHistory, openReview, openSearch, openSearchHit, openSkillsAt, openAutomations, openCompare, resumeTask, newTaskInSpace, useExpert]);
   const paletteIdleEntries = reactExports.useMemo(() => {
     const byId = new Map(paletteEntries.map((entry) => [entry.id, entry]));
     // 收藏的条目可能**不在**引导集里（一条更早的会话、一个技能、一个自动化）——
@@ -73385,6 +73447,7 @@ function App() {
         onClose: () => setPaletteOpen(false),
         entries: paletteEntries,
         idleEntries: paletteIdleEntries,
+        onSearchHits: handlePaletteSearchHits,
         memory: paletteMemory,
         onRun: recordPaletteUse,
         onToggleFavorite: togglePaletteFavorite

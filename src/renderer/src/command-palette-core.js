@@ -40,6 +40,10 @@ export const KIND_WEIGHT = {
 	action: 0,
 	settings: 1,
 	session: 2,
+	/* 正文命中（#286 全局搜索）：来自 searchSessions 的结果已经按会话时间排好，
+	 * 且只在有 ≥2 字符查询时出现。排在实体中段——比命令近（它就是你要找的内容），
+	 * 但压不过同名会话的标题命中（那往往是整场会话的主题）。 */
+	hit: 2.5,
 	workspace: 3,
 	expert: 4,
 	skill: 5,

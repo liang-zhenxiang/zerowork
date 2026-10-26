@@ -16002,3 +16002,19 @@ html[data-palette='graphite'] {
 	border-radius: 4px;
 	padding: 1px 4px;
 }
+
+/* ── §21 正文命中副行（#286 全局搜索）─────────────────────────────
+ * 命中行的 snippet 与标题同行放不下（snippet 是完整句子），放副行；
+ * 与 ac-label 同色系但降一档（--text-secondary），不抢标题的层级。 */
+.command-palette .ac-item .ac-subtitle {
+	display: block;
+	grid-column: 1 / -1;
+	margin-top: 2px;
+	font-size: var(--font-size-xs, 12px);
+	line-height: 1.4;
+	color: var(--text-secondary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 100%;
+}
