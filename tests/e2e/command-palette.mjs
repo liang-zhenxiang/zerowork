@@ -55,10 +55,53 @@
  *   复原后 13/13 恢复绿。
  */
 import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createHarness, waitUntil } from "./lib/harness.mjs";
 import { diffGrids } from "./lib/png.mjs";
+import { startMockModelServer } from "./mock-model-server.mjs";
 
 const h = createHarness({ name: "command-palette" });
+
+// ── 会话正文种子（⑬ 全局搜索用；手法复刻 session-search.mjs）─────────
+// ⌘K 混排的「正文命中」数据源是 CONFIG_DIR/sessions/*.jsonl，
+// 必须在 launch 前写好 —— daemon 启动时扫目录建索引。
+// resumeSession 要求「已选模型」，否则报「还没有选择模型」——⑬ 的跳转
+// 断言依赖 resume，所以还得挂一个 mock 模型服务商（手法同 focus-mode.mjs）。
+const mock = await startMockModelServer({ models: ["palette-mock"] });
+const SESSIONS_DIR = join(h.CONFIG_DIR, "sessions");
+mkdirSync(SESSIONS_DIR, { recursive: true });
+
+function gsMessage(id, parentId, role, text) {
+	return JSON.stringify({
+		type: "message",
+		id,
+		parentId,
+		timestamp: new Date().toISOString(),
+		message: { role, content: [{ type: "text", text }] },
+	});
+}
+
+function gsSeedSession(fileId, sessionId, lines) {
+	writeFileSync(
+		join(SESSIONS_DIR, `2026-10-26T22-00-${fileId}-000Z_s${fileId}.jsonl`),
+		`${[
+			JSON.stringify({ type: "session", version: 3, id: sessionId, timestamp: new Date().toISOString(), cwd: h.WORKSPACE_DIR }),
+			...lines,
+		].join("\n")}\n`,
+	);
+}
+
+// 关键词「锰铜合金」只出现在这批种子里 —— 独一无二，不会被设置项/动作名撞车。
+gsSeedSession("gsaa", "cccccccc-cccc-7ccc-8ccc-cccccccccccc", [
+	gsMessage("gs-m1", null, "user", "帮我查一下锰铜合金的电阻率"),
+	gsMessage("gs-m2", "gs-m1", "assistant", "锰铜合金电阻率约 4.4×10⁻⁷ Ω·m，温漂极低，适合做精密采样电阻。"),
+]);
+gsSeedSession("gsbb", "dddddddd-dddd-7ddd-8ddd-dddddddddddd", [
+	gsMessage("gs2-m1", null, "user", "部署脚本改好了吗"),
+	gsMessage("gs2-m2", "gs2-m1", "assistant", "改好了，跑一遍就行。"),
+]);
+
 await h.launch();
 const win = h.window();
 
@@ -402,4 +445,59 @@ await h.check("⑫ 行右侧的快捷键提示与真实键位一致（不做假�
 	await win.keyboard.press(`${MOD}+.`);
 });
 
+// ══ ⑬ 全局搜索：会话正文命中混排进面板 ══════════════════════════════
+await h.check("⑬ ⌘K 搜会话正文：命中分组出现、Enter 跳回原消息并高亮", async () => {
+	if (await paletteOpen()) {
+		await win.keyboard.press("Escape");
+		await waitPaletteClosed();
+	}
+	await pressModK();
+	await waitPaletteOpen();
+
+	// 输入只存在于种子会话**正文**、不在会话标题里的关键词 —— 否则面板会优先
+	// 命中「最近会话」条目（KIND_WEIGHT: session 2 < hit 2.5，标题命中压正文
+	// 命中是有意设计），Enter 走的就是纯 resumeTask，正文命中链路测不到。
+	await paletteInput().fill("精密采样");
+	const hitRow = await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const opts = [...document.querySelectorAll('.command-palette [role="option"]')];
+				const hit = opts.find((el) => (el.textContent ?? "").includes("精密采样"));
+				if (hit === undefined) return null;
+				return { text: hit.textContent ?? "", group: hit.closest("[data-group]")?.dataset.group ?? null };
+			}),
+		{ timeout: 15_000, desc: "正文命中条目出现在面板里" },
+	);
+	assert.ok(hitRow.text.length > 0, "命中条目应有文本");
+	// 命中的 snippet 里应含正文片段（电阻率那句），证明确实搜的是消息内容。
+	assert.ok(hitRow.text.includes("电阻率"), `命中条目应含正文片段「电阻率」，实际：${hitRow.text}`);
+
+	// resumeSession 需要「已选模型」——先挂 mock 服务商（手法同 focus-mode）。
+	await win.evaluate(
+		async ({ baseUrl, ws }) => {
+			const k = globalThis.kami;
+			await k.saveCustomProvider(
+				{ id: "palette-mock", name: "Palette Mock", baseUrl, api: "openai-completions", authHeader: true,
+					models: [{ id: "palette-mock-model", name: "palette-mock-model", reasoning: false, vision: false, contextWindow: 128000, maxTokens: 8192 }] },
+				"mock-key"
+			);
+			await k.setModel("palette-mock/palette-mock-model");
+			await k.setWorkspace(ws);
+		},
+		{ baseUrl: mock.baseUrl, ws: h.WORKSPACE_DIR }
+	);
+
+	// Enter 执行 → 面板关闭 → resumeTask 打开那个会话并 flash 定位。
+	await win.keyboard.press("Enter");
+	await waitPaletteClosed();
+	await waitUntil(
+		() => win.evaluate(() => document.querySelector(".entry-flash") !== null),
+		{ timeout: 15_000, desc: "跳回原消息并出现 entry-flash 高亮" },
+	);
+	// 定位到的消息里必须有那个关键词。
+	const flashed = await win.evaluate(() => document.querySelector(".entry-flash")?.textContent ?? "");
+	assert.ok(flashed.includes("精密采样"), `高亮的消息应含「精密采样」，实际：${flashed.slice(0, 60)}`);
+});
+
 await h.finish();
+mock.close();
