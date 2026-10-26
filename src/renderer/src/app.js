@@ -13381,7 +13381,27 @@ function Sidebar({
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
   const [tasksExpanded, setTasksExpanded] = reactExports.useState(false);
-  const [collapsedCwds, setCollapsedCwds] = reactExports.useState(/* @__PURE__ */ new Set());
+  /*
+   * 分组折叠记忆（§20）：跨启动记住哪些空间分组被手动收起。
+   * 走 localStorage（设备本地姿势，不是跨设备偏好）；坏 JSON 直接当空集，
+   * 不让一个手改的 localStorage 炸掉侧栏。
+   */
+  const [collapsedCwds, setCollapsedCwds] = reactExports.useState(() => {
+    try {
+      const raw = window.localStorage.getItem("sidebar.collapsedGroups");
+      const arr = raw === null ? [] : JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr.filter((x) => typeof x === "string") : []);
+    } catch {
+      return /* @__PURE__ */ new Set();
+    }
+  });
+  reactExports.useEffect(() => {
+    try {
+      window.localStorage.setItem("sidebar.collapsedGroups", JSON.stringify([...collapsedCwds]));
+    } catch {
+      /* 配额满/隐私模式：记忆失效但不打扰 */
+    }
+  }, [collapsedCwds]);
   const [menuCwd, setMenuCwd] = reactExports.useState(void 0);
   const [menuPath, setMenuPath] = reactExports.useState(void 0);
   const [renamingCwd, setRenamingCwd] = reactExports.useState(void 0);
@@ -16447,6 +16467,27 @@ function CaseCover({ chipId, caseId, accent: accentOverride }) {
     ] })
   });
 }
+/* 第四轮：输入框 placeholder 轮播 —— 空闲时每 4 秒换一条示例，
+ * 给「不知道能问什么」的用户递主意。reduced-motion / 未就绪时不轮播。 */
+const PLACEHOLDER_IDEAS = [
+  "帮我把这份合同里的付款条款整理成表格",
+  "扫描工作区，列出最近改过的 10 个文件",
+  "把这周的会议记录总结成三句要点",
+  "对比两个报价单的差异，标出风险项",
+  "给这个目录写一份 README",
+  "把上次的改动说明翻译成英文"
+];
+function useRotatingPlaceholder(active) {
+  const [index, setIndex] = reactExports.useState(0);
+  reactExports.useEffect(() => {
+    if (!active) return;
+    if (typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const timer = setInterval(() => setIndex((i) => (i + 1) % PLACEHOLDER_IDEAS.length), 4000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return PLACEHOLDER_IDEAS[index];
+}
+
 function HomeView({
   ready,
   scenes,
@@ -16485,6 +16526,11 @@ function HomeView({
    * 拿不到就整块不渲染 —— 空数据比一个「0」更不打扰。
    */
   const [today, setToday] = reactExports.useState(void 0);
+  /*
+   * 空态提示词轮播（§20）：ready 且输入框还没被用户碰过时每 4s 换一条；
+   * 用户一旦输入（prefill 出现或 focus），保持静态不抢注意力。
+   */
+  const rotatingPlaceholder = useRotatingPlaceholder(ready);
   /* 今日 token 相对近 30 天单日最大值的比例（第三轮迷你条）；无数据为 0 → 不画。
      todayMax 从 heatmap 的真实单日峰值取（含今天），不再是占位常数。 */
   const [todayMax, setTodayMax] = reactExports.useState(0);
@@ -16593,6 +16639,12 @@ function HomeView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-eyebrow-dot" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["本地优先", " · ", "桌面办公智能体"] })
       ] }),
+      /* 首页快捷入口（第四轮）：三个高频动作一排胶囊，全走窗口事件解耦（同 zw:palette-open 的口径）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-quick", "data-testid": "home-quick", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "home-quick-btn", onClick: () => window.dispatchEvent(new CustomEvent("zw:palette-open")), children: ["⌘K", " 命令面板"] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "home-quick-btn", onClick: () => window.dispatchEvent(new CustomEvent("zw:focus-toggle")), children: ["专注模式"] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "home-quick-btn", onClick: () => window.dispatchEvent(new CustomEvent("zw:shortcut-sheet-open")), children: ["快捷键", " ⌘/"] })
+      ] }),
       /* 问候随时间变化（凌晨/早上/下午/晚上 + 日期）。渲染层每次进首页时求值一次，不挂计时器。 */
       /* @__PURE__ */ jsxRuntimeExports.jsx(HomeGreeting, {}),
       /* Token 用量迷你条（第三轮）：只画 today.tokens 相对近 30 天单日最大值的比例，
@@ -16689,7 +16741,11 @@ function HomeView({
             {
               ref: composerRef,
               ready,
-              placeholder: ready ? "今天想做点什么？@ 引用文件，/ 调用技能与指令…" : "正在准备…",
+              placeholder: !ready
+                ? "正在准备…"
+                : prefill !== void 0 && prefill !== ""
+                  ? "今天想做点什么？@ 引用文件，/ 调用技能与指令…"
+                  : rotatingPlaceholder,
               rows: 3,
               cwd: cwd2,
               modelId,
@@ -16767,7 +16823,9 @@ function HomeView({
         children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(CaseCover, { chipId: c.chipId, caseId: c.id, accent: c.starter === true ? "var(--brand)" : void 0 }),
         c.starter === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-badge", "aria-hidden": "true", children: "我的" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-title", children: c.title })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-title", children: c.title }),
+        /* hover 才现的适用场景行（§20）：非模板卡才有 subtitle；键盘焦点同口径。 */
+        c.starter !== true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-scene-hint", children: c.subtitle })
       ] }, c.id)) })
     ] })
   ] }) });
@@ -63608,7 +63666,8 @@ function AppearanceSection({ busy }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-main", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "配色预设" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-hint-inline", children: "只换强调色与极光色相，明暗档位不变" })
-        ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ghost-btn", onClick: () => window.dispatchEvent(new CustomEvent("zw:palette-open")), children: "⌘K 里也能换" })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "palette-grid", role: "group", "aria-label": "配色预设", children: PALETTES.map((preset) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
         type: "button",
@@ -70830,7 +70889,17 @@ function paletteActionEntries(ctx) {
     { id: "action:session-search", title: "会话检索", subtitle: "在最近 200 个会话的正文里找，可跳回原消息", keywords: ["检索", "搜索", "查找", "会话", "历史", "search", "find"], run: ctx.openSearch },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
     { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
-    { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare }
+    { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare },
+    ...PALETTES.map((preset) => ({
+      id: `palette:${preset.id}`,
+      title: `配色 · ${preset.name}`,
+      subtitle: preset.hint,
+      keywords: ["配色", "颜色", "预设", preset.name, preset.id],
+      run: () => {
+        setPalettePreference(preset.id);
+        return ctx.setPalette?.(preset.id);
+      }
+    }))
   ];
   // 设置分组各自成条目：标题一律以「设置 · 」开头，输入「设置」即可把 9 个分组一起唤出。
   const settings = NAV_ITEMS.map((page) => ({
@@ -70888,6 +70957,79 @@ function paletteGroups(items, query, favoriteIds) {
   const shaped = groups.map((group) => ({ kind: group.kind, items: group.items }));
   return favoriteList.length === 0 ? shaped : [{ kind: "favorite", items: favoriteList }, ...shaped];
 }
+/*
+ * 快捷键速查表（⌘/）：全部应用级快捷键的一张纸。
+ * 数据是**手写的单一数组** —— 面板只做展示。快捷键本身由各自模块注册；
+ * 这里不做第二份绑定（两处绑定迟早漂移）。新增快捷键时两处都要改：
+ * 本数组和真正注册键的模块；数组注释里写明「谁在哪儿绑定」。
+ */
+const SHORTCUT_SHEET = [
+	{ group: "全局", keys: [
+		{ combo: ["⌘", "K"], desc: "命令面板", where: "App 键盘监听" },
+		{ combo: ["⌘", "/"], desc: "快捷键速查表（本面板）", where: "App 键盘监听" },
+		{ combo: ["⌘", "."], desc: "折叠 / 展开侧栏", where: "App 键盘监听" },
+		{ combo: ["⌘", "⇧", "F"], desc: "专注模式", where: "App 键盘监听" },
+		{ combo: ["Esc"], desc: "关闭浮层 / 退出专注模式", where: "各浮层自身" },
+	] },
+	{ group: "会话", keys: [
+		{ combo: ["Enter"], desc: "发送消息", where: "Composer" },
+		{ combo: ["⇧", "Enter"], desc: "换行", where: "Composer" },
+		{ combo: ["Esc"], desc: "停止生成 / 放弃编辑", where: "Composer" },
+	] },
+	{ group: "系统", keys: [
+		{ combo: ["⌥", "⇧", "W"], desc: "全局唤起窗口（可在设置改）", where: "主进程 globalShortcut" },
+	] },
+];
+
+function ShortcutSheet({ onClose }) {
+	reactExports.useEffect(() => {
+		const onKey = (event) => {
+			if (event.key === "Escape") onClose();
+		};
+		window.addEventListener("keydown", onKey);
+		return () => window.removeEventListener("keydown", onKey);
+	}, [onClose]);
+	const mod = navigator.platform.toLowerCase().includes("mac") ? "⌘" : "Ctrl";
+	return /* @__PURE__ */ jsxRuntimeExports.jsx("div", {
+		className: "shortcut-sheet-backdrop",
+		onClick: onClose,
+		children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+			className: "shortcut-sheet",
+			role: "dialog",
+			"aria-label": "快捷键速查表",
+			onClick: (event) => event.stopPropagation(),
+			children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shortcut-sheet-head", children: [
+					/* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "快捷键" }),
+					/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "shortcut-sheet-close", onClick: onClose, "aria-label": "关闭", children: "✕" }),
+				] }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("div", {
+					className: "shortcut-sheet-body",
+					children: SHORTCUT_SHEET.map((section) =>
+						/* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "shortcut-section", children: [
+							/* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: section.group }),
+							/* @__PURE__ */ jsxRuntimeExports.jsx("ul", {
+								children: section.keys.map((k) =>
+									/* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+										/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "shortcut-desc", children: k.desc }),
+										/* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+											className: "shortcut-keys",
+											children: k.combo.map((part) =>
+												/* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { children: part === "⌘" ? mod : part }, part + k.desc)
+											),
+										}),
+									] }, k.desc)
+								),
+							}),
+						] }, section.group)
+					),
+				}),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shortcut-sheet-foot", children: "快捷键由各自模块注册；这张表只做展示，不重复绑定。" }),
+			],
+		}),
+	});
+}
+
 function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, onToggleFavorite }) {
   const [query, setQuery] = reactExports.useState("");
   const [active, setActive] = reactExports.useState(0);
@@ -71792,7 +71934,12 @@ function App() {
         const next = [...list2, { id, text: text2, type }];
         return next.length > 10 ? next.slice(next.length - 10) : next;
       });
-      window.setTimeout(() => dismissToast(id), 2200);
+      /*
+       * loading 态不自动消失（§20 导出进度反馈）：要等调用方用同一 id
+       * 换成 success/error。dismissToast 已在 Toast 渲染层去掉 loading 的
+       * 关闭钮歧义（有进度条的 toast 不显示进度条，见 Toast 组件）。
+       */
+      if (type !== "loading") window.setTimeout(() => dismissToast(id), 2200);
     },
     [dismissToast]
   );
@@ -72030,6 +72177,22 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
   /*
+   * 快捷键速查表（⌘/ 或 Ctrl+/）：一张列全应用快捷键的浮层。
+   * 数据源是 SHORTCUT_SHEET —— 单一数组，面板只做展示，快捷键本身
+   * 仍由各自模块注册，这里**不做第二份绑定**（两处绑定迟早漂移）。
+   */
+  const [shortcutSheetOpen, setShortcutSheetOpen] = reactExports.useState(false);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key !== "/") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      setShortcutSheetOpen((value) => !value);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  /*
    * 专注模式（⌘⇧F / Ctrl+Shift+F）：把会话从「工具界面」切成「一页纸」。
    *
    * 三个约束决定了写法：
@@ -72045,11 +72208,14 @@ function App() {
   reactExports.useEffect(() => {
     const openPalette = () => setPaletteOpen(true);
     const toggleFocusNow = () => setFocusMode((value) => toggleFocus(value));
+    const openShortcutSheet = () => setShortcutSheetOpen(true);
     window.addEventListener("zw:palette-open", openPalette);
     window.addEventListener("zw:focus-toggle", toggleFocusNow);
+    window.addEventListener("zw:shortcut-sheet-open", openShortcutSheet);
     return () => {
       window.removeEventListener("zw:palette-open", openPalette);
       window.removeEventListener("zw:focus-toggle", toggleFocusNow);
+      window.removeEventListener("zw:shortcut-sheet-open", openShortcutSheet);
     };
   }, []);
   reactExports.useEffect(() => {
@@ -72445,11 +72611,17 @@ function App() {
    */
   const exportMarkdownTask = reactExports.useCallback(
     (path2) => {
+      /*
+       * 导出进度反馈（§20）：导出期间给一条 loading toast（不会自动消失），
+       * 落盘后替换成成功 toast；失败替换成错误 toast。此前导出大文件时
+       * 界面毫无反应，用户不知道点没点上。
+       */
+      showToast("正在导出 Markdown…", "loading");
       window.kami.exportSessionMarkdown(path2).then(({ outputPath }) => {
         showToast(`已导出：${outputPath}`, "success");
         openArtifact(outputPath);
       }).catch((error) => {
-        showToast(error instanceof Error ? error.message : String(error));
+        showToast(error instanceof Error ? error.message : String(error), "error");
       });
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -72804,6 +72976,13 @@ function App() {
   const firstUser = conversation.entries.find((e) => e.role === "user");
   const firstUserText = firstUser === void 0 ? void 0 : firstUser.text !== "" ? firstUser.text : firstUser.skillNames?.[0];
   const title = firstUserText === void 0 ? void 0 : taskTitle(firstUserText);
+  /*
+   * 窗口标题栏显示当前任务名（§20）：会话有标题时「任务名 · ZeroWork」，
+   * 没有就回退纯「ZeroWork」。只在 title 变化时写，不随主题/状态抖动。
+   */
+  reactExports.useEffect(() => {
+    document.title = title === void 0 ? "ZeroWork" : `${title} · ZeroWork`;
+  }, [title]);
   const sidebarGroups = reactExports.useMemo(
     () => taskList === void 0 ? void 0 : groupSessions(
       // 已归档会话不进侧栏（L28）：数据管理分组负责查看与恢复。
@@ -73209,6 +73388,8 @@ function App() {
         onToggleFavorite: togglePaletteFavorite
       }
     ),
+    /* 快捷键速查表：只展示，不重复绑定（见 SHORTCUT_SHEET 注释）。 */
+    shortcutSheetOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(ShortcutSheet, { onClose: () => setShortcutSheetOpen(false) }),
     focusMode === true && /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {

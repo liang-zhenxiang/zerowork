@@ -631,6 +631,7 @@
 	--text-display: 30px;   /* 展示标题：仅首页 hero */
 
 	/* ── 圆角（4 档）────────────────────────────────────────────────── */
+	--shadow-ink: #000;  /* 阴影墨色：浮层 color-mix 的基底，亮暗各配 */
 	--radius-sm: 6px;    /* 小控件：按钮、菜单项、chip、列表行、小输入框 */
 	--radius-md: 10px;   /* 卡片：产物卡、弹层、toast、pre/代码块 */
 	--radius-lg: 16px;   /* 大卡：模态、问卷卡、案例封面 */
@@ -838,6 +839,7 @@
    状态色在暗底上提亮保对比度。首次启用暗色时须对照 docs/DESIGN.md §2 复核一遍，
    并逐区实测校验——本块目前没有实测依据，只是合理的初值。 */
 [data-theme="dark"] {
+	--shadow-ink: #000;  /* 暗色同黑：这里覆盖的意义是显式登记，防未来改色时漏配 */
 	color-scheme: dark;
 
 	--text: rgba(255, 255, 255, 0.92);
@@ -15852,3 +15854,147 @@ html[data-palette='graphite'] {
 	white-space: nowrap;
 }
 .entry:hover .entry-time { opacity: 1; }
+
+/* §20 第四轮十连：快捷键速查表（⌘/） —— 一张纸列全应用快捷键 */
+.shortcut-sheet-backdrop {
+	position: fixed;
+	inset: 0;
+	background: color-mix(in oklab, var(--bg) 55%, transparent);
+	backdrop-filter: blur(6px);
+	z-index: 90;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.shortcut-sheet {
+	width: min(560px, calc(100vw - 48px));
+	max-height: min(600px, calc(100vh - 96px));
+	overflow-y: auto;
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: 0 24px 64px color-mix(in oklab, var(--shadow-ink) 28%, transparent);
+	padding: var(--space-6);
+}
+.shortcut-sheet-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding-bottom: var(--space-4);
+	border-bottom: 1px solid var(--border);
+}
+.shortcut-sheet-head h2 {
+	margin: 0;
+	font-size: var(--text-title);
+	color: var(--text);
+}
+.shortcut-sheet-close {
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: var(--text-body);
+	cursor: pointer;
+	padding: var(--space-2);
+	border-radius: var(--radius-sm);
+}
+.shortcut-sheet-close:hover { color: var(--text); background: var(--bg-hover); }
+.shortcut-section h3 {
+	margin: var(--space-5) 0 var(--space-2);
+	font-size: var(--text-caption);
+	font-weight: 600;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--text-faint);
+}
+.shortcut-section ul { list-style: none; margin: 0; padding: 0; }
+.shortcut-section li {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: var(--space-2) 0;
+	gap: var(--space-4);
+}
+.shortcut-desc { font-size: var(--text-body); color: var(--text-secondary); }
+.shortcut-keys { display: inline-flex; gap: var(--space-1); }
+.shortcut-keys kbd {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: var(--text-caption);
+	color: var(--text);
+	background: var(--bg-hover);
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	border-radius: var(--radius-sm);
+	padding: 2px var(--space-2);
+	min-width: 1.6em;
+	text-align: center;
+}
+.shortcut-sheet-foot {
+	margin-top: var(--space-5);
+	padding-top: var(--space-4);
+	border-top: 1px solid var(--border);
+	font-size: var(--text-caption);
+	color: var(--text-faint);
+}
+[data-theme="dark"] .shortcut-sheet {
+	box-shadow: 0 24px 64px color-mix(in oklab, var(--shadow-ink) 55%, transparent);
+}
+
+/* §20 案例卡 hover 场景提示：默认收起（0 高度），hover/焦点时展开 */
+.case-scene-hint {
+	display: block;
+	max-height: 0;
+	overflow: hidden;
+	opacity: 0;
+	font-size: var(--text-caption);
+	color: var(--text-faint);
+	line-height: 1.4;
+	transition: max-height var(--dur-base) var(--ease-standard), opacity var(--dur-base) var(--ease-standard);
+}
+.case-card:hover .case-scene-hint,
+.case-card:focus-visible .case-scene-hint {
+	max-height: 3.2em;
+	opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+	.case-scene-hint { transition: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §20 第四轮十连（续）：首页快捷入口
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.home-quick {
+	display: flex;
+	gap: var(--space-2);
+	justify-content: center;
+	margin-top: var(--space-3);
+}
+
+.home-quick-btn {
+	appearance: none;
+	border: 1px solid var(--border);
+	background: var(--surface-raised);
+	color: var(--text-secondary);
+	font-size: var(--text-caption);
+	line-height: 1;
+	padding: 7px 12px;
+	border-radius: var(--radius-full);
+	cursor: pointer;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
+}
+.home-quick-btn:hover {
+	border-color: var(--accent);
+	color: var(--text);
+	transform: translateY(-1px);
+}
+.home-quick-btn kbd {
+	font-family: var(--font-mono, ui-monospace, monospace);
+	font-size: 0.9em;
+	background: var(--surface-sunken, transparent);
+	border: 1px solid var(--border);
+	border-radius: 4px;
+	padding: 1px 4px;
+}
