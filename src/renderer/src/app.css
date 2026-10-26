@@ -1106,7 +1106,7 @@ textarea:focus-visible {
 }
 
 .app {
-	/* 定位基准：左上角的侧栏开关（.sidebar-toggle-btn）与右上角的
+	/* 定位基准：收起态的浮动侧栏开关（.sidebar-toggle-btn）与右上角的
 	   面板开关组（.panel-toggle-group）都 absolute 钉在这里。 */
 	position: relative;
 	display: flex;
@@ -1175,14 +1175,16 @@ textarea:focus-visible {
 	height: env(titlebar-area-height, 30px);
 	display: flex;
 	align-items: center;
-	/* 让出左上角的侧栏开关（App 层 absolute，28px 宽，就在这条带子里）：
-	   8(左偏移) + 28(开关宽) + 4(间隙) = 40。让位偏移不是间距档值，登记 token 例外。 */
+	/* 收起态要容下左上角的浮动展开开关（4px 偏移 + 28px 开关 + 4px 间隙 = 36，
+	   取 40 留呼吸）。展开态这条带子左端没有控件，但**保持同值**：否则每次
+	   开合侧栏，整条菜单都会左右跳 34px —— 那比一段留白更像坏掉。
+	   让位偏移不是间距档值，登记 token 例外。 */
 	padding-left: 40px;
 	/* 与侧栏同色：顶边与侧栏连成一体（§4.32 修正）。 */
 	background: var(--bg-sidebar);
 	gap: var(--space-1);
 	/* 这里**不设** `-webkit-app-region: drag`：可拖动区交给下面的 .titlebar-drag
-	   （只覆盖标签右边那段空白）。整条设 drag 会把左上角侧栏开关那一带的鼠标事件
+	   （只覆盖标签右边那段空白）。整条设 drag 会把收起态浮动开关那一带的鼠标事件
 	   当成"拖窗口"吃掉，开关就点不动了（2026-09-19 用户实测）。 */
 }
 
@@ -1270,7 +1272,7 @@ textarea:focus-visible {
 	display: flex;
 	align-items: baseline;
 	gap: var(--space-2);
-	/* 不再需要左让位：侧栏开关已移进顶栏那条带子里（§4.32 修正），
+	/* 不需要左让位：侧栏开关就在本行右端（.sidebar-toggle-inline），
 	   不再压在本行左侧。 */
 	padding: var(--space-1) var(--space-3) var(--space-3);
 }
@@ -3255,20 +3257,40 @@ textarea:focus-visible {
 	color: var(--text);
 }
 
-/* 左上角侧栏开关（App 层常驻，不随侧栏卸载 —— 收起时唯一的展开入口）。
-   与 .panel-toggle-btn 同一按钮语言、同一层级：面板全屏态覆盖整个窗口左缘，
-   同档 + 按钮在 DOM 里靠后 ⇒ 树序后绘者在面板之上，仍可点。top/left 与右开关镜像。 */
+/* 侧栏开关。两个入口同一套按钮语言，**任一时刻只渲染一个**：
+   - 展开态：.sidebar-toggle-inline，在侧栏品牌行右端（2026-10-26 从左上角移来，
+     原先它压住 ZeroWork 徽标）；
+   - 收起态：.sidebar-toggle-btn，App 层左上角浮动 —— 侧栏整体 visibility: hidden，
+     这是唯一的鼠标展开入口。 */
 .sidebar-toggle-btn {
 	position: absolute;
-	/* 落在自绘菜单条那条带子里（30px 高，按钮 28px → 上下各 1px 居中），
-	   位置对齐左上角那个 ☰ —— 它就在菜单标签左边。
-	   `left: 8` 与 `.titlebar` 的 `padding-left: 40px` 是同一处让位，改要一起改。 */
+	/* 落在自绘菜单条那条带子里（30px 高，按钮 28px → 上下各 1px 居中）。
+	   这是 Windows/Linux 的几何；macOS 没有标题栏、左上角是系统红绿灯，
+	   top 由下面那条 `:not(:has(> .titlebar))` 规则另行下移。
+	   `left` 与 .titlebar 的 `padding-left: 40px` 是同一处让位，改要一起改。 */
 	top: 1px;
 	left: var(--space-1);
 	/* 明确排除在拖拽区外（同 .titlebar-item）：这条带子右侧那段是可拖动区，
 	   开关虽不在那个矩形里，但拖拽区若改动几何，这一行能保住它点得动。 */
 	-webkit-app-region: no-drag;
 	z-index: var(--z-overlay);
+}
+
+/* 展开态开关：留在侧栏品牌行内，靠 `margin-left: auto` 顶到行尾。
+   覆盖面只改定位（position / top / left / z-index 对 static 元素无效）；
+   它不在顶栏那条带子里，也不参与窗口拖拽。 */
+.sidebar-toggle-inline {
+	position: static;
+	margin-left: auto;
+}
+
+/* macOS 没有自绘标题栏（TitleBar 返回 null），左上角是系统红绿灯
+   （hiddenInset，实测约 x 13~65 / y 13~25 CSS px）。浮动开关若仍贴顶，红灯会直接
+   盖住它（2026-10-26 用户实测）。下移到红绿灯下缘之下：--space-7 = 32px，
+   正好落在窗内卡片顶部、各视图头部收起态预留的 48px 左槽里，不压任何控件。
+   Windows/Linux 有自绘标题栏，窗口按钮在右侧，保持贴顶即可。 */
+.app:not(:has(> .titlebar)) .sidebar-toggle-btn {
+	top: var(--space-7);
 }
 
 /* 侧栏展开中的激活态：提亮到正文色（与右开关同口径）。 */
@@ -3895,7 +3917,8 @@ textarea:focus-visible {
 	gap: var(--space-3);
 	/*
 	 * 2026-09-19 修订：两角的让位**全部作废**，回到普通内边距。
-	 *   - 左侧 48 是为 App 层那个悬浮的侧栏开关让位 —— 它已移进顶栏那条带子（§4.32 修正二）；
+	 *   - 左侧 48 是为悬浮的侧栏开关让位 —— 展开态它位于侧栏品牌行右端，
+	 *     收起态才浮到左上角（让位见下面 .app[data-sidebar="collapsed"] 的回调）；
 	 *   - 右侧 84 是为悬浮的面板开关组让位 —— 它已成为**本行行尾的行内元素**
 	 *     （App 传节点、见 .panel-toggle-group），不再需要预留。
 	 * 原先那条「左右必须分开写」的注释随让位一起删：不再有需要绕开的悬浮控件。
@@ -14698,9 +14721,12 @@ html[data-focus="on"] {
 	--canvas-floor: .28;
 }
 
-/* 左上角那个开关在专注模式下是**死控件**：`.sidebar` 已 display:none，点它只改
-   sidebarOpen 状态，屏幕上毫无反应 —— 而它不吃 `.titlebar` 的降权，是暗色截图里
-   最亮的像素（纯白）。这块位置让给退出胶囊（见文档 §12.1）。 */
+/* 专注模式下两个开关入口都要消失：
+   - 展开态那个在 `.sidebar` 内，随 `html[data-focus="on"] .sidebar { display:none }`
+     一起隐没；
+   - 收起态的浮动开关是 `.app` 的直接子节点，不吃上面那条，必须在这里单独藏掉 ——
+     否则它留在左上角点下去只改 sidebarOpen、屏幕上毫无反应，还是暗色截图里
+     最亮的像素。这块位置让给退出胶囊（见文档 §12.1）。 */
 html[data-focus="on"] .sidebar-toggle-btn {
 	display: none;
 }
@@ -15711,28 +15737,6 @@ html[data-palette='graphite'] {
 }
 @media (prefers-reduced-motion: reduce) {
 	.typing-dots i { animation: none; opacity: 0.7; }
-}
-
-/* §17 第三轮十连：设置分组搜索框 */
-.settings-search {
-	padding: 0 var(--space-4) var(--space-2);
-}
-.settings-search input {
-	width: 100%;
-	padding: var(--space-2) var(--space-3);
-	border: 1px solid var(--border);
-	border-radius: var(--radius-sm);
-	background: var(--bg);
-	color: var(--text);
-	font-size: var(--text-caption);
-}
-.settings-search input:focus {
-	outline: 2px solid var(--accent);
-	outline-offset: 1px;
-	border-color: transparent;
-}
-.settings-search input::placeholder {
-	color: var(--text-faint);
 }
 
 /* §17 第三轮十连：首页 token 用量迷你条 */
