@@ -13001,6 +13001,12 @@ const IconSend = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, child
 const IconBack = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19 12H5M12 19l-7-7 7-7" }) });
 const IconArrowRight = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5 12h14M12 5l7 7-7 7" }) });
 const IconRefresh = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" }) });
+/* §21.1 链条图标：消息锚点按钮用（链条造型，stroke 与其他图标同口径）。 */
+const IconCornerUpLeft = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M9 14 4 9l5-5M4 9h10a6 6 0 0 1 6 6v6" }) });
+const IconLink = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7" })
+] });
 const IconClose = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M18 6 6 18M6 6l12 12" }) });
 const IconDoc = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" }),
@@ -13359,6 +13365,7 @@ function Sidebar({
   tasksError,
   onReloadTasks,
   unreadIds,
+  sessionHealth,
   pendingConfirmIds,
   onNewTask,
   onResumeTask,
@@ -13581,6 +13588,8 @@ function Sidebar({
                */
               isPinned(task) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-pin-mark", title: "已置顶", children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPin, { size: 12 }) }),
               unreadIds.has(task.id) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-unread-dot" }),
+              /* §21.5 会话健康度红点：后台 run_error 时挂上，打开会话即清。 */
+              sessionHealth?.[task.id] === "error" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-health-dot", title: "上次运行失败，点开会话查看原因" }),
               task.running && /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
               /* 运行中进度环（第三轮）：任务跑起来时标题前一枚旋转圆环。
                  没有真实进度数据源，环表达「进行中」而非百分比 —— 与 spinner 并存不冲突，
@@ -14912,6 +14921,33 @@ function Composer({
     );
   }, []);
   const chars = charCountState(draft.length);
+  /* §21.4 输入 token 估算：粗账即可（用户要的是「这轮大概多大」的量级感，
+   * 不是计费账单）：CJK 字符每个 ≈1 token，其余按 4 字符 ≈1 token。
+   * 显示条件与字符计数一致（有输入才显示），放 char-remaining 左边。 */
+  const tokenEstimate = reactExports.useMemo(() => {
+    const cjk = (draft.match(/[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]/g) ?? []).length;
+    const other = draft.length - cjk;
+    return cjk + Math.ceil(other / 4);
+  }, [draft]);
+  /* §21.7 快速回复模板：三条默认短语，点击整句填入（不是追加）。存
+   * localStorage——模板是个人习惯，不上 daemon 配置，重装不跟走。 */
+  const quickChips = reactExports.useMemo(() => {
+    try {
+      const raw = window.localStorage.getItem("zw:quick-chips");
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string") && parsed.length > 0)
+          return parsed.slice(0, 4);
+      }
+    } catch {
+    }
+    return ["总结一下刚才的结论", "列���接下来的待办", "把上面的方案写进文档"];
+  }, []);
+  const applyChip = reactExports.useCallback((text2) => {
+    setDraft(text2);
+    if (draftKey !== void 0) saveDraft(draftKey, text2);
+    textareaRef.current?.focus();
+  }, [draftKey]);
   const ac = useAutocomplete(draft, setDraft, textareaRef, cwd2, memberItems, pickSkill);
   reactExports.useImperativeHandle(
     ref,
@@ -15030,6 +15066,16 @@ function Composer({
         /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentRefStrip, { refs: img.documentRefs, onRemove: img.removeDocumentRefAt }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(AttachmentStrip, { attachments: img.attachments, onRemove: img.removeAt }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(VisionHint, { visible: visionSupported === false && img.attachments.length > 0 }),
+        draft.trim() === "" && streaming !== true && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "quick-chips", children: quickChips.map((chip) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "quick-chip",
+            onClick: () => applyChip(chip),
+            children: chip
+          },
+          chip
+        )) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-input", children: [
           ac.menu,
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -15064,6 +15110,17 @@ function Composer({
           children,
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
           trailing,
+          /* §21.4 估算的显示门独立于字符计数：字符计数是「快写满了」的警告
+           * （remaining<1000 才出现），而 token 估算要的是日常量级感 —— 只要
+           * 有实质输入（≥40 字符）就显示，搭便车永远等不到那一天。 */
+          draft.length >= 40 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "span",
+            {
+              className: "token-estimate",
+              title: "粗略估算，用于感知本轮输入规模",
+              children: `≈${tokenEstimate} tok`
+            }
+          ),
           chars.show && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "span",
             {
@@ -16568,6 +16625,15 @@ function HomeView({
   onTodo
 }) {
   const composerRef = reactExports.useRef(null);
+  /* #290 F2：引用回复 —— 把目标消息折成 > 引用块填进输入框，用户在其下续写。 */
+  const quoteReply = reactExports.useCallback(
+    (_entryId, text2) => {
+      const quoted = text2.length > 120 ? text2.slice(0, 120) + "…" : text2;
+      const block = quoted.split("\n").map((line) => `> ${line}`).join("\n");
+      composerRef.current?.fillText(`${block}\n`);
+    },
+    []
+  );
   /*
    * 首页「今日回顾」：只用本地统计，不额外发请求。
    * usageStats 的 heatmap 是按天的消息数，我们把今天那一格挑出来；
@@ -32415,12 +32481,20 @@ function UserBubble({
   at,
   images,
   skillNames,
+  sessionPath,
   target,
   branchable,
   onRestart,
-  onBranch
+  onBranch,
+  // #290 F2：引用回复。回调把「> 引用文」塞进输入框草稿。
+  onQuote
 }) {
   const { copied, copy } = useCopyWithTick();
+  const [anchorCopied, setAnchorCopied] = reactExports.useState(false);
+  const copyAnchored = reactExports.useCallback(
+    () => navigator.clipboard.writeText(`${sessionPath}#${entryId}`),
+    [sessionPath, entryId]
+  );
   const [preview, setPreview] = reactExports.useState(void 0);
   const previewRef = useModalFocus();
   reactExports.useEffect(() => {
@@ -32496,6 +32570,35 @@ function UserBubble({
           onClick: () => void copy(skillInvocationText(skillNames ?? [], text2)),
           children: copied ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 13 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 13 })
         }
+      ),
+      sessionPath !== void 0 && entryId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "entry-icon-btn",
+          "aria-label": "复制消息锚点",
+          title: anchorCopied ? "已复制锚点" : "复制锚点链接（可在 ⌘K 搜索后定位）",
+          onClick: () => {
+            void copyAnchored().then(() => {
+              setAnchorCopied(true);
+              window.setTimeout(() => setAnchorCopied(false), 1600);
+            });
+          },
+          children: anchorCopied ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 13 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconLink, { size: 13 })
+        },
+        "entry-anchor"
+      ),
+      onQuote && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "entry-icon-btn",
+          "aria-label": "引用回复",
+          title: "引用这条消息到输入框（> 引用块）",
+          onClick: () => onQuote(entryId, text2),
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCornerUpLeft, { size: 13 })
+        },
+        "entry-quote"
       )
     ] }),
     preview !== void 0 && // 全屏遮罩显示大图，点击任意处（含大图本身）关闭；Esc 关闭在上面的 effect。
@@ -32531,6 +32634,9 @@ function AssistantActions({
   modelId,
   showExecutePlan,
   onExecutePlan,
+  // #290 F9：会话路径 + 条目 id，两者齐备时工具条出现「导出为图片」。
+  exportCard,
+
   // 「留为会话」一类**列级**动作挂进这一行的领衔槽位（对比屏专用；文字动作在前、
   // 图标动作在后的次序与「执行计划」同型）。由调用方传节点，聊天页不传，行为不变。
   keepSlot,
@@ -32547,6 +32653,24 @@ function AssistantActions({
     return null;
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "entry-toolbar entry-toolbar-left", children: [
+    exportCard && copyable && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: "bar-btn",
+        "aria-label": "导出为图片",
+        title: "把这条回答画成图片卡片，存到 exports 目录",
+        onClick: () => {
+          const dataUrl = drawMessageCard(text2, exportCard.meta);
+          window.kami.shareStatsCard(dataUrl, "message").then(({ outputPath }) => {
+            window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: `消息卡片已存到 ${outputPath}` }] }));
+          }).catch((error) => {
+            window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: `导出失败：${String(error instanceof Error ? error.message : error)}` }] }));
+          });
+        },
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconImage, { size: 16 })
+      }
+    ),
     showExecutePlan && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn bar-btn-text", onClick: onExecutePlan, children: "执行计划" }),
     keepSlot,
     copyable && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -33174,6 +33298,7 @@ function ChatView({
   onQuestionnaireSkip,
   turnFoldCache,
   focusEntry,
+  currentSessionPath,
   onFocusHandled,
   memberView,
   onFocusMember,
@@ -33182,6 +33307,12 @@ function ChatView({
   const [tipsDismissed, setTipsDismissed] = reactExports.useState(false);
   const scrollRef = reactExports.useRef(null);
   const composerRef = reactExports.useRef(null);
+  /* #290 F2：引用回复 —— 与 Composer 内同名逻辑一致：折成 > 引用块，120 字截断。 */
+  const quoteReply = reactExports.useCallback((_entryId, text2) => {
+    const quoted = text2.length > 120 ? text2.slice(0, 120) + "…" : text2;
+    const block = quoted.split("\n").map((line) => `> ${line}`).join("\n");
+    composerRef.current?.fillText(`${block}\n`);
+  }, []);
   reactExports.useEffect(() => {
     if (prefill === void 0) return;
     composerRef.current?.fillText(prefill);
@@ -33340,6 +33471,9 @@ function ChatView({
   const pendingLabel = reactExports.useMemo(() => pendingText(entries), [entries]);
   const followRef = reactExports.useRef(true);
   const [showJumpToBottom, setShowJumpToBottom] = reactExports.useState(false);
+  /* #290 F8：右缘时间线标尺的滚动进度（void 0 = 隐藏）；rAF 节流句柄。 */
+  const [rulerPct, setRulerPct] = reactExports.useState(void 0);
+  const rulerRafRef = reactExports.useRef(0);
   reactExports.useLayoutEffect(() => {
     followRef.current = true;
     setShowJumpToBottom(false);
@@ -33351,7 +33485,22 @@ function ChatView({
     const atBottom = node2.scrollHeight - node2.scrollTop - node2.clientHeight < BOTTOM_THRESHOLD_PX;
     followRef.current = atBottom;
     setShowJumpToBottom(!atBottom);
+    /* #290 F8 时间线标尺：滚得多（>1.5 屏）才浮现；内容不足 3 屏不出现。
+     * 节流用 rAF 标志位，scroll 事件本身高频，直接 setState 会抖。 */
+    const range = node2.scrollHeight - node2.clientHeight;
+    if (node2.scrollHeight < node2.clientHeight * 3 || range <= 0) { setRulerPct(void 0); return; }
+    if (rulerRafRef.current !== 0) return;
+    rulerRafRef.current = requestAnimationFrame(() => {
+      rulerRafRef.current = 0;
+      const n = scrollRef.current;
+      if (n === null) return;
+      const pct = Math.round((n.scrollTop / Math.max(1, n.scrollHeight - n.clientHeight)) * 100);
+      setRulerPct(pct < 2 || pct > 98 ? void 0 : pct);
+    });
   };
+  reactExports.useEffect(() => () => {
+    if (rulerRafRef.current !== 0) cancelAnimationFrame(rulerRafRef.current);
+  }, []);
   const releaseFollowForExpand = () => {
     followRef.current = false;
     const node2 = scrollRef.current;
@@ -33517,10 +33666,12 @@ function ChatView({
           at: entry.at,
           images: entry.images,
           skillNames: entry.skillNames,
+          sessionPath: currentSessionPath,
           target: branchTargets.get(entry.id),
           branchable: branchReady,
           onRestart: restartFrom,
-          onBranch: forkFrom
+          onBranch: forkFrom,
+          onQuote: quoteReply
         },
         entry.id
       );
@@ -33566,6 +33717,7 @@ function ChatView({
         {
           text: entry.text,
           modelId: entry.id === metricsAnchorId ? conversation.state.modelId : void 0,
+          exportCard: currentSessionPath != null ? { entryId: entry.id, meta: `${new Date(entry.at ?? Date.now()).toLocaleString("zh-CN")} · ZeroWork` } : void 0,
           showExecutePlan: conversation.state.interactionId === "plan" && !streaming && entry.id === lastEntry?.id,
           onExecutePlan: executePlan,
           showBranch: branchReady && entry.id === metricsAnchorId && retryTarget !== void 0,
@@ -33729,6 +33881,10 @@ function ChatView({
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onBackToLeader, children: "返回主会话" })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stream-wrap", children: [
+          rulerPct !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "time-ruler", "aria-hidden": "true", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-fill", style: { height: `${rulerPct}%` } }) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-pct", children: `${rulerPct}%` })
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stream", ref: scrollRef, onScroll: handleStreamScroll, children: [
             turnViews.map((view, index2) => {
               const isLast = index2 === turnViews.length - 1;
@@ -33749,10 +33905,12 @@ function ChatView({
                         at: userEntry.at,
                         images: userEntry.images,
                         skillNames: userEntry.skillNames,
+                        sessionPath: currentSessionPath,
                         target: branchTargets.get(userEntry.id),
                         branchable: branchReady,
                         onRestart: restartFrom,
-                        onBranch: forkFrom
+                        onBranch: forkFrom,
+                        onQuote: quoteReply
                       }
                     ),
                     turnId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -68497,6 +68655,51 @@ const STAT_BADGES = [
   { id: "messages-500", label: "五百来回", desc: "累计 500 条消息", test: (s) => s.totalMessages >= 500, icon: "\u{1F4AC}" },
   { id: "night-owl", label: "夜猫子", desc: "峰值时段在 0–6 点", test: (s) => s.peakHour !== void 0 && s.peakHour < 6, icon: "\u{1F319}" }
 ];
+/* #290 F9：把一条回答画成 1200×630 的分享卡（同一画法，内容不同）。
+ * 截断在 500 字 —— 卡片是「金句卡」，长文请用会话导出。 */
+function drawMessageCard(text, meta) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1200;
+  canvas.height = 630;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#14102A";
+  ctx.fillRect(0, 0, 1200, 630);
+  const aurora = (x, y, r, color) => {
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, color);
+    g.addColorStop(1, "rgba(20,16,42,0)");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 1200, 630);
+  };
+  aurora(180, 560, 420, "rgba(109,74,255,0.35)");
+  aurora(1040, 120, 380, "rgba(0,194,168,0.25)");
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(28, 28, 1144, 574);
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "600 40px system-ui, -apple-system, 'PingFang SC', sans-serif";
+  const clipped = text.length > 500 ? text.slice(0, 500) + "……" : text;
+  const words = clipped.split("\n");
+  const lines = [];
+  for (const w of words) {
+    let line = "";
+    for (const ch of w) {
+      if (ctx.measureText(line + ch).width > 1020) { lines.push(line); line = ch; }
+      else line += ch;
+    }
+    lines.push(line);
+  }
+  const body = lines.slice(0, 9);
+  let y = 120;
+  for (const line of body) { ctx.fillText(line, 90, y); y += 56; }
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.font = "400 22px system-ui, -apple-system, 'PingFang SC', sans-serif";
+  ctx.fillText(meta, 90, 556);
+  ctx.fillStyle = "#6D4AFF";
+  ctx.fillRect(90, 590, 46, 4);
+  return canvas.toDataURL("image/png");
+}
+
 function StatsBadges({ stats }) {
   const earned = STAT_BADGES.filter((b) => b.test(stats));
   const locked = STAT_BADGES.filter((b) => !b.test(stats));
@@ -72057,6 +72260,28 @@ function App() {
   const [approvals, setApprovals] = reactExports.useState([]);
   const [questionnaires, setQuestionnaires] = reactExports.useState([]);
   const [taskList, setTaskList] = reactExports.useState(void 0);
+  // §21.1 消息锚点：当前会话的落盘路径（判据同 branchFromUserMessage：
+  // taskList 里 item.current === true 那条）。拿不到路径时按钮隐藏——
+  // 宁可少一个按钮，也不复制一个打不开的深链。
+  const currentSessionPath = reactExports.useMemo(
+    () => taskList?.find((item) => item.current)?.path,
+    [taskList]
+  );
+  // §21.5 会话健康度：后台会话出错时在侧栏行挂红点。只记 error——
+  // running 已有 spinner+进度环表达（两个「进行中」信号够了），全部成功
+  // 是常态不必标记（§7.6：状态点只做扫视锚点，不承担全部信息）。
+  const [sessionHealth, setSessionHealth] = reactExports.useState({});
+  const markSessionError = reactExports.useCallback((id) => {
+    setSessionHealth((prev) => prev[id] === "error" ? prev : { ...prev, [id]: "error" });
+  }, []);
+  const clearSessionHealth = reactExports.useCallback((id) => {
+    setSessionHealth((prev) => {
+      if (prev[id] === void 0) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
   const [taskListError, setTaskListError] = reactExports.useState(void 0);
   const [memberFocus, setMemberFocus] = reactExports.useState(void 0);
   const memberFocusRef = reactExports.useRef(memberFocus);
@@ -72133,6 +72358,7 @@ function App() {
         } else if (event.type === "run_error") {
           const title2 = taskListRef.current?.find((t) => t.id === sessionId)?.title;
           showToast(title2 === void 0 ? "后台任务运行失败" : `任务「${title2}」运行失败`, "error");
+          markSessionError(sessionId);
         }
         return;
       }
@@ -72837,6 +73063,7 @@ function App() {
       return window.kami.resumeSession(path2).then(() => {
         if (seq !== resumeSeqRef.current) return;
         if (target !== void 0) {
+          clearSessionHealth(target.id);
           setUnreadIds((prev) => {
             if (!prev.has(target.id)) return prev;
             const next = new Set(prev);
@@ -72911,7 +73138,7 @@ function App() {
     window.kami.archiveSession(path2, true).then(() => showToast("已归档，可在设置 → 数据管理中找到", "success")).catch((error) => {
       showToast(error instanceof Error ? error.message : String(error));
     });
-  }, []);
+  }, [clearSessionHealth, ]);
   /*
    * 置顶 / 取消置顶。**不弹 toast**：置顶的可观察结果是「这一行挪到分区最前 + 钉标记出现」，
    * 都在同一屏内、且可逆；toast 在本项目里的语义是**后台异步结果**（任务完成/失败），
@@ -73417,6 +73644,7 @@ function App() {
         tasksError: taskListError,
         onReloadTasks: reloadSessions,
         unreadIds,
+        sessionHealth,
         pendingConfirmIds,
         onNewTask: newTask,
         onResumeTask: resumeTask,
@@ -73507,6 +73735,7 @@ function App() {
         onInteractionChange: changeInteraction,
         turnFoldCache: turnFoldCacheRef,
         focusEntry: searchFocus,
+        currentSessionPath,
         focusMode,
         onFocusHandled: handleSearchFocusResult,
         memberView: memberFocus === void 0 ? void 0 : { name: memberFocus.name },

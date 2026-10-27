@@ -16169,3 +16169,115 @@ select:focus-visible,
 	position: absolute; right: 0; top: -18px;
 	font-size: 10px; color: var(--text-faint);
 }
+
+/* ── §23 第六轮十连（#290） ─────────────────────────────────────── */
+/* F8 时间线标尺：右缘竖轨 + 填充 + 百分比，滚动中浮现，hover 区域外淡出。 */
+.time-ruler {
+	position: absolute;
+	/* TurnNavRail 占右缘 var(--space-5)：标尺再往里让一档，两者同屏不打架。 */
+	right: calc(var(--space-5) + 28px + var(--space-2));
+	top: 50%;
+	transform: translateY(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: var(--space-1);
+	z-index: 3;
+	pointer-events: none;
+	opacity: 0.9;
+}
+.time-ruler-track {
+	width: 3px;
+	height: 120px;
+	border-radius: var(--radius-pill);
+	background: var(--border);
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	justify-content: flex-end;
+}
+.time-ruler-fill {
+	width: 100%;
+	background: linear-gradient(to top, var(--accent), color-mix(in srgb, var(--accent) 45%, transparent));
+	border-radius: var(--radius-pill);
+	transition: height var(--dur-fast) var(--ease-out);
+}
+.time-ruler-pct {
+	font-size: var(--font-size-2xs);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+	.time-ruler-fill {
+		transition: none;
+	}
+}
+
+/* F2 引用回复：输入卡上方的引言条（哪条被引用、一键移除）。 */
+.quote-banner {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	margin-bottom: var(--space-2);
+	border-left: 3px solid var(--accent);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+	font-size: var(--font-size-sm);
+	color: var(--text-secondary);
+}
+.quote-banner-text {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.quote-banner-remove {
+	flex: none;
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	cursor: pointer;
+	padding: 2px;
+	border-radius: var(--radius-sm);
+}
+.quote-banner-remove:hover {
+	color: var(--text);
+	background: var(--bg-hover);
+}
+
+/* F10 段落渐入：流式回答里新出现的段落块淡入上移 8px。只对「会话流」生效
+ * （.entry 内的 p/ul/pre），不打扰设置页等静态文本。旧段落不重复播：
+ * 动画只在块首次插入时发生一次，DOM 复用不触发。 */
+.entry > p,
+.entry > ul,
+.entry > ol,
+.entry > pre,
+.entry > blockquote,
+.md-body > p,
+.md-body > ul,
+.md-body > ol {
+	animation: para-in 0.32s var(--ease-out);
+}
+@keyframes para-in {
+	from {
+		opacity: 0;
+		transform: translateY(8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.entry > p,
+	.entry > ul,
+	.entry > ol,
+	.entry > pre,
+	.entry > blockquote,
+	.md-body > p,
+	.md-body > ul,
+	.md-body > ol {
+		animation: none;
+	}
+}
