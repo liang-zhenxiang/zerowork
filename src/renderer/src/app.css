@@ -14693,6 +14693,13 @@ html[data-focus="on"] .sidebar {
 	display: none;
 }
 
+html[data-focus="on"] .quick-chips {
+	/* 专注模式撤掉快速回复 chips：它是「招手」元素（三枚模板短语悬在输入框上），
+	   与「少被打断」的主张相反；第六轮 CI 也证明它在矮视口（679 逻辑高）下把
+	   输入卡推出首页视口（composerBottom 682 > home 665）。整块撤掉最干净。 */
+	display: none;
+}
+
 html[data-focus="on"] {
 	/* 极光降档**只改 token、不改层**。
 	   教训（2026-10-24 设计师评审实测）：第一版把 45% 写在 `.app` 的 background 上，
