@@ -4519,7 +4519,7 @@ const handlers = {
    * 文件系统），也不弹系统保存框（exports/ 是本项目既定的导出目录，
    * 会话导出/审计导出都落这里，用户已经知道去哪找）。
    * base64 解码失败要抛可诊断错误，不静默写半个文件。 */
-  [INVOKE.statsShare]: async ([base64Png]) => {
+  [INVOKE.statsShare]: async ([base64Png, kind]) => {
     if (typeof base64Png !== "string" || base64Png.length === 0) {
       throw new Error("分享卡内容为空，请重试");
     }
@@ -4528,7 +4528,10 @@ const handlers = {
     if (buffer.length < 1024) throw new Error("分享卡数据不完整（小于 1KB），请重试");
     const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
     mkdirSync(exportsDir, { recursive: true });
-    const outputPath = buildExportPath(exportsDir, "ZeroWork-统计分享卡", /* @__PURE__ */ new Date(), ".png");
+    /* #290：第二参 kind 决定文件名前缀——"message" 是单条消息导出卡，
+     * 缺省仍是统计分享卡（旧调用方零改动）。 */
+    const prefix = kind === "message" ? "ZeroWork-消息卡片" : "ZeroWork-统计分享卡";
+    const outputPath = buildExportPath(exportsDir, prefix, /* @__PURE__ */ new Date(), ".png");
     writeFileSync(outputPath, buffer);
     return { outputPath };
   },

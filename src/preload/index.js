@@ -686,7 +686,7 @@ const bridge = {
   archiveSession: (path, archived) => ipcRenderer.invoke(INVOKE.sessionArchive, path, archived),
   pinSession: (path, pinned) => ipcRenderer.invoke(INVOKE.sessionPin, path, pinned),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
-  shareStatsCard: (base64Png) => ipcRenderer.invoke(INVOKE.statsShare, base64Png),
+  shareStatsCard: (base64Png, kind) => ipcRenderer.invoke(INVOKE.statsShare, base64Png, kind),
   exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
   // 文件时光机：入参统一是 `{ key, id? }`（design.md §3.1），返回值里失败用 ok:false 表达。
