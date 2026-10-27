@@ -759,6 +759,21 @@ dragleave 在子元素之间穿行时也会触发。必须 dragDepth 计数，�
 
 ## §21 第六轮十连（#290）：会话体验
 
+### 专注模式与「招手」元素互斥（2026-10-28 CI 事故沉淀）
+
+专注模式（`html[data-focus="on"]`）撤掉了快速回复 chips（`.quick-chips` display:none，
+与 .sidebar 同一条规则块）。两个理由：
+
+1. **语义**：chips 是「招手」元素——三枚模板短语悬在输入框上等你点。专注模式的主张是
+   「少被打断」，两者不能同屏。
+2. **几何**（CI 实测）：矮视口（CI 1280×679）下 chips 行把 composer-zone 整体抬高，
+   输入卡溢出首页视口——focus-mode 用例② composerBottom=682 > home=665。本机 860 高
+   复现不出来；这是「新元素进首页时必须过一遍矮视口」判据的第一个真实案例。
+
+**判据**：以后任何往首页 composer 区加行/加件的改动，先跑 `focus-mode.mjs`（它量
+composer 与 .home 的几何关系）；能想到矮视口就再 `setViewportSize(1280, 679)` 跑一遍。
+
+
 ### 踩坑（下轮必查）
 
 1. **AssistantActions 的作用域只有组件 props**：F9 第一版在调用处写 `sessionPath`，
