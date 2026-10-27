@@ -16281,3 +16281,41 @@ select:focus-visible,
 		animation: none;
 	}
 }
+
+/* F7 快速回复 chips：composer 输入框上方的一行模板短语，空草稿才出现。 */
+.quick-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	padding: 0 var(--space-4);
+	margin-bottom: var(--space-2);
+}
+.quick-chip {
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: var(--space-1) var(--space-3);
+	font-size: var(--font-size-sm);
+	color: var(--text-secondary);
+	background: var(--bg);
+	transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.quick-chip:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+
+/* F4 token 估算：composer 状态行的 ≈N tok 弱提示。 */
+.token-estimate {
+	color: var(--text-faint);
+	font-size: var(--font-size-xs);
+	font-variant-numeric: tabular-nums;
+}
+
+/* F5 会话健康度圆点：侧栏任务行上的失败标记（红点，title 说明）。 */
+.task-health-dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--danger, #d64545);
+	flex: none;
+}
