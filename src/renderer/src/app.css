@@ -16326,3 +16326,113 @@ select:focus-visible,
 	background: var(--danger);
 	flex: none;
 }
+
+/* ── §24 第七轮十连（#292）：人味与仪式感 ─────────────────────── */
+
+/* F1 生日彩蛋徽标：连续天数纪念时问候语后的 ◆ */
+.home-greeting-anniv {
+	color: var(--accent);
+	font-size: 14px;
+	vertical-align: 2px;
+	margin-inline-start: var(--space-2);
+}
+
+/* F2 打卡徽章：周柱状图尾部的「今日已打卡」 */
+.week-checkin {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12px;
+	color: var(--accent);
+	background: var(--accent-soft);
+	border-radius: var(--radius-pill, 999px);
+	padding: 2px 10px;
+	margin-inline-start: var(--space-2);
+}
+.week-checkin::before {
+	content: "";
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--accent);
+}
+
+/* F3/F9 专注复盘小结：70 秒自动消失的小结条 */
+.focus-recap {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	width: fit-content;
+	margin: 0 auto var(--space-4);
+	padding: var(--space-2) var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	animation: para-in 0.32s var(--ease-out);
+}
+.focus-recap-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--accent);
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* F5 夜间护眼：一句式提示按钮（点了切暗色） */
+.night-eye-tip {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	width: fit-content;
+	margin: 0 auto var(--space-4);
+	padding: var(--space-2) var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	color: var(--text-secondary);
+	font-size: 13px;
+	cursor: pointer;
+	transition: color var(--dur-fast) var(--ease-out);
+}
+.night-eye-tip:hover { color: var(--text); }
+.night-eye-x { opacity: 0.5; }
+
+/* F7 假期徽标：问候语旁的节日小徽 */
+.holiday-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	font-size: 12px;
+	color: var(--text-secondary);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-pill, 999px);
+	padding: 2px 10px;
+	margin-inline-start: var(--space-2);
+}
+
+/* F10 升级彩带：全屏纯装饰层，3.2s 后自卸载 */
+.confetti-layer {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: var(--z-toast, 90);
+	overflow: hidden;
+}
+.confetti-piece {
+	position: absolute;
+	top: -12px;
+	width: 8px;
+	height: 14px;
+	border-radius: 2px;
+	animation: confetti-fall linear both;
+}
+@keyframes confetti-fall {
+	0% { transform: translateY(-12px) rotate(0deg); opacity: 1; }
+	100% { transform: translateY(105vh) rotate(540deg); opacity: 0.6; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.confetti-piece { animation: none; opacity: 0; }
+	.focus-recap, .night-eye-tip { animation: none; }
+}
