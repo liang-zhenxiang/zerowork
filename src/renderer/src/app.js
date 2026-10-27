@@ -16247,27 +16247,38 @@ function TypingTitle({ text: text2 }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-title-caret", style: { "--char-index": String(chars.length) } })
   ] }) });
 }
-function WeekSparkline({ week }) {
+function WeekSparkline({ week, streakDays }) {
   const days = week ?? [];
   const max = Math.max(1, ...days.map((d) => d.count));
+  const todayKey = new Date().toLocaleDateString("sv-SE");
+  /* #292 F2：今天有过消息就算「今日已打卡」，徽章显示连续天数（>1 才值得炫耀）。 */
+  const checkedToday = days.some((d) => d.date === todayKey && d.count > 0);
   const labels = ["一", "二", "三", "四", "五", "六", "日"];
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "week-sparkline", "aria-label": "本周消息概览", children: days.length === 0 ? null : days.map((d, i) => {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "week-sparkline", "aria-label": "本周消息概览", children: [
+    days.length === 0 ? null : days.map((d, i) => {
     const h = Math.max(6, Math.round((d.count / max) * 28));
     const label = labels[(new Date(d.date + "T00:00:00").getDay() + 6) % 7] ?? "";
     return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "week-spark-col", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "week-spark-bar", style: { height: `${h}px` }, "data-today": d.date === new Date().toLocaleDateString("sv-SE") ? "true" : void 0 }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "week-spark-label", children: label })
     ] }, d.date || i);
-  }) });
+    }),
+    /* 打卡徽章：今日已打卡 + 连续天数（streakDays>1 才显示数字）。 */
+    checkedToday ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "week-checkin", "data-testid": "week-checkin", title: streakDays != null && streakDays > 1 ? `已连续 ${streakDays} 天` : "今日已打卡", children: streakDays != null && streakDays > 1 ? `已连续 ${streakDays} 天` : "今日已打卡" }) : null
+  ] });
 }
-function HomeGreeting() {
+function HomeGreeting({ streakDays } = {}) {
   const now = new Date();
   const hour = now.getHours();
   const word = hour < 5 ? "夜深了" : hour < 11 ? "早上好" : hour < 13 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
   const date = `${now.getMonth() + 1} 月 ${now.getDate()} 日`;
   const weekday = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-greeting", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-greeting-word", children: word }),
+  /* #292 F1：连续使用整周/整月/整百天时，问候换成纪念版式（同一天只纪念整数天）。 */
+  const streak = typeof streakDays === "number" ? streakDays : void 0;
+  const anniversary = streak != null && streak > 0 && (streak === 7 || streak === 30 || streak === 100 || streak % 365 === 0) ? streak : void 0;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-greeting", "data-anniversary": anniversary != null ? "true" : void 0, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-greeting-word", children: anniversary != null ? `连续 ${anniversary} 天，了不起` : word }),
+    anniversary != null ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-greeting-anniv", "aria-label": `${anniversary} 天纪念`, children: "◆" }) : null,
     /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-greeting-date", children: [" · ", date, " 星期", weekday] })
   ] });
 }
@@ -16593,6 +16604,118 @@ function useRotatingPlaceholder(active) {
   return PLACEHOLDER_IDEAS[index];
 }
 
+/* #292 F7：假期徽标——节日当天首页问候旁挂一个小标记，不弹窗不打扰。
+ * 阳历节日内置；农历节日（春节/中秋）按 2025-2026 已知日期表写死，
+ * 表外年份自然不显示（宁可少显示也不显示错）。 */
+const HOLIDAYS = [
+  { m: 1, d: 1, name: "元旦", emoji: "🎉" },
+  { m: 2, d: 17, name: "春节", emoji: "🧧" }, { m: 2, d: 18, name: "春节", emoji: "🧧" }, { m: 2, d: 19, name: "春节", emoji: "🧧" },
+  { m: 4, d: 5, name: "清明", emoji: "🌿" },
+  { m: 5, d: 1, name: "劳动节", emoji: "🛠️" },
+  { m: 6, d: 19, name: "端午", emoji: "🚣" },
+  { m: 9, d: 25, name: "中秋", emoji: "🥮" },
+  { m: 10, d: 1, name: "国庆", emoji: "🇨🇳" }, { m: 10, d: 2, name: "国庆", emoji: "🇨🇳" }, { m: 10, d: 3, name: "国庆", emoji: "🇨🇳" },
+  { m: 12, d: 25, name: "圣诞", emoji: "🎄" }
+];
+function holidayToday() {
+  const now = new Date();
+  return HOLIDAYS.find((h) => h.m === now.getMonth() + 1 && h.d === now.getDate()) ?? null;
+}
+function HolidayBadge() {
+  const holiday = reactExports.useMemo(holidayToday, []);
+  if (holiday === null) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "span",
+    { className: "holiday-badge", title: `今天是${holiday.name}`, children: `${holiday.emoji} ${holiday.name}` },
+    "holiday-badge"
+  );
+}
+
+/* #292 第七轮十连：三个自包含小组件（首页挂载，互不依赖）────────────── */
+
+/* F3/F9 专注复盘小结：退出专注模式时 App 往 window 派 zw:focus-recap
+ * （detail: {minutes, turns}），这里消费成一条 70 秒自动消失的小结条。
+ * role=status：出现时不打断、读屏可播报。 */
+const FocusRecap = () => {
+  const [recap, setRecap] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    const onRecap = (event) => {
+      const detail = event.detail ?? {};
+      if ((detail.minutes ?? 0) < 1) return;
+      setRecap(detail);
+      const timer = window.setTimeout(() => setRecap(void 0), 70_000);
+      return () => window.clearTimeout(timer);
+    };
+    window.addEventListener("zw:focus-recap", onRecap);
+    return () => window.removeEventListener("zw:focus-recap", onRecap);
+  }, []);
+  if (recap == null) return null;
+  const label = `专注 ${recap.minutes} 分钟 · ${recap.turns} 轮对话`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", {
+    className: "focus-recap", role: "status", "data-testid": "focus-recap",
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "focus-recap-dot", "aria-hidden": true }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "focus-recap-text", children: label })
+    ]
+  });
+};
+
+/* F5 夜间护眼：22 点后（或 5 点前）第一次回首页、当日未提醒过、且当前不是
+ * 暗色主题时，提示一句「切暗色更护眼」。显示即记日期，一天最多一次。 */
+const NightEyeTip = () => {
+  const [show, setShow] = reactExports.useState(() => {
+    try {
+      const hour = new Date().getHours();
+      if (!(hour >= 22 || hour < 5)) return false;
+      const today = new Date().toISOString().slice(0, 10);
+      if (window.localStorage.getItem("zw:night-eye-date") === today) return false;
+      if (document.documentElement.dataset.theme === "dark") return false;
+      window.localStorage.setItem("zw:night-eye-date", today);
+      return true;
+    } catch { return false; }
+  });
+  if (!show) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+    className: "night-eye-tip", type: "button",
+    onClick: () => { try { window.dispatchEvent(new CustomEvent("zw:set-theme", { detail: "dark" })); } catch { /* 忽略 */ } setShow(false); },
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": true, children: "🌙" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "夜深了，切到暗色主题更护眼" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "night-eye-x", "aria-hidden": true, children: "×" })
+    ]
+  });
+};
+
+/* F10 升级彩带：版本号与 localStorage 里记录的不同（升级后第一次启动）时，
+ * 飘一次 30 片纯 CSS 彩带（3.2 秒，aria-hidden 不进读屏），记下新版本。
+ * 不用任何依赖——span + keyframes 就够了。 */
+const UpgradeConfetti = ({ version }) => {
+  const [burst, setBurst] = reactExports.useState(() => {
+    try { return window.localStorage.getItem("zw:seen-version") !== version; }
+    catch { return false; }
+  });
+  reactExports.useEffect(() => {
+    if (!burst) return;
+    try { window.localStorage.setItem("zw:seen-version", version); } catch { /* 忽略 */ }
+    const timer = window.setTimeout(() => setBurst(false), 3_400);
+    return () => window.clearTimeout(timer);
+  }, [burst, version]);
+  if (!burst) return null;
+  const colors = ["#6D4AFF", "#00C2A8", "#F59E0B", "#EC4899"];
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "confetti-layer", "aria-hidden": true,
+    children: Array.from({ length: 30 }, (_, i) => /* @__PURE__ */ jsxRuntimeExports.jsx("i", {
+      className: "confetti-piece",
+      style: {
+        left: `${(i * 37) % 100}%`,
+        background: colors[i % colors.length],
+        animationDelay: `${(i % 10) * 0.12}s`,
+        animationDuration: `${2.4 + (i % 5) * 0.3}s`
+      }
+    }, i))
+  });
+};
+
+
 function HomeView({
   ready,
   scenes,
@@ -16665,14 +16788,15 @@ function HomeView({
           messages: day?.count ?? 0,
           sessions: stats?.totalSessions ?? 0,
           tokens: stats?.totalTokens?.total ?? 0,
-          week
+          week,
+          streakDays: Number(stats?.streakDays ?? 0) || 0
         });
         const peak = days.reduce((acc, entry) => Math.max(acc, Number(entry?.tokens ?? 0) || 0), 0);
         setTodayMax(peak > 0 ? peak : 0);
       } catch {
         // 统计读不到也要把这一条画出来：它是「今天的状态」，不是「有数据才成立的东西」。
         /* week 必须给空数组：渲染层读 today.week（F4 周柱状），缺字段就是白屏。 */
-        if (alive) setToday({ messages: 0, sessions: 0, tokens: 0, week: [] });
+        if (alive) setToday({ messages: 0, sessions: 0, tokens: 0, week: [], streakDays: 0 });
       }
     })();
     return () => {
@@ -16753,6 +16877,10 @@ function HomeView({
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsx("main", { className: "home", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-inner", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-main", children: [
+        /* #292 F3/F9/F5/F10：专注复盘小结、夜间护眼提醒、升级彩带（全部自包含）。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx(FocusRecap, {}),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(NightEyeTip, {}),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(UpgradeConfetti, { version: "0.14.0" }),
         // 首页眉标（极光墨）：一行小字给首页开场，渐变圆点做呼吸。
       // 纯装饰层，不承担任何状态，故不进 a11y 树（aria-hidden）。
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-eyebrow", "aria-hidden": "true", children: [
@@ -16766,10 +16894,12 @@ function HomeView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "home-quick-btn", onClick: () => window.dispatchEvent(new CustomEvent("zw:shortcut-sheet-open")), children: ["快捷键", " ⌘/"] })
       ] }),
       /* 问候随时间变化（凌晨/早上/下午/晚上 + 日期）。渲染层每次进首页时求值一次，不挂计时器。 */
-      /* @__PURE__ */ jsxRuntimeExports.jsx(HomeGreeting, {}),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HomeGreeting, { streakDays: today?.streakDays }),
+      /* #292 F7：节日当天问候旁的小徽标（非节日不渲染）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(HolidayBadge, {}),
       /* today 初始为 void 0（统计 IPC 未回包），必须可选链——
        * probe 实测：直接 today.week 在冷启动帧白屏（F4 引入的回归）。 */
-      Array.isArray(today?.week) && today.week.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(WeekSparkline, { week: today.week }),
+      Array.isArray(today?.week) && today.week.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(WeekSparkline, { week: today.week, streakDays: today?.streakDays }),
       /* Token 用量迷你条（第三轮）：只画 today.tokens 相对近 30 天单日最大值的比例，
          数据拿不到就不画 —— 不拿 0 糊弄。 */
       today !== void 0 && todayMax > 0 && today.tokens > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "token-meter", title: `今日 ${today.tokens.toLocaleString()} tok`, children: [
@@ -33611,6 +33741,11 @@ function ChatView({
       });
     });
   };
+  /* #292 F9：轮数写进 sessionStorage，退出专注模式时算「本次完成几轮」。
+   * 只在 ChatView 作用域有 turnViews，App 侧读不到 —— 就地写，读方在 App。 */
+  reactExports.useEffect(() => {
+    try { window.sessionStorage.setItem("zw:turn-count", String(turnViews.length)); } catch { /* 隐私模式等场景失败可忽略 */ }
+  }, [turnViews]);
   /*
    * 检索页「跳回原消息」的落点：条目是异步到达的（resumeTask 之后才有快照），
    * 所以不能一挂载就找 —— turnViews 一变就重试，另加 4 秒兜底。
@@ -64417,6 +64552,60 @@ function IdentitySection({
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "这些会在每轮对话开始时告诉 AI，留空的项不提；保存后下一轮对话生效。" })
   ] });
 }
+/* #292 F6：成就音效开关状态（localStorage，缺省 off —— 静默升级不打扰存量用户）。 */
+function sfxOn() {
+  try { return window.localStorage.getItem("zw:sfx") === "on"; } catch { return false; }
+}
+/* 一声轻响：WebAudio 合成（880Hz 短正弦 + 指数衰减），零依赖、零音频文件。
+ * AudioContext 在首次用户手势后创建（浏览器自动播放策略）。 */
+function playSfx(kind = "done") {
+  if (!sfxOn()) return;
+  try {
+    const Ctx = window.AudioContext;
+    if (Ctx === void 0) return;
+    playSfx.ctx ??= new Ctx();
+    const ctx = playSfx.ctx;
+    if (ctx.state === "suspended") void ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    const t = ctx.currentTime;
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(kind === "error" ? 330 : 880, t);
+    osc.frequency.exponentialRampToValueAtTime(kind === "error" ? 220 : 1320, t + 0.18);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.12, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + 0.42);
+  } catch { /* 音频不可用就静默 */ }
+}
+/* #292 F4：结束语灵感（1/3 概率 + 当日至多 3 条；localStorage zw:inspiration=off 关掉）。 */
+const INSPIRATIONS = [
+  "休息一下，灵感常在走神时敲门。",
+  "今天的进展已经比昨天多了。",
+  "把复杂的事做完，是最朴素的浪漫。",
+  "剩下的交给下一次开工的你。",
+  "工具安静下来的时候，就是活干完的时候。"
+];
+function inspirationOn() {
+  try { return window.localStorage.getItem("zw:inspiration") !== "off"; } catch { return true; }
+}
+function shouldInspire() {
+  try {
+    const key = "zw:inspire-count";
+    const today = new Date().toISOString().slice(0, 10);
+    const raw = window.localStorage.getItem(key);
+    const state = raw !== null ? JSON.parse(raw) : { date: "", n: 0 };
+    if (state.date !== today) { state.date = today; state.n = 0; }
+    if (state.n >= 3) { window.localStorage.setItem(key, JSON.stringify(state)); return false; }
+    if (Math.random() >= 1 / 3) { window.localStorage.setItem(key, JSON.stringify(state)); return false; }
+    state.n += 1;
+    window.localStorage.setItem(key, JSON.stringify(state));
+    return true;
+  } catch { return false; }
+}
+
 function BehaviorSection({
   busy,
   info: info2,
@@ -64455,6 +64644,29 @@ function BehaviorSection({
             disabled: busy,
             "aria-label": "展示文件变更过程详情",
             onChange: (e) => onToggle("showChangeDetails", e.currentTarget.checked)
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-thumb" }) })
+      ] })
+    ] }) }),
+    /* #292 F6：成就音效开关。localStorage 持久化（「此刻姿势」级偏好，不进 daemon schema）；
+     * 音效本体在 zw:sfx 模块，默认关 —— 静默升级，不打扰存量用户。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "成就音效" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "里程碑解锁、会话完成时播放一声轻响（默认关）" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "mcp-switch", title: sfxOn() ? "点击停用" : "点击启用", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "checkbox",
+            checked: sfxOn(),
+            disabled: busy,
+            "aria-label": "成就音效",
+            onChange: (e) => {
+              try { window.localStorage.setItem("zw:sfx", e.currentTarget.checked ? "on" : "off"); } catch { /* 隐私模式忽略 */ }
+              onToggle("__sfx_recheck__", e.currentTarget.checked);
+            }
           }
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-thumb" }) })
@@ -72355,7 +72567,9 @@ function App() {
         if (event.type === "run_finished" && event.outcome === "completed") {
           const title2 = taskListRef.current?.find((t) => t.id === sessionId)?.title;
           showToast(title2 === void 0 ? "后台任务已完成" : `任务「${title2}」已完成`, "success");
+          playSfx("done");
         } else if (event.type === "run_error") {
+          playSfx("error");
           const title2 = taskListRef.current?.find((t) => t.id === sessionId)?.title;
           showToast(title2 === void 0 ? "后台任务运行失败" : `任务「${title2}」运行失败`, "error");
           markSessionError(sessionId);
@@ -72412,6 +72626,10 @@ function App() {
           automationToastText(event),
           automationToastTone(event)
         );
+        /* #292 F4 结束语灵感：完成时按 1/3 概率捎一句短灵感。 */
+        if (automationToastTone(event) === "success" && inspirationOn() && shouldInspire()) {
+          showToast(INSPIRATIONS[Math.floor(Math.random() * INSPIRATIONS.length)], "info");
+        }
         if (event.sessionId === "") return;
         if (event.sessionId === visibleSessionIdRef.current && viewRef.current === "chat") return;
         setUnreadIds((prev) => {
@@ -72763,6 +72981,25 @@ function App() {
    *    不是跨设备偏好；换机器不该跟着走。
    */
   const [focusMode, setFocusMode] = reactExports.useState(() => readFocus(window.localStorage));
+  /* #292 F3/F9：专注会话追踪。进入时记时刻（呼吸圈由 CSS 在 html[data-focus=on]
+   * 上播一次 3 秒呼吸动画）；退出时算时长，往 window 派 zw:focus-recap，
+   * 首页的 FocusRecap 消费后显示 2 分钟内自动消失的小结条。 */
+  const focusStartedAtRef = reactExports.useRef(void 0);
+  const focusTurnsAtEntryRef = reactExports.useRef(0);
+  reactExports.useEffect(() => {
+    if (focusMode) {
+      focusStartedAtRef.current = Date.now();
+      focusTurnsAtEntryRef.current = Number(window.sessionStorage.getItem("zw:turn-count") ?? "0") || 0;
+      return void 0;
+    }
+    const startedAt = focusStartedAtRef.current;
+    if (startedAt === void 0) return void 0;
+    focusStartedAtRef.current = void 0;
+    const minutes = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
+    const turns = Math.max(0, (Number(window.sessionStorage.getItem("zw:turn-count") ?? "0") || 0) - focusTurnsAtEntryRef.current);
+    window.dispatchEvent(new CustomEvent("zw:focus-recap", { detail: { minutes, turns } }));
+    return void 0;
+  }, [focusMode]);
   // 首页「快捷动作」用窗口事件解耦：小部件不需要知道 App 的 setter 在哪。
   // 两个事件都由首页按钮派发，只在 App 挂载时注册一次。
   reactExports.useEffect(() => {
@@ -73106,6 +73343,27 @@ function App() {
     // 改这里的取值来源时，务必同步这一个数组。
     [resumeTask, revealPanel, openPreview2]
   );
+  /* #292 F8：重命名面板打开且标题为默认（新建任务/未命名）时，从会话首条
+   * 用户消息里提关键词给三个建议名。纯本地启发式：取 6-14 字的名词性片段，
+   * 不调模型 —— 命名是 300ms 的事，不该花一次推理。 */
+  const titleSuggestions = reactExports.useCallback((session) => {
+    if (session === void 0) return [];
+    const title = (session.title ?? "").trim();
+    if (title !== "" && title !== "新建任务" && !title.startsWith("会话 ")) return [];
+    const firstUser = (session.entries ?? []).find((e) => e.role === "user");
+    const text2 = (firstUser?.text ?? "").replace(/\s+/g, " ").trim();
+    if (text2.length < 4) return [];
+    const out = [];
+    const cut = (start) => {
+      const seg = text2.slice(start, start + 14).replace(/[，。、！？：;；,.!?\s].*$/, "").trim();
+      if (seg.length >= 4 && !out.includes(seg)) out.push(seg);
+    };
+    cut(0);
+    const q = text2.indexOf("？") ;
+    if (q > 0) cut(Math.min(q + 1, text2.length - 4));
+    if (out.length < 3 && text2.length > 18) cut(6);
+    return out.slice(0, 3);
+  }, []);
   const renameTask = reactExports.useCallback(
     (path2, name2) => {
       window.kami.renameSession(path2, name2).catch((error) => {
