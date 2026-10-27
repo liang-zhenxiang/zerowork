@@ -16316,6 +16316,6 @@ select:focus-visible,
 	width: 7px;
 	height: 7px;
 	border-radius: 50%;
-	background: var(--danger, #d64545);
+	background: var(--danger);
 	flex: none;
 }
