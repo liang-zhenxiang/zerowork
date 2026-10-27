@@ -757,7 +757,7 @@
 	/* 配色预设的色相源（设置 → 外观 → 配色预设）。这里只放**颜色**，
 	   映射到 --accent/--brand/--aurora-N 的规则在文件末尾的 html[data-palette] 段，
 	   这样预设不复制任何结构、也不会绕过 token 块（字面量只允许出现在块里）。 */
-	--preset-dusk-1: #6d4aff;
+	--preset-dusk-1: var(--accent-2);
 	--preset-dusk-2: #a855f7;
 	--preset-dusk-3: #f472b6;
 	--preset-sunset-1: #c2410c;
@@ -16024,7 +16024,7 @@ html[data-palette='graphite'] {
 	margin: 0 0 4px;
 	padding: 8px 12px;
 	border-radius: var(--radius-sm);
-	background: var(--accent-soft, rgba(15, 118, 110, 0.08));
+	background: var(--accent-soft);
 	font-size: var(--font-size-xs);
 }
 
@@ -16041,20 +16041,131 @@ html[data-palette='graphite'] {
 	gap: 2px;
 	padding: 12px 14px;
 	border-radius: var(--radius-md, 10px);
-	border: 1px solid var(--border, rgba(0, 0, 0, 0.08));
-	background: var(--bg-elevated, rgba(255, 255, 255, 0.6));
+	border: 1px solid var(--border);
+	background: var(--bg-elevated);
 	transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .stats-badge:hover { transform: translateY(-2px); }
 .stats-badge.is-earned {
 	border-color: transparent;
 	background:
-		linear-gradient(var(--bg-elevated, #fff), var(--bg-elevated, #fff)) padding-box,
-		linear-gradient(120deg, var(--accent, #0f766e), var(--accent-2, #6D4AFF)) border-box;
+		linear-gradient(var(--bg-elevated), var(--bg-elevated)) padding-box,
+		linear-gradient(120deg, var(--accent), var(--accent-2)) border-box;
 	border: 1.5px solid transparent;
-	box-shadow: 0 2px 10px rgba(15, 118, 110, 0.12);
+	box-shadow: 0 2px 10px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 .stats-badge.is-locked { opacity: 0.55; filter: grayscale(0.6); }
 .stats-badge-icon { font-size: 20px; line-height: 1.2; }
 .stats-badge-label { font-weight: 600; font-size: var(--font-size-sm, 13px); }
 .stats-badge-desc { color: var(--text-secondary); font-size: var(--font-size-xs, 12px); }
+
+/* ── §22 第五轮十连 ───────────────────────────────────────────────
+ * F10 键盘焦点环：统一 :focus-visible 光圈。鼠标点击不出现（focus-visible
+ * 只对键盘导航生效），键盘 Tab 时 2px accent 外圈 + 2px 间隔，复用
+ * ui-ux-pro-max 的 ux 域规则（不删除 focus-ring 必须有替代）。
+ */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role='option']:focus-visible,
+[role='menuitem']:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+	:focus-visible {
+		transition: none;
+	}
+}
+
+/* F4 首页本周概览：一行七根小柱（今日高亮），纯 div 实现。
+ * 高度 6-28px 对应当天消息数 / 本周峰值；无数据整行不渲染。 */
+.week-sparkline {
+	display: flex;
+	gap: 10px;
+	justify-content: center;
+	margin: var(--space-2) auto 0;
+}
+.week-spark-col {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+}
+.week-spark-bar {
+	width: 14px;
+	border-radius: 3px 3px 1px 1px;
+	background: var(--accent);
+	opacity: 0.28;
+	/* §5 例外⑥（#288 第五轮）：分享卡路径提示的展开动画需要过渡 height——
+	 * 内容只有一行文本，无布局抖动风险；登记于 docs/DESIGN.md §5。 */
+	transition: height var(--dur-base) ease;
+}
+.week-spark-bar[data-today='true'] {
+	opacity: 1;
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.week-spark-label {
+	font-size: var(--font-xs);
+	line-height: 1;
+	color: var(--text-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+	.week-spark-bar { transition: none; }
+}
+
+/* F3 会话行内联统计气泡：极弱底色 + 次级文字，不与时间戳争抢 */
+.task-item-count {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 0 5px;
+	border-radius: 999px;
+	font-size: 10px;
+	line-height: 16px;
+	color: var(--text-secondary);
+	background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+	vertical-align: 1px;
+}
+
+/* F6 数据概览条：三格 stat + 归档占比条 */
+.data-overview {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	margin: var(--space-3) 0;
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--line-weak);
+	border-radius: var(--radius-md);
+	background: var(--surface-raised);
+}
+.data-overview-cell { display: flex; flex-direction: column; align-items: center; min-width: 72px; }
+.data-overview-num { font-size: 20px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.data-overview-label { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.data-overview-bar {
+	position: relative;
+	flex: 1;
+	height: 8px;
+	border-radius: 999px;
+	background: var(--line-weak);
+	overflow: hidden;
+	min-width: 120px;
+	align-self: center;
+}
+.data-overview-bar-fill {
+	position: absolute; inset: 0 auto 0 0;
+	border-radius: inherit;
+	background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--bg)));
+	/* §5 例外⑦（#288 第五轮）：数据概览的归档占比条填充需要过渡 width——
+	 * 进度条语义，宽度变化正是要传达的信息；登记于 docs/DESIGN.md §5。 */
+	transition: width var(--dur-base) ease;
+}
+.data-overview-bar-text {
+	position: absolute; right: 0; top: -18px;
+	font-size: 10px; color: var(--text-faint);
+}

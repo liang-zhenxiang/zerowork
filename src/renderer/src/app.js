@@ -13254,6 +13254,7 @@ function Skeleton({
  */
 function pickEmptyArt(title) {
 	if (/任务|会话|历史/.test(title)) return "tasks";
+	if (/统计|还没.*会话/.test(title)) return "stats";
 	if (/模型|服务商|Key/i.test(title)) return "model";
 	if (/文件|内容|预览|工作区/.test(title)) return "doc";
 	return "generic";
@@ -13276,6 +13277,16 @@ function EmptyArt({ variant }) {
 			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M80 36V18M80 98V80M58 58H28M102 58h30", ...stroke, opacity: 0.4 }),
 			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 80, cy: 16, r: 4, fill: "currentColor", opacity: 0.5 }),
 			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 26, cy: 58, r: 4, fill: "currentColor", opacity: 0.5 })
+		] });
+	}
+	if (variant === "stats") {
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("svg", { ...common, children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: 22, y: 16, width: 116, height: 84, rx: 10, ...stroke, opacity: 0.55 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M36 86V64M52 86V52M68 86V70", ...stroke, opacity: 0.35 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M84 86V44", ...stroke, opacity: 0.5 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("rect", { x: 98, y: 34, width: 12, height: 52, rx: 3, className: "art-accent", stroke: "currentColor", strokeWidth: 2 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M36 56L68 44L84 30L104 18", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round", opacity: 0.7 }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: 104, cy: 18, r: 4, className: "art-accent", fill: "currentColor", stroke: "none" })
 		] });
 	}
 	if (variant === "doc") {
@@ -13483,6 +13494,14 @@ function Sidebar({
   const allSessions = groups === void 0 ? [] : [...groups.tasks, ...groups.spaces.flatMap((group) => group.sessions)];
   const renderTaskRow = (task) => {
     const meta = formatMessageTime(task.modifiedAt, Date.now());
+    /*
+     * F3（#288 第五轮）内联统计：侧栏会话行 meta 加消息数气泡。口径与
+     * 首页 resume 卡一致——messageCount 是 user+assistant 条数之和，0 条
+     * 省略（「0 条」读起来像数据缺失，首页 R3 已确立这条口径）。
+     * 常驻不 hover 才显示：侧栏行本身就是高频扫视区，hover 才出现等于
+     * 把信息藏起来；占宽极小（约 34px），不挤压标题。
+     */
+    const count2 = task.messageCount ?? 0;
     const origin = resolveSessionOrigin(allSessions, task);
     const rowClass = task.current ? "task-item task-item-current" : "task-item";
     if (confirmingPath === task.path) {
@@ -13533,7 +13552,10 @@ function Sidebar({
             }
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-item-meta", children: meta })
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "task-item-meta", children: [
+          meta,
+          count2 > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-item-count", children: `${count2} 条` })
+        ] })
       ] }) }, task.path);
     }
     return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: rowClass, children: [
@@ -16168,6 +16190,19 @@ function TypingTitle({ text: text2 }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-title-caret", style: { "--char-index": String(chars.length) } })
   ] }) });
 }
+function WeekSparkline({ week }) {
+  const days = week ?? [];
+  const max = Math.max(1, ...days.map((d) => d.count));
+  const labels = ["一", "二", "三", "四", "五", "六", "日"];
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "week-sparkline", "aria-label": "本周消息概览", children: days.length === 0 ? null : days.map((d, i) => {
+    const h = Math.max(6, Math.round((d.count / max) * 28));
+    const label = labels[(new Date(d.date + "T00:00:00").getDay() + 6) % 7] ?? "";
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "week-spark-col", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "week-spark-bar", style: { height: `${h}px` }, "data-today": d.date === new Date().toLocaleDateString("sv-SE") ? "true" : void 0 }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "week-spark-label", children: label })
+    ] }, d.date || i);
+  }) });
+}
 function HomeGreeting() {
   const now = new Date();
   const hour = now.getHours();
@@ -16556,16 +16591,22 @@ function HomeView({
         const key = new Date().toLocaleDateString("sv-SE");
         const days = Array.isArray(stats?.heatmap) ? stats.heatmap : stats?.heatmap?.days ?? [];
         const day = days.find((entry) => entry?.date === key);
+        const week = days.slice(-7).map((entry) => ({
+          date: entry?.date ?? "",
+          count: Number(entry?.count ?? 0) || 0
+        }));
         setToday({
           messages: day?.count ?? 0,
           sessions: stats?.totalSessions ?? 0,
-          tokens: stats?.totalTokens?.total ?? 0
+          tokens: stats?.totalTokens?.total ?? 0,
+          week
         });
         const peak = days.reduce((acc, entry) => Math.max(acc, Number(entry?.tokens ?? 0) || 0), 0);
         setTodayMax(peak > 0 ? peak : 0);
       } catch {
         // 统计读不到也要把这一条画出来：它是「今天的状态」，不是「有数据才成立的东西」。
-        if (alive) setToday({ messages: 0, sessions: 0, tokens: 0 });
+        /* week 必须给空数组：渲染层读 today.week（F4 周柱状），缺字段就是白屏。 */
+        if (alive) setToday({ messages: 0, sessions: 0, tokens: 0, week: [] });
       }
     })();
     return () => {
@@ -16660,6 +16701,9 @@ function HomeView({
       ] }),
       /* 问候随时间变化（凌晨/早上/下午/晚上 + 日期）。渲染层每次进首页时求值一次，不挂计时器。 */
       /* @__PURE__ */ jsxRuntimeExports.jsx(HomeGreeting, {}),
+      /* today 初始为 void 0（统计 IPC 未回包），必须可选链——
+       * probe 实测：直接 today.week 在冷启动帧白屏（F4 引入的回归）。 */
+      Array.isArray(today?.week) && today.week.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(WeekSparkline, { week: today.week }),
       /* Token 用量迷你条（第三轮）：只画 today.tokens 相对近 30 天单日最大值的比例，
          数据拿不到就不画 —— 不拿 0 糊弄。 */
       today !== void 0 && todayMax > 0 && today.tokens > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "token-meter", title: `今日 ${today.tokens.toLocaleString()} tok`, children: [
@@ -65930,15 +65974,66 @@ function DataManagementSection() {
     },
     [load]
   );
+
+    /*
+     * F7（#288 第五轮）批量清理归档 + 确认摘要：一键清空全部归档。
+     * 确认态明说后果（N 场会话、不可恢复路径是回收目录）——
+     * 「宁可拒绝，也不静默降级」：没看清摘要之前按钮文字保持疑问句。
+     */
+    const [confirmPurge, setConfirmPurge] = reactExports.useState(false);
+    const purgeArchived = reactExports.useCallback(async () => {
+      if (busy) return;
+      setBusy(true);
+      try {
+        for (const task of (sessions ?? []).filter((s) => s.archived)) {
+          await window.kami.deleteSession(task.path);
+        }
+        setConfirmPurge(false);
+        await load();
+      } catch (e) {
+        setError(errorText$3(e));
+      } finally {
+        setBusy(false);
+      }
+    }, [busy, sessions, load]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "数据管理" }),
+      archived.length > 0 && (confirmPurge ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: `将删除 ${archived.length} 场已归档会话（移入回收目录）` }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => void purgeArchived(), children: "确认清空" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setConfirmPurge(false), children: "取消" })
+      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => setConfirmPurge(true), children: "清空归档" })),
       sessions !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
         archived.length,
         " 个已归档任务"
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "归档的任务不占用侧栏列表，但完整保留：可以在这里恢复，也可以删除。" }),
+    /*
+     * F6（#288 第五轮）数据概览条：三格 stat（全部/归档/最近 7 天活跃）。
+     * 数据全部来自已加载的 listSessions，不新增 IPC。放 section 头部，
+     * 用户进「数据管理」第一眼先看到规模，再往下做归档/删除决策。
+     */
+    sessions !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(sessions.length) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "全部会话" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(archived.length) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "已归档" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(sessions.filter((s) => now - (s.modifiedAt ?? 0) < 7 * 864e5).length) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "近 7 天活跃" })
+      ] }),
+      /* 归档占比条：宽度按 archived/total 比例，直观呈现「多少数据被收起来了」 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-bar", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-bar-fill", style: { width: `${sessions.length === 0 ? 0 : Math.round(archived.length / sessions.length * 100)}%` } }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-bar-text", children: sessions.length === 0 ? "暂无数据" : `归档占比 ${Math.round(archived.length / sessions.length * 100)}%` })
+      ] })
+    ] }),
     error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : sessions === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取会话…" }) : archived.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "没有已归档的任务。在任务行的 ⋯ 菜单里选择「归档」即可收进这里。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "preview-segments", children: archived.map((task) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "seg-card", children: confirmingPath === task.path ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "seg-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "确认删除？文件将移入回收目录。" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
@@ -67465,9 +67560,39 @@ function formatClock(ts) {
 function usageTotal(u) {
   return u.input + u.output + u.cacheRead + u.cacheWrite;
 }
+/*
+ * F9 替代项（#288 第五轮）数字滚动：统计卡数值从 0 数到目标值。
+ * 用 rAF 而不是 CSS counter（CSS 无计数动画）；600ms ease-out；
+ * reduced-motion 直接显示终值。纯数值型 value 才滚（"1,234" 这类
+ * 千分位字符串先剥逗号），非数值原样显示。
+ */
+function useCountUp(target, durationMs) {
+  const [display, setDisplay] = reactExports.useState(target);
+  const reduce = reactExports.useMemo(() => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false, []);
+  reactExports.useEffect(() => {
+    const numeric = Number(String(target).replace(/,/g, ""));
+    if (!Number.isFinite(numeric) || reduce || numeric === 0) {
+      setDisplay(target);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now) => {
+      const t = Math.min(1, (now - start) / durationMs);
+      const eased = 1 - Math.pow(1 - t, 3);
+      const val = Math.round(numeric * eased);
+      setDisplay(String(val));
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, durationMs, reduce]);
+  return display;
+}
 function StatCard$1(props) {
+  const animated = useCountUp(props.value, 600);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stat-card", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stat-value", children: props.value }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stat-value", children: animated }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stat-label", children: props.label }),
     props.hint !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stat-hint", children: props.hint })
   ] });
@@ -68531,6 +68656,30 @@ function StatsView({ onClose }) {
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "把统计画成一张可分享的图片，存到 exports 目录", disabled: stats === void 0 || sharing, onClick: share, children: [
         sharing ? "生成中…" : "分享卡"
       ] }),
+      /*
+       * F8（#288 第五轮）导出 CSV：模型用量表（byModel）导出为 CSV。
+       * 渲染层 Blob 下载（Electron 的 download 事件落「下载」目录），
+       * 零主进程改动——分享卡走 statsShare 是因为要落 exports/ 且校验
+       * PNG 魔数；CSV 是表格数据，走浏览器下载语义更自然。
+       */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "模型用量表导出为 CSV 表格", disabled: stats === void 0 || (stats?.byModel?.length ?? 0) === 0, onClick: () => {
+        if (stats === void 0) return;
+        /* byModel 经 IPC 序列化后是 {model, count, tokens, cost}——tokens 已是
+         * 四项合计（input+output+cacheRead+cacheWrite），不重复拆列。 */
+        const rows2 = [["模型", "调用次数", "tokens 合计", "花费(USD)"]];
+        for (const m of stats.byModel ?? []) {
+          rows2.push([m.model, String(m.count), String(m.tokens), m.cost.toFixed(4)]);
+        }
+        const csv = "\uFEFF" + rows2.map((r) => r.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(",")).join("\r\n");
+        const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+        const url2 = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url2;
+        a.download = "ZeroWork-模型用量.csv";
+        a.click();
+        URL.revokeObjectURL(url2);
+        window.dispatchEvent(new CustomEvent("zw:toast", { detail: { type: "success", text: "CSV 已导出（见下载目录）" } }));
+      }, children: "导出 CSV" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取统计", onClick: refresh, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
         "刷新"
@@ -68542,7 +68691,7 @@ function StatsView({ onClose }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "clickable-path", children: shareUrl })
       ] }),
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
-      stats === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取统计…" }) : empty2 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "还没有任何会话，先用一次再回来看。" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      stats === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取统计…" }) : empty2 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "还没有任何会话，先用一次再回来看。", description: "统计每天更新一次：会话数、消息数、token 用量与连续活跃天数都会画在这里。" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "概览" }),

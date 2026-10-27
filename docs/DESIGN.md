@@ -236,6 +236,8 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 | ③ | `width` 过渡 —— 右侧栏开合与全屏（`.panel-slot`、`.preview-panel`） | 面板是**让位栏**（把消息列推开），不是浮层 —— `transform` 不改变布局宽，表达不了「让位」。`.panel-slot` 是常驻的动画载体（面板本体条件挂载，挂载即终态、没有起点可跑），宽度由 TSX 内联 style 驱动；`.preview-panel` 的同一条 `width` 还兼管**全屏扫开**（panelWidth → 100%）与停靠态调宽（sash ±10px / 键盘）。三条附则：`display:flex` + 子项 `flex-shrink:0`（否则面板高度塌成内容高，内部滚动区失效）；`visibility` 参与过渡（滑动中保持 visible，收成 0 后才移出 Tab 序与 a11y 树）；`overflow:hidden` 常驻（滑动期间面板仍按 panelWidth 渲染，靠容器裁掉溢出）。**sash 拖拽中**与**窗口 resize 手势期间**停过渡（否则面板追不上鼠标 / 与窗口边缘错拍）。代价：滑动期间消息列每帧重排（约 12 帧布局），已知并接受。 |
 | ④ | `flex-basis` 过渡 —— 左侧栏折叠（`.sidebar`） | 折叠同样是**让位**语义（推开内容，不是浮层覆盖），`transform` 表达不了；元素常驻 DOM（`data-sidebar` 状态，不再条件挂载）才有「起始态→终态」可跑。`padding-inline` / `border-right-width` **不参与过渡**、在 t=0 就归零 —— border-box 下它们会顶住 `flex-basis`（只归零 flex-basis 时理论值 25px、实测渲染盒 24.8px，而不是 0），而 `artifact-panel` 的 `maxPanelWidth` 正是量这个盒子，归零才保住「收起时量到 0」的既有契约。`visibility` 参与过渡只服务 a11y。代价与 ③ 同款：折叠期间侧栏内容随宽度重排，已知并接受。 |
 | ⑤ | `height` 过渡 —— widget iframe 高度（`.widget-frame`） | 跨文档的 iframe **只能由宿主改盒子高度** —— `transform: scale` 会缩放内容，并错位 iframe 内部的点击 / 滚动坐标。高度由 TSX 内联 style 驱动（ResizeObserver 上报 + clamp + 防抖），是离散值，无过渡即逐跳变，故用 `--dur-fast` 让微增长平滑。**轨道（`.turn-nav`）的高度不过渡** —— 它曾有一条同类例外，本项目判定「收益不抵一条例外」已撤销（见 `app.css` 该处注释），所以 ⑤ 只对 widget iframe 成立。 |
+| ⑥ | `height` 过渡 —— 统计分享卡路径提示（`.stats-share-hint`，#288 第五轮） | 提示条出现/收起的展开动画。内容仅一行固定文本，高度变化不引发兄弟重排（容器不随动），无 ③④ 的让位语义但有同款的「常驻 DOM + 起终态」结构；`transform` 表达不了高度语义。 |
+| ⑦ | `width` 过渡 —— 数据概览归档占比条（`.data-overview-bar-fill`，#288 第五轮） | 进度条语义：宽度变化正是要传达的信息（归档占比），`transform: scaleX` 会拉伸圆角与内部渐变。元素在 8px 高的轨道内，宽度变化零布局外溢。 |
 
 同性质的元素不做退场动画、入场照做。
 未登记的布局属性过渡一律不放行。
@@ -731,3 +733,25 @@ dragleave 在子元素之间穿行时也会触发。必须 dragDepth 计数，�
   太长且无样式。改为 `<time class="entry-time">` 绝对定位在块右上角，
   `opacity: 0 → 1`（hover 块时），格式 `HH:mm`。**不占布局**——绝对定位 +
   `pointer-events: none`，不会把正文挤动。
+---
+
+## §20 第五轮十连（#288）：数据可见性
+
+### 已存在无需重做（先查再写）
+
+- 空态插画 EmptyState 已有 tasks/model/doc/generic 四变体（`pickEmptyArt`），本轮只补 stats 变体。
+- 统计页 StatCard / 热力图 / 模型用量表骨架早已存在，本轮全部是「在其上加层」。
+
+### 本轮踩坑（下轮必查）
+
+1. **e2e 种子会话必须用嵌套 message 格式**：`{type:"message", message:{role, content:[{type:"text",text}], model?}}`。
+   扁平的 `{role, text}` 顶层字段**读不到**（parseSessionFile 只认 message.role）。assistant 不带
+   model 字段时 isLegacySession（session-files.js:753）整条跳过 → totalSessions=0 → 统计页走空态。
+   可用的种子范本：tests/e2e/stats-share.mjs。
+2. **渲染层访问 IPC 数据的可选字段必须可选链**：F4 的 `today.week` 在 usageStats 未回包
+   （today=void 0）与 catch 分支都会被读——冷启动帧直接白屏。catch 分支的 setToday 也要
+   给齐全部字段（week:[]），不能只给部分。
+3. **新增 IPC 通道要进 shared/ipc.js 真源**：preload 有自己的 INVOKE 表，但主进程按
+   shared 的对象值注册；两边不同步 = 「No handler registered」。有 diff 工具脚本。
+4. **hooks 不能写在 return 的 JSX 里**：F7 的 useState/useCallback 插进了 JSX children
+   数组（esbuild 报 Unexpected "const"）——hooks 必须在组件体顶层。
