@@ -120,6 +120,8 @@ const INVOKE = {
    * 返回导出文件的绝对路径。
    */
   sessionExport: "session:export",
+  /** 使用统计分享卡：渲染层把 canvas 生成的 PNG（dataURL）落进 exports/ 目录。 */
+  statsShare: "stats:share",
   /**
    * 导出为 Markdown：把当前分支渲染成可移植文档，落在同一个 exports/ 目录下。
    * 与 sessionExport（HTML）同形：path 定位会话，返回 { outputPath }。
@@ -684,6 +686,7 @@ const bridge = {
   archiveSession: (path, archived) => ipcRenderer.invoke(INVOKE.sessionArchive, path, archived),
   pinSession: (path, pinned) => ipcRenderer.invoke(INVOKE.sessionPin, path, pinned),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
+  shareStatsCard: (base64Png) => ipcRenderer.invoke(INVOKE.statsShare, base64Png),
   exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
   // 文件时光机：入参统一是 `{ key, id? }`（design.md §3.1），返回值里失败用 ok:false 表达。

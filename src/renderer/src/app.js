@@ -68356,6 +68356,113 @@ function TokenTrend({ stats }) {
     ] })
   ] });
 }
+/**
+ * 里程碑徽章（#288 第五轮十连）：把已有数字变成「成就」，给使用本身加一层正反馈。
+ * 判据全部来自 usageStats 的既有字段，不新增 IPC。
+ */
+const STAT_BADGES = [
+  { id: "streak-3", label: "三日之约", desc: "连续使用 3 天", test: (s) => s.longestStreakDays >= 3, icon: "\u{1F525}" },
+  { id: "streak-7", label: "一周搭子", desc: "连续使用 7 天", test: (s) => s.longestStreakDays >= 7, icon: "\u{1F4B0}" },
+  { id: "streak-30", label: "月度老友", desc: "连续使用 30 天", test: (s) => s.longestStreakDays >= 30, icon: "\u{1F3AF}" },
+  { id: "sessions-10", label: "十全十美", desc: "累计 10 个会话", test: (s) => s.totalSessions >= 10, icon: "\u{1F4DD}" },
+  { id: "sessions-50", label: "半百俱乐部", desc: "累计 50 个会话", test: (s) => s.totalSessions >= 50, icon: "\u{1F3C6}" },
+  { id: "sessions-200", label: "二百强", desc: "累计 200 个会话", test: (s) => s.totalSessions >= 200, icon: "\u{1F451}" },
+  { id: "tokens-1m", label: "百万雄兵", desc: "累计 100 万 tokens", test: (s) => s.totalTokens.total >= 1e6, icon: "\u26A1" },
+  { id: "tokens-10m", label: "千万言语", desc: "累计 1000 万 tokens", test: (s) => s.totalTokens.total >= 1e7, icon: "\u{1F300}" },
+  { id: "messages-500", label: "五百来回", desc: "累计 500 条消息", test: (s) => s.totalMessages >= 500, icon: "\u{1F4AC}" },
+  { id: "night-owl", label: "夜猫子", desc: "峰值时段在 0–6 点", test: (s) => s.peakHour !== void 0 && s.peakHour < 6, icon: "\u{1F319}" }
+];
+function StatsBadges({ stats }) {
+  const earned = STAT_BADGES.filter((b) => b.test(stats));
+  const locked = STAT_BADGES.filter((b) => !b.test(stats));
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stats-badges", children: [
+    earned.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: `已解锁 ${earned.length} / ${STAT_BADGES.length}` }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stats-badge-grid", children: [
+      ...earned.map((b) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stats-badge is-earned", title: b.desc, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stats-badge-icon", "aria-hidden": "true", children: b.icon }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stats-badge-label", children: b.label }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stats-badge-desc", children: b.desc })
+      ] }, b.id)),
+      ...locked.map((b) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stats-badge is-locked", title: `未解锁：${b.desc}`, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stats-badge-icon", "aria-hidden": "true", children: "\u{1F512}" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stats-badge-label", children: b.label }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stats-badge-desc", children: b.desc })
+      ] }, b.id))
+    ] })
+  ] });
+}
+/**
+ * 使用统计分享卡（#288 第五轮十连）：把统计画成 1200×630 的 PNG。
+ * 手写 canvas（不引依赖）：深墨底 + 极光渐变（与 Aurora Ink 同色系），
+ * 四格数据 + 30 天迷你热力条。返回 dataURL；渲染层不落盘，主进程写 exports/。
+ */
+function drawStatsShareCard(stats) {
+  const W = 1200, H = 630;
+  const canvas = document.createElement("canvas");
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext("2d");
+  if (ctx === null) throw new Error("无法创建画布，请重试");
+  // 背景：深墨紫底 + 两团极光（token 同款色）
+  ctx.fillStyle = "#14102A"; ctx.fillRect(0, 0, W, H);
+  let g = ctx.createRadialGradient(180, 80, 40, 180, 80, 620);
+  g.addColorStop(0, "rgba(109,74,255,0.55)"); g.addColorStop(1, "rgba(109,74,255,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  g = ctx.createRadialGradient(1060, 560, 40, 1060, 560, 560);
+  g.addColorStop(0, "rgba(0,194,168,0.45)"); g.addColorStop(1, "rgba(0,194,168,0)");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 2;
+  ctx.strokeRect(24.5, 24.5, W - 49, H - 49);
+  // 标题
+  ctx.fillStyle = "#FBFAFE"; ctx.font = "600 44px system-ui, -apple-system, sans-serif";
+  ctx.fillText("ZeroWork · 我的使用统计", 72, 118);
+  ctx.fillStyle = "rgba(251,250,254,0.62)"; ctx.font = "400 22px system-ui, sans-serif";
+  const gen = new Date();
+  ctx.fillText(`截至 ${gen.getFullYear()} 年 ${gen.getMonth() + 1} 月 ${gen.getDate()} 日 · 本地优先桌面智能体`, 72, 158);
+  // 四格数据
+  const cells = [
+    { label: "会话", value: String(stats.totalSessions) },
+    { label: "消息", value: formatTokens(stats.totalMessages) },
+    { label: "Tokens", value: formatTokens(stats.totalTokens.total) },
+    { label: "连续使用", value: `${stats.streakDays} 天` }
+  ];
+  const cw = (W - 144 - 3 * 28) / 4;
+  cells.forEach((cell, i) => {
+    const x = 72 + i * (cw + 28);
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    roundRectPath(ctx, x, 218, cw, 130, 16); ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.10)"; ctx.lineWidth = 1.5;
+    roundRectPath(ctx, x, 218, cw, 130, 16); ctx.stroke();
+    ctx.fillStyle = "#FBFAFE"; ctx.font = "600 42px system-ui, sans-serif";
+    ctx.fillText(cell.value, x + 22, 288);
+    ctx.fillStyle = "rgba(251,250,254,0.55)"; ctx.font = "400 20px system-ui, sans-serif";
+    ctx.fillText(cell.label, x + 22, 322);
+  });
+  // 30 天迷你热力条
+  const days = (stats.heatmap ?? []).slice(-30);
+  const maxCount = Math.max(1, ...days.map((d) => d.count ?? 0));
+  const bw = (W - 144 - 29 * 8) / 30, bh = 74, by = 430;
+  days.forEach((d, i) => {
+    const lv = (d.count ?? 0) / maxCount;
+    ctx.fillStyle = lv === 0 ? "rgba(255,255,255,0.08)"
+      : `rgba(${Math.round(109 + (0 - 109) * lv * 0.2)},${Math.round(74 + (194 - 74) * lv)},${Math.round(255 + (168 - 255) * lv)},${0.35 + 0.65 * lv})`;
+    roundRectPath(ctx, 72 + i * (bw + 8), by + bh * (1 - Math.max(lv, 0.08)), bw, bh * Math.max(lv, 0.08), 4);
+    ctx.fill();
+  });
+  ctx.fillStyle = "rgba(251,250,254,0.45)"; ctx.font = "400 20px system-ui, sans-serif";
+  ctx.fillText("最近 30 天活跃度", 72, 546);
+  ctx.fillText(`最长连续 ${stats.longestStreakDays} 天 · 活跃 ${stats.activeDays} 天`, 72, 578);
+  return canvas.toDataURL("image/png");
+}
+function roundRectPath(ctx, x, y, w, h, r) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
 function StatsView({ onClose }) {
   const [stats, setStats] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
@@ -68389,6 +68496,24 @@ function StatsView({ onClose }) {
     });
     return off;
   }, [refresh]);
+  const [sharing, setSharing] = reactExports.useState(false);
+  const [shareUrl, setShareUrl] = reactExports.useState(void 0);
+  const share = reactExports.useCallback(() => {
+    if (stats === void 0 || sharing) return;
+    setSharing(true);
+    try {
+      const dataUrl = drawStatsShareCard(stats);
+      window.kami.shareStatsCard(dataUrl).then(({ outputPath }) => {
+        setShareUrl(outputPath);
+      }).catch((e) => {
+        setShareUrl(void 0);
+        window.dispatchEvent(new CustomEvent("zw:toast", { detail: { type: "error", text: `分享卡保存失败：${e instanceof Error ? e.message : String(e)}` } }));
+      }).finally(() => setSharing(false));
+    } catch (e) {
+      setSharing(false);
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: { type: "error", text: `分享卡生成失败：${e instanceof Error ? e.message : String(e)}` } }));
+    }
+  }, [stats, sharing]);
   const grid = reactExports.useMemo(
     () => stats === void 0 ? void 0 : buildHeatmapWeeks(stats.heatmap),
     [stats]
@@ -68403,12 +68528,19 @@ function StatsView({ onClose }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "使用统计" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "把统计画成一张可分享的图片，存到 exports 目录", disabled: stats === void 0 || sharing, onClick: share, children: [
+        sharing ? "生成中…" : "分享卡"
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取统计", onClick: refresh, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
         "刷新"
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", children: [
+      shareUrl !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "stat-hint stats-share-hint", children: [
+        "分享卡已保存：",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "clickable-path", children: shareUrl })
+      ] }),
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
       stats === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取统计…" }) : empty2 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "还没有任何会话，先用一次再回来看。" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
@@ -68470,6 +68602,13 @@ function StatsView({ onClose }) {
             " ",
             formatDuration(stats.averageSessionMs)
           ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "里程碑徽章" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "用得越多，解锁越多" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(StatsBadges, { stats })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
@@ -72255,13 +72394,22 @@ function App() {
     const openPalette = () => setPaletteOpen(true);
     const toggleFocusNow = () => setFocusMode((value) => toggleFocus(value));
     const openShortcutSheet = () => setShortcutSheetOpen(true);
+    // 全局 toast 通道（#288）：非 App 作用域的组件（如 StatsView）报错误用。
+    // detail 形如 { type: "error" | "success" | "info", text }，缺省 info。
+    const onGlobalToast = (event) => {
+      const detail = event.detail;
+      if (detail === void 0 || typeof detail.text !== "string") return;
+      showToast(detail.text, detail.type === "error" || detail.type === "success" ? detail.type : "info");
+    };
     window.addEventListener("zw:palette-open", openPalette);
     window.addEventListener("zw:focus-toggle", toggleFocusNow);
     window.addEventListener("zw:shortcut-sheet-open", openShortcutSheet);
+    window.addEventListener("zw:toast", onGlobalToast);
     return () => {
       window.removeEventListener("zw:palette-open", openPalette);
       window.removeEventListener("zw:focus-toggle", toggleFocusNow);
       window.removeEventListener("zw:shortcut-sheet-open", openShortcutSheet);
+      window.removeEventListener("zw:toast", onGlobalToast);
     };
   }, []);
   reactExports.useEffect(() => {

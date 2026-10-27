@@ -612,6 +612,12 @@ const INVOKE = {
    */
   usageStats: "stats:usage",
   /**
+   * 保存使用统计分享卡（#288 第五轮十连）：渲染层把统计画成 1200×630 的
+   * PNG（dataURL），主进程落盘到工作区 exports/ 目录，返回 { outputPath }。
+   * 与会话导出同目录同一套命名规则，用户不必记两套规则。
+   */
+  statsShare: "stats:share",
+  /**
    * 会话全文检索：检索页的数据源。按会话分组返回命中（含 entryId 与会话文件 path）。
    * 语义与 Agent 的 conversation_search 一致：空格分词、**所有词都要命中**，
    * 只扫最近 200 个会话（scannedLimit 随结果返回，界面要如实说明上限）。

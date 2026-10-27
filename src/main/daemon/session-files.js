@@ -4513,6 +4513,25 @@ const handlers = {
     return auditSnapshot(void 0);
   },
   [INVOKE.auditExport]: async () => exportAuditRecords(),
+  /* ── 使用统计分享卡（#288 第五轮十连）─────────────────────────
+   * 渲染层用 canvas 画好 1200×630 的成就卡，base64 传上来；主进程只做
+   * 「落盘到 exports/ + 返回绝对路径」。不在渲染层直接写文件（沙箱里没有
+   * 文件系统），也不弹系统保存框（exports/ 是本项目既定的导出目录，
+   * 会话导出/审计导出都落这里，用户已经知道去哪找）。
+   * base64 解码失败要抛可诊断错误，不静默写半个文件。 */
+  [INVOKE.statsShare]: async ([base64Png]) => {
+    if (typeof base64Png !== "string" || base64Png.length === 0) {
+      throw new Error("分享卡内容为空，请重试");
+    }
+    const payload = base64Png.replace(/^data:image\/png;base64,/, "");
+    const buffer = Buffer.from(payload, "base64");
+    if (buffer.length < 1024) throw new Error("分享卡数据不完整（小于 1KB），请重试");
+    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
+    mkdirSync(exportsDir, { recursive: true });
+    const outputPath = buildExportPath(exportsDir, "ZeroWork-统计分享卡", /* @__PURE__ */ new Date(), ".png");
+    writeFileSync(outputPath, buffer);
+    return { outputPath };
+  },
   /* ── 定时任务 ─────────────────────────────────────────────────── */
   [INVOKE.automationList]: async () => automationStore.list(),
   [INVOKE.automationSave]: async ([input]) => saveAutomation(input),
