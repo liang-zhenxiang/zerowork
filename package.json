@@ -140,7 +140,7 @@
     "pdfjs-dist": "6.4.299",
     "turndown": "^7.2.4",
     "typebox": "^1.4.2",
-    "undici": "8.12.2"
+    "undici": "8.12.3"
   },
   "devDependencies": {
     "@corbe30/fortune-excel": "^2.3.3",
