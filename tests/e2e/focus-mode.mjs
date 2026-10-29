@@ -78,6 +78,26 @@ const state = () =>
 				const zone = document.querySelector(".composer-zone, .composer-slot");
 				return zone === null ? 0 : zone.getBoundingClientRect().bottom;
 			})(),
+			composerZoneTop: (() => {
+				const zone = document.querySelector(".composer-zone, .composer-slot");
+				return zone === null ? 0 : zone.getBoundingClientRect().top;
+			})(),
+			composerZoneH: (() => {
+				const zone = document.querySelector(".composer-zone, .composer-slot");
+				return zone === null ? 0 : zone.getBoundingClientRect().height;
+			})(),
+			hmPadBottom: (() => {
+				const hm = document.querySelector(".home-main");
+				return hm === null ? "n/a" : getComputedStyle(hm).paddingBottom;
+			})(),
+			heroTails: (() => {
+				const tails = [];
+				for (const el of document.querySelectorAll(".home-main > *")) {
+					const r = el.getBoundingClientRect();
+					if (r.bottom > 500) tails.push(`${String(el.className || el.tagName).slice(0, 26)}@${Math.round(r.top)}-${Math.round(r.bottom)}`);
+				}
+				return tails.join(", ");
+			})(),
 			homeHeight: (() => {
 				const home = document.querySelector(".home");
 				return home === null ? 0 : home.getBoundingClientRect().height;
@@ -131,7 +151,9 @@ await h.check("进入专注模式：侧栏收起、列宽 720、极光降档", a
 	assert.equal(s.casesDisplay, "none", "案例区在专注模式下应整块撤掉（它是首页最亮的四块矩形，与「少被打断」相反）");
 	assert.ok(
 		s.composerBottom < s.homeHeight,
-		`输入卡不能溢出首页视口（composerBottom=${Math.round(s.composerBottom)}, home=${Math.round(s.homeHeight)}）`
+		`输入卡不能溢出首页视口（composerBottom=${Math.round(s.composerBottom)}, home=${Math.round(s.homeHeight)}, ` +
+			`zoneTop=${Math.round(s.composerZoneTop)} zoneH=${Math.round(s.composerZoneH)} hmPad=${s.hmPadBottom} ` +
+			`heroTails=[${s.heroTails}]）`
 	);
 	assert.ok(
 		s.pillBox.left < 200 && s.pillBox.top < 200,
