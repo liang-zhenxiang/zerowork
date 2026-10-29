@@ -14695,12 +14695,17 @@ html[data-focus="on"] .sidebar {
 
 html[data-focus="on"] .quick-chips,
 html[data-focus="on"] .week-sparkline,
-html[data-focus="on"] .week-checkin {
+html[data-focus="on"] .week-checkin,
+html[data-focus="on"] .home-quick,
+html[data-focus="on"] .capability-zone {
 	/* 专注模式撤掉「招手」元素：快速回复 chips（三枚模板短语悬在输入框上）
 	   与周柱状图/打卡徽章（第七轮加入的 hero 区数据行）。
 	   与「少被打断」的主张相反是语义理由；几何理由是第六、七轮 CI 两次证明
 	   它们在矮视口（679 逻辑高）下把输入卡推出首页视口
-	   （第六轮 composerBottom 682 > home 665；第七轮 692 > 665）。整块撤掉最干净。 */
+	   （第六轮 composerBottom 682 > home 665；第七轮 692 > 665）。整块撤掉最干净。
+   2026-10-29 第五轮取证补：home-quick（快捷入口三胶囊）与 capability-zone
+   （四枚能力胶囊）同样是招手元素 —— CI 无 PingFang 字体回退下胶囊文字变宽
+   换行，各多占一行 ≈29px，正好把输入卡顶出视口（zoneTop 342 vs 本地 314）。 */
 	display: none;
 }
 
