@@ -617,6 +617,9 @@ const INVOKE = {
    * 与会话导出同目录同一套命名规则，用户不必记两套规则。
    */
   statsShare: "stats:share",
+  /** UI 缩放（#300 F10）：读写作 preferences.uiScale（整数百分比 80–150）。 */
+  getUiScale: "settings:get-ui-scale",
+  setUiScale: "settings:set-ui-scale",
   /**
    * 会话全文检索：检索页的数据源。按会话分组返回命中（含 entryId 与会话文件 path）。
    * 语义与 Agent 的 conversation_search 一致：空格分词、**所有词都要命中**，

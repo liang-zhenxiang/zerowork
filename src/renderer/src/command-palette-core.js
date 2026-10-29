@@ -51,6 +51,31 @@ export const KIND_WEIGHT = {
 	automation: 7,
 };
 
+/**
+ * 标题命中区间（#300 F1 高亮用）：返回 query 在 title 里的字符下标数组
+ * （精确/前缀→连续段；子串→连续段；子序列→散点）。未命中返回 null。
+ * 与 matchRank 的 0-3 级一一对应：0 精确、1 前缀、2 子串、3 子序列；
+ * 副标题/关键词命中（rank 4）不高亮 —— 高亮只表达「标题里的你」。
+ */
+export function matchIndices(query, title) {
+	const q = normalize(query);
+	const t = normalize(title);
+	if (q === "" || t === "") return null;
+	if (t === q) return t.split("").map((_, i) => i);
+	if (t.startsWith(q)) return q.split("").map((_, i) => i);
+	const at = t.indexOf(q);
+	if (at !== -1) return Array.from({ length: q.length }, (_, i) => at + i);
+	const idx = [];
+	let from = 0;
+	for (const ch of q) {
+		const hit = t.indexOf(ch, from);
+		if (hit === -1) return null;
+		idx.push(hit);
+		from = hit + 1;
+	}
+	return idx;
+}
+
 /** 归一化：字符串去首尾空白 + 小写；非字符串一律当空串（不做宽容转换，避免误匹配）。 */
 function normalize(value) {
 	return typeof value === "string" ? value.trim().toLowerCase() : "";

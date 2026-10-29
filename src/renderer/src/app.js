@@ -13361,6 +13361,7 @@ const TASK_SKELETON_TITLE_STYLE = {
 function Sidebar({
   link: link2,
   groups,
+  runningCount,
   currentCwd,
   tasksError,
   onReloadTasks,
@@ -13426,6 +13427,21 @@ function Sidebar({
   const [renamingCwd, setRenamingCwd] = reactExports.useState(void 0);
   const [removingCwd, setRemovingCwd] = reactExports.useState(void 0);
   const [tasksCollapsed, setTasksCollapsed] = reactExports.useState(false);
+  /* #300 F4'：侧栏任务即时过滤。过滤词非空时窗口全开（过滤本身就说明
+   * 用户在找具体某条，「查看更多」再藏一半是反作用）；清空恢复原窗口。 */
+  const [taskFilter, setTaskFilter] = reactExports.useState("");
+  /* #300 F6：批量归档多选。Set 存 path；⌘点任务行切换选中并进入多选态；
+   * Esc 或清空退出。批量动作直接循环 archiveTask（IPC 幂等、量小）。 */
+  const [selectedPaths, setSelectedPaths] = reactExports.useState(() => /* @__PURE__ */ new Set());
+  reactExports.useEffect(() => {
+    if (selectedPaths.size === 0) return void 0;
+    const onKey = (event) => {
+      if (event.key !== "Escape") return;
+      setSelectedPaths(/* @__PURE__ */ new Set());
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedPaths.size]);
   const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
   /*
    * 会话行的 ⋯ 菜单：下方放不下时翻到行的上方（`.space-menu-up`）。
@@ -13510,7 +13526,10 @@ function Sidebar({
      */
     const count2 = task.messageCount ?? 0;
     const origin = resolveSessionOrigin(allSessions, task);
-    const rowClass = task.current ? "task-item task-item-current" : "task-item";
+    const rowClass = [
+      task.current ? "task-item task-item-current" : "task-item",
+      selectedPaths.has(task.path) ? "task-item-selected" : ""
+    ].filter(Boolean).join(" ");
     if (confirmingPath === task.path) {
       return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-item task-item-confirm", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-confirm-text", children: "确认删除？" }),
@@ -13572,7 +13591,18 @@ function Sidebar({
           type: "button",
           className: "task-item-body",
           title: sessionRowTitle(task, origin),
-          onClick: () => {
+          onClick: (event) => {
+            /* #300 F6：⌘点进入/切换多选；已处于多选态时普通点击也切换。 */
+            if (event.metaKey || event.ctrlKey || selectedPaths.size > 0) {
+              event.preventDefault();
+              setSelectedPaths((prev) => {
+                const next = new Set(prev);
+                if (next.has(task.path)) next.delete(task.path);
+                else next.add(task.path);
+                return next;
+              });
+              return;
+            }
             setEditingPath(void 0);
             setConfirmingPath(void 0);
             onResumeTask(task.path);
@@ -13976,8 +14006,10 @@ function Sidebar({
   const taskWindow = tasksExpanded
     ? { visible: tasks ?? [], hiddenCount: 0 }
     : taskListWindow(tasks ?? [], TASKS_COLLAPSED_COUNT);
-  const visibleTasks = taskWindow.visible;
-  const hiddenTaskCount = taskWindow.hiddenCount;
+  const filterNeedle = taskFilter.trim().toLowerCase();
+  const filteredTasks = filterNeedle === "" ? taskWindow.visible : (tasks ?? []).filter((task) => (task.title ?? "").toLowerCase().includes(filterNeedle));
+  const visibleTasks = filteredTasks;
+  const hiddenTaskCount = filterNeedle === "" ? taskWindow.hiddenCount : 0;
   /**
    * 一条导航行。抽出来的唯一目的是让「已就绪」与「即将开放」两段
    * 共用同一份渲染，避免为分组复制一遍按钮（DESIGN.md §6 禁复制）。
@@ -14094,6 +14126,21 @@ function Sidebar({
       // 「**用文字或角标说明状态**」（docs/DESIGN.md §7.6）。上一轮只落了前者，
       // 后者没落 —— 这里补上，并采用同一份记录里方案 (a) 认可的「重组而不是隐藏」：
       // 6 项一个不少地留在主导航里，只是排成两段，组内顺序不变。
+      /* #300 F6：批量归档浮条。只在有选中时出现；动作完成后清空选择。 */
+      selectedPaths.size > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bulk-bar", role: "toolbar", "aria-label": "批量操作", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "bulk-bar-count", children: [selectedPaths.size, " 项已选"] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          onClick: () => {
+            const paths = [...selectedPaths];
+            setSelectedPaths(/* @__PURE__ */ new Set());
+            paths.forEach((p) => onArchiveTask(p));
+          },
+          children: "归档所选"
+        }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setSelectedPaths(/* @__PURE__ */ new Set()), children: "取消" })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-title", children: "规划中" }),
         NAV_ITEMS$1.filter((item) => !item.ready).map(renderNavItem)
@@ -14114,6 +14161,14 @@ function Sidebar({
             ]
           }
         ),
+        !tasksCollapsed && tasks !== void 0 && tasks.length > 3 && /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+          type: "text",
+          className: "task-filter",
+          placeholder: "过滤任务…",
+          "aria-label": "过滤任务",
+          value: taskFilter,
+          onChange: (event) => setTaskFilter(event.target.value)
+        }),
         !tasksCollapsed && (tasksError !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: tasksError, onRetry: onReloadTasks }) : tasks === void 0 && groupsUnavailable ? (
           /* 断开原因（含 daemon 退出码）已在底部状态行如实显示，这里只给短结论：
               窄栏里再抄一遍长文本没有信息增量。重试会拿到 daemon 的真实报错
@@ -14128,7 +14183,17 @@ function Sidebar({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-item-title", style: TASK_SKELETON_TITLE_STYLE, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width }) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-item-meta", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 26 }) })
           ] }) }, width)) })
-        ) : tasks.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "暂无历史任务" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-list", children: [
+        ) : tasks.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "暂无历史任务" }),
+          /* #300 F8：空态键位行 —— 第一次打开时最需要的四个动作，
+             在「没有东西可列」的位置顺手教会。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "empty-keys", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [jsxRuntimeExports.jsx("kbd", { children: "⌘K" }), " 命令面板"] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [jsxRuntimeExports.jsx("kbd", { children: "⌘E" }), " 最近会话"] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [jsxRuntimeExports.jsx("kbd", { children: "⌘/" }), " 快捷键表"] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [jsxRuntimeExports.jsx("kbd", { children: "⌘1" }), " 侧栏直达"] })
+          ] })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-list", children: [
           visibleTasks.map(renderTaskRow),
           hiddenTaskCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
@@ -14162,6 +14227,20 @@ function Sidebar({
         !spacesCollapsed && (groups !== void 0 ? spaces.map(renderSpaceGroup) : groupsUnavailable ? null : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取空间…" }))
       ] })
     ] }),
+    /* #300 F9：多任务聚合条。≥2 个任务运行时才出现 —— 一个任务有自己的
+     * 转圈就够了，聚合的价值在「数不过来」的时刻。点击滚动到任务区顶部
+     * （所有运行中的行都在各自空间组里，回到列表头即一屏可见）。 */
+    runningCount >= 2 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      type: "button",
+      className: "running-strip",
+      onClick: () => {
+        document.querySelector(".sidebar-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+      },
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "running-strip-text", children: [runningCount, " 个任务运行中"] })
+      ]
+    }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-footer", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("img", { className: "footer-brand", src: APP_LOGO, width: 22, height: 22, alt: "" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `link-dot link-dot-${link2.kind}` }),
@@ -30536,7 +30615,7 @@ function gfm(options) {
  * remark-math 原生围栏式（$$ 独立行开闭）。
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
-import { rankEntries, matchRank, KIND_WEIGHT } from "./command-palette-core.js";
+import { rankEntries, matchRank, matchIndices, KIND_WEIGHT } from "./command-palette-core.js";
 import { applyFocus, focusContentWidth, persistFocus, readFocus, toggleFocus } from "./focus-mode-core.js";
 // 命令面板的「记忆」（收藏 + 常用分）同样是纯逻辑，单测直接 import 它 ——
 // 排序位置（frecency 不能压匹配质量）与衰减规则都在那边钉死，组件只管画。
@@ -34002,6 +34081,12 @@ function ChatView({
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "chat-header", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回首页", onClick: onBack, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
+          /* #300 F3 面包屑：空间 / 会话。空间段可点（= 返回首页的语义化形态，
+             与返回键同目标）；无空间（临时任务）时只显示会话标题，不出空段。 */
+          conversation.state.cwd !== void 0 && conversation.state.cwd !== "" && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-crumbs", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-crumb-link", onClick: onBack, children: pickerLabel(conversation.state.cwd) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-crumb-sep", "aria-hidden": "true", children: "/" })
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-title", title, children: title }),
           headerActions
         ] }),
@@ -71661,6 +71746,37 @@ function paletteGroups(items, query, favoriteIds) {
   return favoriteList.length === 0 ? shaped : [{ kind: "favorite", items: favoriteList }, ...shaped];
 }
 /*
+ * 面板标题命中高亮（#300 F1）：把 query 在 title 里命中的字符包进 <mark>。
+ * matchIndices 返回 null（未命中或空查询）时原样返回纯文本 —— 空查询下面板
+ * 是「常用 + 最近」导航视图，没有任何东西该被高亮。
+ */
+function HighlightTitle({ query, title }) {
+	const idx = matchIndices(query, title);
+	if (idx === null || idx.length === 0) return jsxRuntimeExports.jsx("span", { children: title });
+	const set = new Set(idx);
+	const parts = [];
+	let buf = "";
+	let mode = set.has(0);
+	for (let i = 0; i < title.length; i += 1) {
+		const now = set.has(i);
+		if (now === mode) {
+			buf += title[i];
+		} else {
+			parts.push({ text: buf, hit: mode });
+			buf = title[i];
+			mode = now;
+		}
+	}
+	parts.push({ text: buf, hit: mode });
+	return jsxRuntimeExports.jsx("span", {
+		children: parts.map((p, i) =>
+			p.hit
+				? jsxRuntimeExports.jsx("mark", { className: "ac-mark", children: p.text }, i)
+				: jsxRuntimeExports.jsx("span", { children: p.text }, i)
+		),
+	});
+}
+/*
  * 快捷键速查表（⌘/）：全部应用级快捷键的一张纸。
  * 数据是**手写的单一数组** —— 面板只做展示。快捷键本身由各自模块注册；
  * 这里不做第二份绑定（两处绑定迟早漂移）。新增快捷键时两处都要改：
@@ -71733,7 +71849,7 @@ function ShortcutSheet({ onClose }) {
 	});
 }
 
-function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, onToggleFavorite, onSearchHits }) {
+function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, onToggleFavorite, onSearchHits, jumpToRecentRef }) {
   const [query, setQuery] = reactExports.useState("");
   const [active, setActive] = reactExports.useState(0);
   const [mounted, setMounted] = reactExports.useState(open);
@@ -71755,6 +71871,15 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
     }, PALETTE_EXIT_MS);
     return () => window.clearTimeout(timer);
   }, [open, mounted]);
+  /* ⌘E 消费（#300 F7）：打开后把高亮定位到第一条「最近会话」。
+   * 数据在 idleEntries（空查询引导集），必须等条目就位再找，所以放在
+   * 依赖 idleEntries 的独立 effect 里；找不到就落在 0，不另作提示。 */
+  reactExports.useEffect(() => {
+    if (!open || !mounted || !jumpToRecentRef?.current) return;
+    jumpToRecentRef.current = false;
+    const at = idleEntries.findIndex((entry) => entry.kind === "session");
+    setActive(at === -1 ? 0 : at);
+  }, [open, mounted, idleEntries, jumpToRecentRef]);
   /* ┌─ 全局搜索（issue #286）：会话正文命中，就地混排 ───────────────────
    * 有查询且 ≥2 字符时，防抖 200ms 调 searchSessions（与「会话检索」页同一 IPC）。
    * 结果转成面板条目（kind "hit"），由 App 的 onSearchHits 合入 entries 的尾部。
@@ -71973,7 +72098,7 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
                             },
                             children: [
                               Icon !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 15, className: "ac-icon" }),
-                              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-label", children: item.title }),
+                              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ac-label", children: jsxRuntimeExports.jsx(HighlightTitle, { query, title: item.title }) }),
                               // 正文命中（#286）展示 snippet 副行：标题是会话名，不展示命中的
                               // 那句话，用户无法分辨「找到了什么」；其他 kind 维持原样（动作的
                               // subtitle 是说明文字，历来不进面板行，保持现状不改版式）。
@@ -72954,6 +73079,70 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  /* ⌘1-6 / Ctrl+1-6 数字直达侧栏（#300 F2）：点第 N 个可用导航项。
+   * 通过真实 DOM click 走 React 合成事件 —— 与各 nav-item 的既有 onClick
+   * 语义零重复（焦点在输入框里时不劫持数字输入：activeElement 是可编辑
+   * 元素就放行）。⌘9 预留给未来，六个 ready 项之后不扩展。 */
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      const n = Number(event.key);
+      if (!Number.isInteger(n) || n < 1 || n > 6) return;
+      const active = document.activeElement;
+      if (active !== null && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return;
+      const items = [...document.querySelectorAll(".sidebar .nav-item:not([disabled])")];
+      const target = items[n - 1];
+      if (target === void 0) return;
+      event.preventDefault();
+      target.click();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  /* ⌘E / Ctrl+E（#300 F7）：最近会话直达。打开面板并让高亮落在第一条
+   * 「最近会话」条目上 —— 空查询引导集里 session 组就在常用动作之后，
+   * 定位比模拟键入更可靠。paletteJumpToRecentRef 由 CommandPalette 消费。 */
+  /* ⌘=/⌘−（#300 F10）：UI 缩放步进 10%，80–150。因子应用在 preload
+   * （webFrame 只在那层可达），这里只算新值并落盘。步进值自带本地记忆
+   * （uiScaleRef），避免每次都先 IPC 读一遍。 */
+  const uiScaleRef = reactExports.useRef(100);
+  reactExports.useEffect(() => {
+    window.kami?.getUiScale?.().then((result) => {
+      if (typeof result?.scale === "number") uiScaleRef.current = result.scale;
+    }).catch(() => {});
+    const onKey = (event) => {
+      const key = event.key;
+      if (key !== "=" && key !== "+" && key !== "-") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      const active = document.activeElement;
+      if (active !== null && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return;
+      const step = key === "-" ? -10 : 10;
+      const next = Math.min(150, Math.max(80, uiScaleRef.current + step));
+      if (next === uiScaleRef.current) {
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      uiScaleRef.current = next;
+      window.kami?.setUiScale?.(next).catch(() => {});
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const paletteJumpToRecentRef = reactExports.useRef(false);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key.toLowerCase() !== "e") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      const active = document.activeElement;
+      if (active !== null && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return;
+      event.preventDefault();
+      paletteJumpToRecentRef.current = true;
+      setPaletteOpen(true);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   /*
    * 快捷键速查表（⌘/ 或 Ctrl+/）：一张列全应用快捷键的浮层。
    * 数据源是 SHORTCUT_SHEET —— 单一数组，面板只做展示，快捷键本身
@@ -73898,6 +74087,7 @@ function App() {
       {
         link: link2,
         groups: sidebarGroups,
+        runningCount: (taskList ?? []).filter((task) => task.running).length,
         currentCwd: conversation.state.cwd,
         tasksError: taskListError,
         onReloadTasks: reloadSessions,
@@ -74231,6 +74421,7 @@ function App() {
         onClose: () => setPaletteOpen(false),
         entries: paletteEntries,
         idleEntries: paletteIdleEntries,
+        jumpToRecentRef: paletteJumpToRecentRef,
         onSearchHits: handlePaletteSearchHits,
         memory: paletteMemory,
         onRun: recordPaletteUse,

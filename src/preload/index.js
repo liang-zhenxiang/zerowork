@@ -122,6 +122,9 @@ const INVOKE = {
   sessionExport: "session:export",
   /** 使用统计分享卡：渲染层把 canvas 生成的 PNG（dataURL）落进 exports/ 目录。 */
   statsShare: "stats:share",
+  /** UI 缩放（#300 F10）：读写 preferences.uiScale（80–150 整数百分比）。 */
+  getUiScale: "settings:get-ui-scale",
+  setUiScale: "settings:set-ui-scale",
   /**
    * 导出为 Markdown：把当前分支渲染成可移植文档，落在同一个 exports/ 目录下。
    * 与 sessionExport（HTML）同形：path 定位会话，返回 { outputPath }。
@@ -743,6 +746,8 @@ const bridge = {
   setDefaultWorkspacePath: (path) => ipcRenderer.invoke(INVOKE.setDefaultWorkspacePath, path),
   getThinkingLevelDefault: () => ipcRenderer.invoke(INVOKE.getThinkingLevelDefault),
   setThinkingLevelDefault: (level) => ipcRenderer.invoke(INVOKE.setThinkingLevelDefault, level),
+  getUiScale: () => ipcRenderer.invoke(INVOKE.getUiScale),
+  setUiScale: (scale) => ipcRenderer.invoke(INVOKE.setUiScale, scale),
   getStyle: () => ipcRenderer.invoke(INVOKE.getStyle),
   setStyle: (styleId) => ipcRenderer.invoke(INVOKE.setStyle, styleId),
   getThemePreference: () => ipcRenderer.invoke(INVOKE.getThemePreference),
@@ -839,3 +844,22 @@ const bridge = {
   onRuntimeInstallProgress: (listener) => subscribe(PUSH.runtimeInstallProgress, listener)
 };
 contextBridge.exposeInMainWorld("kami", bridge);
+/* UI 缩放（#300 F10）：preload 阶段就应用持久化的缩放，首帧不闪变。
+ * webFrame 只在 preload 可达；渲染层改缩放走 setUiScale IPC 落盘后，
+ * 由渲染层自己调 webFrame —— 不行，渲染层拿不到 webFrame，所以这里
+ * 轮询不上钩；改用 kami.setUiScale 成功后由**这层**应用：包一层。 */
+try {
+  const { webFrame } = require("electron");
+  ipcRenderer.invoke(INVOKE.getUiScale).then((result) => {
+    const scale = typeof result?.scale === "number" && result.scale >= 80 && result.scale <= 150 ? result.scale : 100;
+    webFrame.setZoomFactor(scale / 100);
+  }).catch(() => {});
+  bridge.setUiScale = async (scale) => {
+    const result = await ipcRenderer.invoke(INVOKE.setUiScale, scale);
+    const applied = typeof result?.scale === "number" ? result.scale : scale;
+    webFrame.setZoomFactor(applied / 100);
+    return result;
+  };
+} catch {
+  /* webFrame 不可用的环境（测试 harness 注入的假 preload）：缩放退化为仅存盘 */
+}
