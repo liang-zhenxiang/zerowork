@@ -14693,13 +14693,6 @@ html[data-focus="on"] .sidebar {
 	display: none;
 }
 
-html[data-focus="on"] .home-main {
-	/* 案例区在专注模式已整块撤掉，但它底下这 268px 的「案例槽预留」
-	   还在占位 —— 矮视口（679）下输入卡溢出视口的真正大头（CI 实测
-	   composerBottom 692 > home 663）。案例没了，预留也该没。 */
-	padding-bottom: 0;
-}
-
 html[data-focus="on"] .quick-chips,
 html[data-focus="on"] .week-sparkline,
 html[data-focus="on"] .week-checkin {
@@ -14824,9 +14817,11 @@ html[data-focus="on"] .home-main {
 	/* 撤掉英雄区那团光晕：它固定在内容列上，换掉页面底色后会留下一个矩形色块的
 	   硬边（径向渐变的 transparent 端点在浅底上会泛灰）；读的时候也没有信息量。 */
 	background-image: none;
-	/* 案例区撤掉后，把只属于它的底部预留（252px）还回来 —— 否则英雄区会悬在偏上
-	   的位置，下方留出一大片没有内容的空白。 */
-	padding-bottom: var(--space-6);
+	/* 案例区撤掉后，把只属于它的底部预留还回来 —— 否则英雄区会悬在偏上。
+	   但第七轮起（#298 三轮 CI 实证）这个预留本身成了矮视口溢出的大头：
+	   679 逻辑高下 hero+composer 已贴满，任何非零预留都把输入卡推出视口
+	   （composerBottom 692 > home 665）。归零：专注模式不要预留。 */
+	padding-bottom: 0;
 }
 
 html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
