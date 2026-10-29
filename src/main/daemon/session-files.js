@@ -5377,6 +5377,18 @@ const handlers = {
     styles: RESOURCES.styles.map((s) => ({ id: s.id, label: s.label })),
     styleId: readPreferences().styleId ?? DEFAULT_STYLE_ID
   }),
+  /* ── UI 缩放（#300 F10）────────────────────────────────────── */
+  // 80–150 整数百分比；未写回 100。写侧同样卡范围，挡住渲染层的越界值。
+  [INVOKE.getUiScale]: async () => ({
+    scale: readPreferences().uiScale ?? 100
+  }),
+  [INVOKE.setUiScale]: async ([scale]) => {
+    if (typeof scale !== "number" || !Number.isInteger(scale) || scale < 80 || scale > 150) {
+      throw new Error(`UI 缩放超出范围（80–150）：${String(scale)}`);
+    }
+    writePreferences({ ...readPreferences(), uiScale: scale });
+    return { scale };
+  },
   [INVOKE.setStyle]: async ([styleId]) => {
     if (typeof styleId !== "string" || styleId !== "" && !RESOURCES.styles.some((s) => s.id === styleId)) {
       throw new Error(`未知的回复风格：${String(styleId)}`);

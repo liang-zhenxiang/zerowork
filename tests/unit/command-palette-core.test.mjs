@@ -27,7 +27,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { KIND_WEIGHT, matchRank, rankEntries } from "../../src/renderer/src/command-palette-core.js";
+import { KIND_WEIGHT, matchIndices, matchRank, rankEntries } from "../../src/renderer/src/command-palette-core.js";
 
 /** 构造条目；不传的字段走默认（kind 默认 action，方便只看 title 的用例）。 */
 function e(over = {}) {
@@ -296,5 +296,30 @@ describe("rankEntries —— 第四级：常用分（可选 scoreOf）", () => {
 			scoreOf: (entry) => (entry.id === "a" ? "大" : undefined),
 		});
 		expect(items2.map((x) => x.id)).toEqual(["a", "b"]);
+	});
+});
+
+// ── matchIndices（#300 F1 高亮）───────────────────────────────────────
+describe("matchIndices", () => {
+	it("精确命中：返回全部下标", () => {
+		expect(matchIndices("统计", "统计")).toEqual([0, 1]);
+	});
+	it("前缀命中：连续段", () => {
+		expect(matchIndices("统计", "统计页")).toEqual([0, 1]);
+	});
+	it("子串命中：从命中处开始的连续段", () => {
+		expect(matchIndices("统计", "使用统计")).toEqual([2, 3]);
+	});
+	it("子序列命中：保序散点", () => {
+		const idx = matchIndices("统计", "设置为统计");
+		expect(idx).not.toBeNull();
+		expect(idx).toEqual(idx.slice().sort((a, b) => a - b));
+		expect(idx).toHaveLength(2);
+	});
+	it("未命中：null（不高亮）", () => {
+		expect(matchIndices("统计", "文件")).toBeNull();
+	});
+	it("空查询：null", () => {
+		expect(matchIndices("", "统计")).toBeNull();
 	});
 });

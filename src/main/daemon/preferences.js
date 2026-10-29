@@ -245,6 +245,9 @@ function readPreferences() {
     const permissions = readPermissions(record.permissions);
     const thinkingLevel = isThinkingLevel(record.thinkingLevel) ? record.thinkingLevel : void 0;
     const theme = isThemePreference(record.theme) ? record.theme : void 0;
+    // UI 缩放（#300 F10）：80–150 的整数百分比，非法/缺省 = 未写。
+    const uiScaleRaw = record.uiScale;
+    const uiScale = typeof uiScaleRaw === "number" && Number.isInteger(uiScaleRaw) && uiScaleRaw >= 80 && uiScaleRaw <= 150 ? uiScaleRaw : void 0;
     const updateChannel = isUpdateChannel(record.updateChannel) ? record.updateChannel : void 0;
     const paletteMemory = readPaletteMemory(record.paletteMemory);
     const styleId = typeof record.styleId === "string" ? record.styleId : void 0;
@@ -285,6 +288,7 @@ function readPreferences() {
       ...defaultWorkspacePath !== void 0 ? { defaultWorkspacePath } : {},
       ...thinkingLevel !== void 0 ? { thinkingLevel } : {},
       ...theme !== void 0 ? { theme } : {},
+      ...uiScale !== void 0 ? { uiScale } : {},
       ...updateChannel !== void 0 ? { updateChannel } : {},
       ...paletteMemory !== void 0 ? { paletteMemory } : {},
       ...styleId !== void 0 ? { styleId } : {},

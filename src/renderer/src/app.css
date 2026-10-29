@@ -16447,3 +16447,118 @@ select:focus-visible,
 	.confetti-piece { animation: none; opacity: 0; }
 	.focus-recap, .night-eye-tip { animation: none; }
 }
+
+/* ── §25 第八轮十连（#300）：空间感与效率 ─────────────────────── */
+/* F1 面板命中高亮：mark 用 accent 底 + 墨字，与选中态同时出现也不糊。 */
+.ac-mark {
+	background: color-mix(in srgb, var(--accent) 22%, transparent);
+	color: var(--text);
+	border-radius: 2px;
+	padding: 0 1px;
+}
+.ac-item.active .ac-mark {
+	background: color-mix(in srgb, var(--accent) 34%, transparent);
+}
+/* F3 面包屑：空间段是可点的链接形，分隔符降权。 */
+.chat-crumbs {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.chat-crumb-link {
+	padding: 2px 6px;
+	border-radius: var(--radius-sm);
+	font-size: var(--text-base);
+	color: var(--text-secondary);
+	transition: color var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out);
+}
+.chat-crumb-link:hover {
+	color: var(--text);
+	background: var(--bg-hover);
+}
+.chat-crumb-sep {
+	color: var(--text-faint);
+}
+/* F4' 侧栏任务过滤：细窄输入行，与侧栏密度一致。 */
+.task-filter {
+	margin: var(--space-1) var(--space-2) var(--space-2);
+	padding: 4px 8px;
+	width: calc(100% - var(--space-4));
+	font-size: var(--text-sm);
+	color: var(--text);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	outline: none;
+	transition: border-color var(--dur-fast) var(--ease-out);
+}
+.task-filter:focus {
+	border-color: var(--accent);
+}
+.task-filter::placeholder {
+	color: var(--text-faint);
+}
+/* F6 批量归档浮条：侧栏底部悬浮条，选中即现。 */
+.bulk-bar {
+	position: sticky;
+	bottom: var(--space-2);
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-2);
+	z-index: 4;
+}
+.bulk-bar-count {
+	font-size: var(--text-sm);
+	color: var(--text-secondary);
+	white-space: nowrap;
+}
+.task-item-selected .task-item-body {
+	background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+/* F8 空态键位行：两列小字，kbd 与 SHORTCUT_SHEET 同款键帽。 */
+.empty-keys {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-1) var(--space-2);
+	padding: 0 var(--space-3) var(--space-3);
+	font-size: var(--text-sm);
+	color: var(--text-faint);
+}
+.empty-keys kbd {
+	font-family: var(--font-mono, monospace);
+	font-size: 10px;
+	padding: 1px 4px;
+	border: 1px solid var(--border);
+	border-bottom-width: 2px;
+	border-radius: 4px;
+	color: var(--text-secondary);
+	margin-right: 2px;
+}
+/* F9 多任务聚合条：贴在 footer 上方的一条细横幅。 */
+.running-strip {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin: var(--space-2) var(--space-3);
+	padding: var(--space-1) var(--space-2);
+	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+	font-size: var(--text-sm);
+	text-align: left;
+	transition: background-color var(--dur-fast) var(--ease-out);
+}
+.running-strip:hover {
+	background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.running-strip-text {
+	white-space: nowrap;
+}

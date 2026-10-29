@@ -499,5 +499,28 @@ await h.check("⑬ ⌘K 搜会话正文：命中分组出现、Enter 跳回原�
 	assert.ok(flashed.includes("精密采样"), `高亮的消息应含「精密采样」，实际：${flashed.slice(0, 60)}`);
 });
 
+// ══ ⑭ 命中高亮（#300 F1）══════════════════════════════════════════
+// 输入「统计」→ 每条命中行的标题里应有 .ac-mark，且 mark 文本按序组成
+// 查询串（matchIndices 的契约：连续或散点，顺序不变）。
+await h.check("⑭ 命中高亮：mark 存在且按序拼出查询词", async () => {
+	await pressModK();
+	await paletteInput().fill("统计");
+	await waitUntil(
+		() => win.evaluate(() => document.querySelectorAll(".command-palette .ac-mark").length > 0),
+		{ timeout: 8_000, desc: "mark 元素出现" },
+	);
+	const marks = await win.evaluate(() => [...document.querySelectorAll(".command-palette .ac-mark")].map((m) => m.textContent));
+	assert.ok(marks.length > 0, "至少一条命中行有高亮");
+	// 每条 mark 都应该是「统计」（查询词在这个标题里的命中段——散点高亮也保持字符顺序）。
+	for (const text of marks) {
+		const stripped = [...text].join("");
+		assert.ok(
+			stripped === "统计" || (stripped.includes("统") && stripped.includes("计") && stripped.indexOf("统") < stripped.indexOf("计")),
+			`mark 内容应保序含查询字符，实际：${text}`,
+		);
+	}
+	await win.keyboard.press("Escape");
+});
+
 await h.finish();
 mock.close();
