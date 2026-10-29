@@ -14693,10 +14693,19 @@ html[data-focus="on"] .sidebar {
 	display: none;
 }
 
-html[data-focus="on"] .quick-chips {
-	/* 专注模式撤掉快速回复 chips：它是「招手」元素（三枚模板短语悬在输入框上），
-	   与「少被打断」的主张相反；第六轮 CI 也证明它在矮视口（679 逻辑高）下把
-	   输入卡推出首页视口（composerBottom 682 > home 665）。整块撤掉最干净。 */
+html[data-focus="on"] .quick-chips,
+html[data-focus="on"] .week-sparkline,
+html[data-focus="on"] .week-checkin,
+html[data-focus="on"] .home-quick,
+html[data-focus="on"] .capability-zone {
+	/* 专注模式撤掉「招手」元素：快速回复 chips（三枚模板短语悬在输入框上）
+	   与周柱状图/打卡徽章（第七轮加入的 hero 区数据行）。
+	   与「少被打断」的主张相反是语义理由；几何理由是第六、七轮 CI 两次证明
+	   它们在矮视口（679 逻辑高）下把输入卡推出首页视口
+	   （第六轮 composerBottom 682 > home 665；第七轮 692 > 665）。整块撤掉最干净。
+   2026-10-29 第五轮取证补：home-quick（快捷入口三胶囊）与 capability-zone
+   （四枚能力胶囊）同样是招手元素 —— CI 无 PingFang 字体回退下胶囊文字变宽
+   换行，各多占一行 ≈29px，正好把输入卡顶出视口（zoneTop 342 vs 本地 314）。 */
 	display: none;
 }
 
@@ -14813,9 +14822,11 @@ html[data-focus="on"] .home-main {
 	/* 撤掉英雄区那团光晕：它固定在内容列上，换掉页面底色后会留下一个矩形色块的
 	   硬边（径向渐变的 transparent 端点在浅底上会泛灰）；读的时候也没有信息量。 */
 	background-image: none;
-	/* 案例区撤掉后，把只属于它的底部预留（252px）还回来 —— 否则英雄区会悬在偏上
-	   的位置，下方留出一大片没有内容的空白。 */
-	padding-bottom: var(--space-6);
+	/* 案例区撤掉后，把只属于它的底部预留还回来 —— 否则英雄区会悬在偏上。
+	   但第七轮起（#298 三轮 CI 实证）这个预留本身成了矮视口溢出的大头：
+	   679 逻辑高下 hero+composer 已贴满，任何非零预留都把输入卡推出视口
+	   （composerBottom 692 > home 665）。归零：专注模式不要预留。 */
+	padding-bottom: 0;
 }
 
 html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {

@@ -88,15 +88,20 @@ const readGeometry = () =>
  * 外槽底缘采样带：落在槽的 padding-bottom 内（卡片已结束），左右各内缩 30px
  * 避开 24px 圆角；竖直只取底缘 2px，避免蹭到卡片底边的抗锯齿。
  */
-function slotRingRect(geo) {
+function slotRingRect(geo, imgH) {
 	/* 采样带不再依赖 padBottom（第三轮布局把 padding 收到 1.5px，老公式
 	   h2=max(2, round(1.5)-2)=2 的带落在 padding 之外的槽底/极光区上，
 	   CI 连红三次同一数字 3.19:1）。改为锚定卡片底边：卡片下方 6px 处
-	   取 3px 带 —— 一定是「槽面本身」，与 padding 值解耦。 */
+	   取 3px 带 —— 一定是「槽面本身」，与 padding 值解耦。
+	   2026-10-29：CI 矮视口（679 逻辑高）下卡片底边可能贴着/越过视口下缘
+	   （cardBottom≈694 > 679），带出图 → regionMean 抛「区域为空」。
+	   把带 clamp 进图像：优先保持「卡下 6px」，放不下就上移到图内最后 3px；
+	   上下两种采样都在渐变面内，对比度语义不变。 */
 	const cardBottom = geo.cardBottom ?? geo.slot.y + geo.slot.h - geo.padBottom;
+	const limit = imgH - 3;
 	return {
 		x: geo.slot.x + 30,
-		y: cardBottom + 6,
+		y: Math.min(cardBottom + 6, limit),
 		w: geo.slot.w - 60,
 		h: 3,
 	};
@@ -152,7 +157,7 @@ const probeTurnNavMark = () =>
 // 底色 background-image 必须是 none（渐变不许回到底色上）。
 const light = await h.shoot("home-light");
 const lightGeo = await readGeometry();
-const lightRing = regionMean(light.img, slotRingRect(lightGeo), lightGeo.vw);
+const lightRing = regionMean(light.img, slotRingRect(lightGeo, light.img.height), lightGeo.vw);
 const lightBg = regionMean(light.img, bgRect(lightGeo), lightGeo.vw);
 
 await h.check("浅色下输入卡外槽是实心极浅面（渐变只在描边上，不回到底色）", async () => {
@@ -181,7 +186,7 @@ await h.check("浅色下输入卡外槽是实心极浅面（渐变只在描边�
 await setTheme("dark");
 const dark = await h.shoot("home-dark");
 const darkGeo = await readGeometry();
-const darkRing = regionMean(dark.img, slotRingRect(darkGeo), darkGeo.vw);
+const darkRing = regionMean(dark.img, slotRingRect(darkGeo, dark.img.height), darkGeo.vw);
 const darkBg = regionMean(dark.img, bgRect(darkGeo), darkGeo.vw);
 
 await h.check("深色下输入卡外槽只是略亮一档的面，不是一圈亮边", () => {

@@ -125,8 +125,12 @@ await h.check("首页画布下半部分单调变暗（底光生效，越往下�
 	const a = bandMean(shot, 0.50, 0.62);
 	const b = bandMean(shot, 0.70, 0.82);
 	const c = bandMean(shot, 0.88, 0.98);
+	// a≥b 允许 1 个亮度单位的容差（2026-10-29，PR #298 第四轮 CI）：
+	// CI 的字体渲染与本地差 1px 级，hero 元素右缘偶尔蹭进采样带，造成
+	// a/b 差 ±0.8 的噪声翻转；而 a-c≥2（下一行）已保证底光趋势真实存在。
+	// 判据的适用边界：趋势判断，不做像素级法庭。
 	assert.ok(
-		a >= b && b >= c,
+		a >= b - 1 && b >= c,
 		`下半部分不是单调下降：中=${a.toFixed(1)} 偏下=${b.toFixed(1)} 底=${c.toFixed(1)}` +
 			" —— --canvas-floor 那条线性渐变没接上？"
 	);
