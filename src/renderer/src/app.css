@@ -14693,6 +14693,13 @@ html[data-focus="on"] .sidebar {
 	display: none;
 }
 
+html[data-focus="on"] .home-main {
+	/* 案例区在专注模式已整块撤掉，但它底下这 268px 的「案例槽预留」
+	   还在占位 —— 矮视口（679）下输入卡溢出视口的真正大头（CI 实测
+	   composerBottom 692 > home 663）。案例没了，预留也该没。 */
+	padding-bottom: 0;
+}
+
 html[data-focus="on"] .quick-chips,
 html[data-focus="on"] .week-sparkline,
 html[data-focus="on"] .week-checkin {
