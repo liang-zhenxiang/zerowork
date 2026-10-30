@@ -64881,8 +64881,43 @@ function BehaviorSection({
   info: info2,
   onToggle
 }) {
+  /* round9 F9：夜间自动柔化开关。偏好存 localStorage（zw:night-dim），与
+     求值器同 key；改后立即广播重估 —— 不走 daemon，纯本机显示习惯。 */
+  const [nightDim, setNightDim] = reactExports.useState(() => {
+    try {
+      return window.localStorage.getItem("zw:night-dim") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const toggleNightDim = (next) => {
+    setNightDim(next);
+    try {
+      window.localStorage.setItem("zw:night-dim", next ? "on" : "off");
+    } catch {
+      /* 忽略存储异常 */
+    }
+    if (typeof applyNightDim === "function") applyNightDim();
+  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "对话体验" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "夜间自动柔化" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "22 点到清晨 6 点，画布极光自动降到柔和亮度" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "mcp-switch", title: nightDim ? "点击停用" : "点击启用", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "checkbox",
+            checked: nightDim,
+            "aria-label": "夜间自动柔化",
+            onChange: (e) => toggleNightDim(e.currentTarget.checked)
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-thumb" }) })
+      ] })
+    ] }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "加载欢迎语" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "会话加载较慢时，用一句问候陪你等待" }),
@@ -74747,6 +74782,25 @@ function applyTheme(pref) {
   themePreference = pref;
   document.documentElement.setAttribute("data-theme", resolveTheme(pref));
 }
+/* round9 F9：夜间自动柔化。22:00–6:00 给 <html> 挂 data-night-dim="on"，
+   画布极光降到 55%（CSS 段 §26）。用户可在设置→个性化里关掉；关掉后属性
+   直接写 "off"，CSS 永不生效 —— 偏好与求值分离，改偏好不用改求值器。 */
+function applyNightDim() {
+  let enabled = true;
+  try {
+    enabled = window.localStorage.getItem("zw:night-dim") !== "off";
+  } catch {
+    enabled = true;
+  }
+  const hour = new Date().getHours();
+  const night = hour >= 22 || hour < 6;
+  document.documentElement.setAttribute("data-night-dim", enabled && night ? "on" : "off");
+}
+function initNightDim() {
+  applyNightDim();
+  window.setInterval(applyNightDim, 60 * 1000);
+  window.addEventListener("zw:theme-changed", applyNightDim);
+}
 function initTheme() {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
   applyTheme(THEME_PREFS.includes(stored) ? stored : "light");
@@ -74779,7 +74833,7 @@ function setThemePreference(pref) {
   window.dispatchEvent(new CustomEvent("zw:theme-changed"));
   return window.kami.setThemePreference(pref);
 }
-initTheme();
+initNightDim();initTheme();
 initPalette();
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root 不存在");

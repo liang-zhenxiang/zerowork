@@ -16646,3 +16646,20 @@ mark.search-hit {
 .markdown tbody tr:hover td {
 	background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
+
+/* round9 F9：夜间自动柔化。22:00–6:00 且亮色主题时，画布极光降到 55% 亮度。
+   开关由渲染层在 <html> 上写 data-night-dim="on|off"（缺省 on；设置→个性化可关）。
+   只动亮色块 —— 暗色主题本身已是低亮度，不需要再柔化。 */
+html[data-night-dim="on"]:not([data-theme="dark"]) .app > * {
+	/* 画布底图整体降档：极光层与 canvas-floor 同源，这里用 filter 压亮度最省事
+	   且不影响前景对比度（只作用于背景图层容器）。 */
+	filter: brightness(0.96) saturate(0.82);
+}
+html[data-night-dim="on"]:not([data-theme="dark"]) .app::before {
+	opacity: 0.55;
+}
+@media (prefers-reduced-motion: reduce) {
+	html[data-night-dim="on"]:not([data-theme="dark"]) .app::before {
+		transition: none;
+	}
+}
