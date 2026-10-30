@@ -16623,3 +16623,26 @@ mark.search-hit {
 .chat-session-stats-sep {
 	opacity: 0.6;
 }
+
+/* F3 表格增强：宽表横向可滚（wrapper 由 .markdown 直接给 table 套不行——
+   table 有自己的圆角边框，改成给 .markdown 里紧跟 table 的 div 无侵入方案：
+   直接让 table 自身 max-width 100% + 外层 .markdown 允许横向溢出并配 sticky 阴影提示）。 */
+.markdown .table-scroll {
+	overflow-x: auto;
+	margin: var(--space-3) 0;
+}
+.markdown .table-scroll table {
+	margin: 0;
+	min-width: 480px;
+}
+/* 斑马纹：偶数行淡一档底色，长表逐行好读。 */
+.markdown tbody tr:nth-child(even) td {
+	background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+/* hover 行高亮：桌面端快速对行。 */
+.markdown tbody tr {
+	transition: background var(--dur-fast) var(--ease-out);
+}
+.markdown tbody tr:hover td {
+	background: color-mix(in srgb, var(--accent) 6%, transparent);
+}

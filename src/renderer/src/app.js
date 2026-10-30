@@ -30917,6 +30917,8 @@ const Markdown = React.memo(function Markdown2({
         // 只覆盖 pre（围栏块）成行卡片；行内 code 走下面的 code 覆盖。
         pre: CodeBlockCard,
         code: renderCode,
+        // round9 F3：宽表横向可滚 —— 表格套一层 .table-scroll，窄窗口不再挤爆版心。
+        table: ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "table-scroll", children: /* @__PURE__ */ jsxRuntimeExports.jsx("table", { children }) }),
         // 链接一律交给主进程白名单（window.open → openWindowHandler → openExternal）。
         a: ({ href, children }) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "a",
@@ -32848,6 +32850,8 @@ function AssistantActions({
   onExecutePlan,
   // #290 F9：会话路径 + 条目 id，两者齐备时工具条出现「导出为图片」。
   exportCard,
+  // round9 F6：把这条回答作为引用填进输入框（「接着上面说」）。齐备才出现。
+  onQuote,
 
   // 「留为会话」一类**列级**动作挂进这一行的领衔槽位（对比屏专用；文字动作在前、
   // 图标动作在后的次序与「执行计划」同型）。由调用方传节点，聊天页不传，行为不变。
@@ -32881,6 +32885,17 @@ function AssistantActions({
           });
         },
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconImage, { size: 16 })
+      }
+    ),
+    onQuote !== void 0 && copyable && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: "bar-btn",
+        "aria-label": "引用回复",
+        title: "把这条回答作为引用填进输入框，接着它说",
+        onClick: () => onQuote(text2),
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCornerUpLeft, { size: 16 })
       }
     ),
     showExecutePlan && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn bar-btn-text", onClick: onExecutePlan, children: "执行计划" }),
@@ -33759,10 +33774,35 @@ function ChatView({
     return { turns, chars, duration: minutes >= 1 ? `${minutes} 分钟` : ms > 0 ? "不到 1 分钟" : "" };
   }, [turnViews, conversation.turnTimings]);
   const rulerRafRef = reactExports.useRef(0);
+  const readPosTimerRef = reactExports.useRef(0);
   reactExports.useLayoutEffect(() => {
     followRef.current = true;
     setShowJumpToBottom(false);
-  }, [sessionId]);
+    /* round9 F2：重开会话恢复上次读到的位置。rAF 两帧等首屏渲染完；
+       位置过旧（会话已更新到接近底部）就不打扰 —— 那种情况用户要的是新消息。 */
+    const node2 = scrollRef.current;
+    if (node2 === null) return;
+    let saved = 0;
+    try {
+      saved = Number(window.localStorage.getItem(`zw:readpos:${sessionId}`) ?? "0") || 0;
+    } catch {
+      saved = 0;
+    }
+    if (saved <= 0) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const n = scrollRef.current;
+        if (n === null) return;
+        const maxScroll = n.scrollHeight - n.clientHeight;
+        if (saved < maxScroll - 240) {
+          n.scrollTop = saved;
+          setShowJumpToBottom(true);
+          followRef.current = false;
+          showToast("已定位到上次阅读的位置");
+        }
+      });
+    });
+  }, [sessionId, showToast]);
   const [pendingAlign, setPendingAlign] = reactExports.useState(void 0);
   const handleStreamScroll = () => {
     const node2 = scrollRef.current;
@@ -33770,6 +33810,19 @@ function ChatView({
     const atBottom = node2.scrollHeight - node2.scrollTop - node2.clientHeight < BOTTOM_THRESHOLD_PX;
     followRef.current = atBottom;
     setShowJumpToBottom(!atBottom);
+    /* round9 F2：阅读进度记忆。800ms 防抖写 localStorage；滚到近底视为读完即清除。
+       key 带会话 id，互不串位；恢复动作在 sessionId 切换的 layout effect 里。 */
+    if (readPosTimerRef.current !== 0) window.clearTimeout(readPosTimerRef.current);
+    const sid = sessionId;
+    const ratio = node2.scrollHeight <= node2.clientHeight ? 1 : node2.scrollTop / (node2.scrollHeight - node2.clientHeight);
+    readPosTimerRef.current = window.setTimeout(() => {
+      try {
+        if (ratio > 0.95) window.localStorage.removeItem(`zw:readpos:${sid}`);
+        else window.localStorage.setItem(`zw:readpos:${sid}`, String(node2.scrollTop));
+      } catch {
+        /* 存储满/隐私模式：进度记忆属增强功能，静默放弃 */
+      }
+    }, 800);
     /* #290 F8 时间线标尺：滚得多（>1.5 屏）才浮现；内容不足 3 屏不出现。
      * 节流用 rAF 标志位，scroll 事件本身高频，直接 setState 会抖。 */
     const range = node2.scrollHeight - node2.clientHeight;
@@ -33785,6 +33838,7 @@ function ChatView({
   };
   reactExports.useEffect(() => () => {
     if (rulerRafRef.current !== 0) cancelAnimationFrame(rulerRafRef.current);
+    if (readPosTimerRef.current !== 0) window.clearTimeout(readPosTimerRef.current);
   }, []);
   const releaseFollowForExpand = () => {
     followRef.current = false;
@@ -34046,6 +34100,11 @@ function ChatView({
           text: entry.text,
           modelId: entry.id === metricsAnchorId ? conversation.state.modelId : void 0,
           exportCard: currentSessionPath != null ? { entryId: entry.id, meta: `${new Date(entry.at ?? Date.now()).toLocaleString("zh-CN")} · ZeroWork` } : void 0,
+          onQuote: (text2) => {
+            const quoted = text2.length > 120 ? text2.slice(0, 120) + "…" : text2;
+            const block = quoted.split("\n").map((line) => `> ${line}`).join("\n");
+            composerRef.current?.fillText(`${block}\n`);
+          },
           showExecutePlan: conversation.state.interactionId === "plan" && !streaming && entry.id === lastEntry?.id,
           onExecutePlan: executePlan,
           showBranch: branchReady && entry.id === metricsAnchorId && retryTarget !== void 0,
