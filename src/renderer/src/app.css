@@ -16562,3 +16562,64 @@ select:focus-visible,
 .running-strip-text {
 	white-space: nowrap;
 }
+
+/* ── §26 第九轮十连（#302） ─────────────────────────────────────── */
+/* F1 会话内命中高亮：定位的那条消息里，命中的词短暂点亮。 */
+mark.search-hit {
+	background: color-mix(in srgb, var(--accent) 22%, transparent);
+	color: inherit;
+	border-radius: 3px;
+	padding: 0 1px;
+	box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* F4 代码块语言徽标：语言名后跟行数，一眼知道这段有多长。 */
+.code-block-lines {
+	margin-left: var(--space-1);
+	padding: 0 5px;
+	border-radius: 999px;
+	font-size: 10px;
+	line-height: 16px;
+	color: var(--text-secondary);
+	background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* F5 复制整轮：TurnHeader 前缀小图标，hover 才显（不与折叠箭头抢注意力）。 */
+.turn-copy-turn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	margin-right: var(--space-1);
+	border-radius: var(--radius-sm);
+	color: var(--text-faint);
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity var(--dur-fast) var(--ease-out);
+}
+.turn-group:hover .turn-copy-turn,
+.turn-copy-turn:focus-visible {
+	opacity: 1;
+}
+.turn-copy-turn:hover {
+	color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* F7 会话统计：标题右侧的「N 轮 · N 字 · N 分钟」，弱化、不抢标题。 */
+.chat-session-stats {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	flex-shrink: 0;
+	margin-left: var(--space-2);
+	font-size: 11px;
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+.chat-session-stats-sep {
+	opacity: 0.6;
+}

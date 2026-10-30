@@ -30818,7 +30818,10 @@ function CodeBlockCard({ children }) {
   const foldable = lineCount > 18;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block", "data-folded": foldable && !expanded ? "true" : "false", "data-lines": lineCount, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-head", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lang", children: language }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "code-block-lang", children: [
+        language,
+        lineCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lines", children: `${lineCount} 行` })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -33394,7 +33397,8 @@ function TurnHeader({
   assistantName,
   collapsible,
   expanded,
-  onToggle
+  onToggle,
+  onCopyTurn
 }) {
   const [now, setNow] = reactExports.useState(() => Date.now());
   reactExports.useEffect(() => {
@@ -33408,7 +33412,41 @@ function TurnHeader({
   } else if (turn !== void 0 && turn.endedAt !== void 0) {
     duration = turn.cancelled === true ? `已取消 ${formatDuration$1(turn.endedAt - turn.startedAt)}` : `已完成 ${formatDuration$1(turn.endedAt - turn.startedAt)}`;
   }
+  /* round9 F5：复制整轮。折叠分支的 header 本体是 <button>，HTML 不许按钮嵌按钮
+     —— 所以那里用 span role=button 并挡住冒泡，避免点了复制顺手把过程折叠了。 */
+  const copyTurnControl = onCopyTurn === void 0 ? null : collapsible ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "span",
+    {
+      role: "button",
+      tabIndex: 0,
+      className: "turn-copy-turn",
+      "aria-label": "复制本轮对话",
+      title: "复制本轮对话",
+      onClick: (e) => {
+        e.stopPropagation();
+        onCopyTurn();
+      },
+      onKeyDown: (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.stopPropagation();
+          onCopyTurn();
+        }
+      },
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 12 })
+    }
+  ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "button",
+    {
+      type: "button",
+      className: "turn-copy-turn",
+      "aria-label": "复制本轮对话",
+      title: "复制本轮对话",
+      onClick: onCopyTurn,
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 12 })
+    }
+  );
   const body = /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    copyTurnControl,
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "turn-avatar", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("img", { className: "turn-avatar-img", src: APP_LOGO, alt: "" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "turn-meta", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "turn-agent", children: assistantName }),
@@ -33522,6 +33560,23 @@ function ChatView({
     const block = quoted.split("\n").map((line) => `> ${line}`).join("\n");
     composerRef.current?.fillText(`${block}\n`);
   }, []);
+  /* round9 F5：复制整轮对话。user 提问 + assistant 回答拼成一段纯文本——
+     用户要把「一次问答」贴给同事或存档时，不必再两条各复制一遍。 */
+  const copyTurn = reactExports.useCallback((entryId) => {
+    const view = turnViews.find((candidate) => candidate.userEntry?.id === entryId);
+    if (view === void 0) return;
+    const parts = [];
+    if (view.userEntry !== void 0) parts.push(`【问】${view.userEntry.text ?? ""}`);
+    const answer = view.plan.items.map((item) => {
+      if (item.kind !== "assistant" || item.entry === void 0) return "";
+      return item.entry.text ?? "";
+    }).filter((t) => t !== "").join("\n\n");
+    if (answer !== "") parts.push(`【答】${answer}`);
+    if (parts.length === 0) return;
+    void navigator.clipboard.writeText(parts.join("\n\n")).then(() => {
+      showToast("本轮对话已复制");
+    });
+  }, [turnViews, showToast]);
   reactExports.useEffect(() => {
     if (prefill === void 0) return;
     composerRef.current?.fillText(prefill);
@@ -33682,6 +33737,27 @@ function ChatView({
   const [showJumpToBottom, setShowJumpToBottom] = reactExports.useState(false);
   /* #290 F8：右缘时间线标尺的滚动进度（void 0 = 隐藏）；rAF 节流句柄。 */
   const [rulerPct, setRulerPct] = reactExports.useState(void 0);
+  /* round9 F7：会话统计。轮数=以 user 开头的视图数；字数=user+assistant 正文；
+     时长=各轮 endedAt-startedAt 之和（流式中的轮不计入总和，避免来回跳）。 */
+  const sessionStats = reactExports.useMemo(() => {
+    let turns = 0;
+    let chars = 0;
+    let ms = 0;
+    for (const view of turnViews) {
+      if (view.startsWithUser) turns += 1;
+      if (view.userEntry !== void 0) chars += (view.userEntry.text ?? "").length;
+      for (const item of view.plan.items) {
+        if (item.kind === "assistant" && item.entry !== void 0) chars += (item.entry.text ?? "").length;
+      }
+      const turnId = view.turnId;
+      const timing = turnId === void 0 ? void 0 : conversation.turnTimings?.[turnId];
+      if (timing !== void 0 && timing.startedAt !== void 0 && timing.endedAt !== void 0) {
+        ms += Math.max(0, timing.endedAt - timing.startedAt);
+      }
+    }
+    const minutes = Math.round(ms / 60000);
+    return { turns, chars, duration: minutes >= 1 ? `${minutes} 分钟` : ms > 0 ? "不到 1 分钟" : "" };
+  }, [turnViews, conversation.turnTimings]);
   const rulerRafRef = reactExports.useRef(0);
   reactExports.useLayoutEffect(() => {
     followRef.current = true;
@@ -33801,7 +33877,7 @@ function ChatView({
   // 轨迹条「点击定位」：目标行可能藏在折叠组里（收起态跳过渲染，见
   // .metafold-body:not(.open) 的注释），先展开再定位，否则滚到的位置是空的。
   // 两帧 rAF 等折叠展开挂载；flash 是一次性动画，animationend 即摘除。
-  const focusEntryInTurn = (view, entryId) => {
+  const focusEntryInTurn = (view, entryId, highlightQuery) => {
     for (const item of view.plan.items) {
       if (item.entries === void 0) continue;
       if (!item.entries.some((e) => e.id === entryId)) continue;
@@ -33817,6 +33893,44 @@ function ChatView({
         void el.offsetWidth;
         el.classList.add("entry-flash");
         el.addEventListener("animationend", () => el.classList.remove("entry-flash"), { once: true });
+        /* round9 F1：把命中词在那条消息里高亮。只查纯文本节点，不碰已有的
+           mark/代码结构；2.5s 后自动摘除 —— 高亮是「指路」，不是永久标记。 */
+        if (typeof highlightQuery === "string" && highlightQuery.length >= 2) {
+          const walk = (node) => {
+            for (const child of [...node.childNodes]) {
+              if (child.nodeType === Node.TEXT_NODE) {
+                const text2 = child.nodeValue ?? "";
+                const lower = text2.toLowerCase();
+                const needle = highlightQuery.toLowerCase();
+                const at = lower.indexOf(needle);
+                if (at < 0) continue;
+                const frag = document.createDocumentFragment();
+                let cursor = 0;
+                let idx = at;
+                let guard = 0;
+                while (idx >= 0 && guard < 20) {
+                  guard += 1;
+                  if (idx > cursor) frag.appendChild(document.createTextNode(text2.slice(cursor, idx)));
+                  const mark = document.createElement("mark");
+                  mark.className = "search-hit";
+                  mark.textContent = text2.slice(idx, idx + needle.length);
+                  frag.appendChild(mark);
+                  cursor = idx + needle.length;
+                  idx = lower.indexOf(needle, cursor);
+                }
+                if (cursor < text2.length) frag.appendChild(document.createTextNode(text2.slice(cursor)));
+                child.replaceWith(frag);
+                window.setTimeout(() => {
+                  el.querySelectorAll("mark.search-hit").forEach((m) => m.replaceWith(document.createTextNode(m.textContent ?? "")));
+                  el.normalize();
+                }, 2500);
+              } else if (child.nodeType === Node.ELEMENT_NODE && !["MARK", "CODE", "PRE", "BUTTON"].includes(child.tagName)) {
+                walk(child);
+              }
+            }
+          };
+          walk(el);
+        }
       });
     });
   };
@@ -33841,7 +33955,7 @@ function ChatView({
       if (focusEntry.sessionId !== void 0 && focusEntry.sessionId !== sessionId) return;
       const view = turnViews.find((candidate) => candidate.plan.items.some((item) => item.entry?.id === focusEntry.entryId || item.entries?.some((entry) => entry.id === focusEntry.entryId)));
       if (view !== void 0) {
-        focusEntryInTurn(view, focusEntry.entryId);
+        focusEntryInTurn(view, focusEntry.entryId, focusEntry.query);
         onFocusHandled(true);
         return;
       }
@@ -34088,6 +34202,16 @@ function ChatView({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-crumb-sep", "aria-hidden": "true", children: "/" })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-title", title, children: title }),
+          /* round9 F7：会话统计。有内容才显，避免空会话一上来就是「0 轮」。 */
+          sessionStats.turns > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-session-stats", children: [
+            `${sessionStats.turns} 轮`,
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-session-stats-sep", "aria-hidden": "true", children: "·" }),
+            `${sessionStats.chars} 字`,
+            sessionStats.duration !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.Fragment, { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-session-stats-sep", "aria-hidden": "true", children: "·" }),
+              sessionStats.duration
+            ] })
+          ] }),
           headerActions
         ] }),
         memberView !== void 0 && onBackToLeader !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "member-focus-bar", role: "status", children: [
@@ -34141,7 +34265,8 @@ function ChatView({
                         turn: streaming && turnId === lastUserId ? conversation.turn : conversation.turnTimings?.[turnId],
                         collapsible: view.plan.hasTurnFold,
                         expanded: turnFoldExpanded(turnFolds, turnId),
-                        onToggle: () => toggleTurn(turnId)
+                        onToggle: () => toggleTurn(turnId),
+                        onCopyTurn: userEntry !== void 0 && !(streaming && turnId === lastUserId) ? () => copyTurn(userEntry.id) : void 0
                       }
                     ),
                     // 轨迹条在 plan.items 之外：回合「过程」折叠时正文隐藏，它仍完整显示
@@ -36646,6 +36771,7 @@ class KeyboardManager {
 }
 class ColorManager {
   static _colorsMapping = /* @__PURE__ */ new Map([["CanvasText", [0, 0, 0]], ["Canvas", [255, 255, 255]]]);
+
   get _colors() {
     const colors = /* @__PURE__ */ new Map([["CanvasText", null], ["Canvas", null]]);
     getColorValues(colors);
@@ -71907,7 +72033,7 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
             const hits = session && Array.isArray(session.hits) ? session.hits : [];
             const hit = hits[0];
             if (hit === void 0 || hit === null) continue;
-            rows.push({ session, hit });
+            rows.push({ session, hit, query: trimmed });
           }
           setContentHits(rows);
         },
@@ -73774,6 +73900,9 @@ function App() {
     setSearchFocus({
       sessionId: hit.sessionId,
       entryId: hit.entryId,
+      /* 命中词随定位请求一并下发：ChatView 定位成功后在那条消息里把关键词
+         高亮（round9 F1）——用户不只想「回到那条」，还想立刻看到「为什么命中」。 */
+      query: typeof hit.query === "string" && hit.query.trim() !== "" ? hit.query.trim() : void 0,
       nonce: `${Date.now()}-${Math.random()}`
     });
     void Promise.resolve(resumeTask(hit.path)).catch((error) => {
@@ -73945,13 +74074,13 @@ function App() {
       keywords: [task.prompt ?? ""],
       run: () => openAutomations()
     }));
-    const hitEntries = paletteContentHits.map(({ session, hit }) => ({
+    const hitEntries = paletteContentHits.map(({ session, hit, query }) => ({
       id: `hit:${session.sessionId}:${hit.entryId ?? "0"}`,
       kind: "hit",
       title: session.title === void 0 || session.title === "" ? "未命名会话" : session.title,
       subtitle: hit.snippet ?? "正文命中",
       keywords: [],
-      run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path })
+      run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path, query })
     }));
     return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...hitEntries];
     // 依赖数组**只能靠人维护**：本文件不在 eslint 的覆盖内（eslint.config.mjs 的
