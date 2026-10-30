@@ -33575,23 +33575,6 @@ function ChatView({
     const block = quoted.split("\n").map((line) => `> ${line}`).join("\n");
     composerRef.current?.fillText(`${block}\n`);
   }, []);
-  /* round9 F5：复制整轮对话。user 提问 + assistant 回答拼成一段纯文本——
-     用户要把「一次问答」贴给同事或存档时，不必再两条各复制一遍。 */
-  const copyTurn = reactExports.useCallback((entryId) => {
-    const view = turnViews.find((candidate) => candidate.userEntry?.id === entryId);
-    if (view === void 0) return;
-    const parts = [];
-    if (view.userEntry !== void 0) parts.push(`【问】${view.userEntry.text ?? ""}`);
-    const answer = view.plan.items.map((item) => {
-      if (item.kind !== "assistant" || item.entry === void 0) return "";
-      return item.entry.text ?? "";
-    }).filter((t) => t !== "").join("\n\n");
-    if (answer !== "") parts.push(`【答】${answer}`);
-    if (parts.length === 0) return;
-    void navigator.clipboard.writeText(parts.join("\n\n")).then(() => {
-      showToast("本轮对话已复制");
-    });
-  }, [turnViews, showToast]);
   reactExports.useEffect(() => {
     if (prefill === void 0) return;
     composerRef.current?.fillText(prefill);
@@ -33773,6 +33756,24 @@ function ChatView({
     const minutes = Math.round(ms / 60000);
     return { turns, chars, duration: minutes >= 1 ? `${minutes} 分钟` : ms > 0 ? "不到 1 分钟" : "" };
   }, [turnViews, conversation.turnTimings]);
+
+  /* round9 F5：复制整轮对话。user 提问 + assistant 回答拼成一段纯文本——
+     用户要把「一次问答」贴给同事或存档时，不必再两条各复制一遍。 */
+  const copyTurn = reactExports.useCallback((entryId) => {
+    const view = turnViews.find((candidate) => candidate.userEntry?.id === entryId);
+    if (view === void 0) return;
+    const parts = [];
+    if (view.userEntry !== void 0) parts.push(`【问】${view.userEntry.text ?? ""}`);
+    const answer = view.plan.items.map((item) => {
+      if (item.kind !== "assistant" || item.entry === void 0) return "";
+      return item.entry.text ?? "";
+    }).filter((t) => t !== "").join("\n\n");
+    if (answer !== "") parts.push(`【答】${answer}`);
+    if (parts.length === 0) return;
+    void navigator.clipboard.writeText(parts.join("\n\n")).then(() => {
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "本轮对话已复制" }] }));
+    });
+  }, [turnViews]);
   const rulerRafRef = reactExports.useRef(0);
   const readPosTimerRef = reactExports.useRef(0);
   reactExports.useLayoutEffect(() => {
@@ -33798,11 +33799,11 @@ function ChatView({
           n.scrollTop = saved;
           setShowJumpToBottom(true);
           followRef.current = false;
-          showToast("已定位到上次阅读的位置");
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: "已定位到上次阅读的位置" }] }));
         }
       });
     });
-  }, [sessionId, showToast]);
+  }, [sessionId]);
   const [pendingAlign, setPendingAlign] = reactExports.useState(void 0);
   const handleStreamScroll = () => {
     const node2 = scrollRef.current;
@@ -34012,6 +34013,21 @@ function ChatView({
         focusEntryInTurn(view, focusEntry.entryId, focusEntry.query);
         onFocusHandled(true);
         return;
+      }
+      /* round9 F1 兜底：⌘K「正文命中」带的 entryId 来自磁盘 jsonl（pi 会话
+         树的 8 位短 id），与渲染层 session-host 的内存 id（"assistant-g1-3"）
+         不是同一套 —— 精确匹配永远落空。改按 query 在正文里模糊定位：第一条
+         含查询词的 assistant entry 即目标。 */
+      if (typeof focusEntry.query === "string" && focusEntry.query !== "") {
+        const needle = focusEntry.query.toLowerCase();
+        const matchesItem = (item) => item.entry !== void 0 && item.entry.role === "assistant" && (item.entry.text ?? "").toLowerCase().includes(needle);
+        const fuzzyView = turnViews.find((candidate) => candidate.plan.items.some(matchesItem));
+        const fuzzyItem = fuzzyView === void 0 ? void 0 : fuzzyView.plan.items.find(matchesItem);
+        if (fuzzyView !== void 0 && fuzzyItem !== void 0 && fuzzyItem.entry !== void 0) {
+          focusEntryInTurn(fuzzyView, fuzzyItem.entry.id, focusEntry.query);
+          onFocusHandled(true);
+          return;
+        }
       }
       attempts += 1;
       if (attempts >= 20) {
@@ -72117,6 +72133,7 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
     }
     const seq = hitSeqRef.current + 1;
     hitSeqRef.current = seq;
+    window.__hitGate = { open, len: trimmed.length };
     const timer = window.setTimeout(() => {
       void window.kami.searchSessions(trimmed, { limit: 5, hitsPerSession: 1 }).then(
         (result) => {
@@ -73418,8 +73435,12 @@ function App() {
     // 全局 toast 通道（#288）：非 App 作用域的组件（如 StatsView）报错误用。
     // detail 形如 { type: "error" | "success" | "info", text }，缺省 info。
     const onGlobalToast = (event) => {
-      const detail = event.detail;
-      if (detail === void 0 || typeof detail.text !== "string") return;
+      /* 形状兼容：仓库里既有裸对象 {type,text}（StatsView 时代）也有
+         [ {type,text} ]（round9 起的部分派发点照抄了 Toast 的 messages 数组
+         形状）。消费端统一剥一层，比要求 7 个派发点记同一形状可靠。 */
+      const raw = event.detail;
+      const detail = Array.isArray(raw) ? raw[0] : raw;
+      if (detail === void 0 || detail === null || typeof detail.text !== "string") return;
       showToast(detail.text, detail.type === "error" || detail.type === "success" ? detail.type : "info");
     };
     window.addEventListener("zw:palette-open", openPalette);
@@ -74101,6 +74122,7 @@ function App() {
    * 条目构造（含 Enter 分派）收在 entries 组装里，跳回原消息复用 openSearchHit。 */
   const [paletteContentHits, setPaletteContentHits] = reactExports.useState([]);
   const handlePaletteSearchHits = reactExports.useCallback((rows) => {
+    window.__hitsRows = rows.map((r) => r.hit?.snippet?.slice(0, 20));
     setPaletteContentHits((current) => (current.length === 0 && rows.length === 0 ? current : rows));
   }, []);
   const paletteEntries = reactExports.useMemo(() => {
