@@ -16562,3 +16562,104 @@ select:focus-visible,
 .running-strip-text {
 	white-space: nowrap;
 }
+
+/* ── §26 第九轮十连（#302） ─────────────────────────────────────── */
+/* F1 会话内命中高亮：定位的那条消息里，命中的词短暂点亮。 */
+mark.search-hit {
+	background: color-mix(in srgb, var(--accent) 22%, transparent);
+	color: inherit;
+	border-radius: 3px;
+	padding: 0 1px;
+	box-shadow: inset 0 -1.5px 0 color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* F4 代码块语言徽标：语言名后跟行数，一眼知道这段有多长。 */
+.code-block-lines {
+	margin-left: var(--space-1);
+	padding: 0 5px;
+	border-radius: 999px;
+	font-size: 10px;
+	line-height: 16px;
+	color: var(--text-secondary);
+	background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+
+/* F5 复制整轮：TurnHeader 前缀小图标，hover 才显（不与折叠箭头抢注意力）。 */
+.turn-copy-turn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	margin-right: var(--space-1);
+	border-radius: var(--radius-sm);
+	color: var(--text-faint);
+	background: transparent;
+	border: none;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity var(--dur-fast) var(--ease-out);
+}
+.turn-group:hover .turn-copy-turn,
+.turn-copy-turn:focus-visible {
+	opacity: 1;
+}
+.turn-copy-turn:hover {
+	color: var(--accent);
+	background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* F7 会话统计：标题右侧的「N 轮 · N 字 · N 分钟」，弱化、不抢标题。 */
+.chat-session-stats {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	flex-shrink: 0;
+	margin-left: var(--space-2);
+	font-size: 11px;
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+.chat-session-stats-sep {
+	opacity: 0.6;
+}
+
+/* F3 表格增强：宽表横向可滚（wrapper 由 .markdown 直接给 table 套不行——
+   table 有自己的圆角边框，改成给 .markdown 里紧跟 table 的 div 无侵入方案：
+   直接让 table 自身 max-width 100% + 外层 .markdown 允许横向溢出并配 sticky 阴影提示）。 */
+.markdown .table-scroll {
+	overflow-x: auto;
+	margin: var(--space-3) 0;
+}
+.markdown .table-scroll table {
+	margin: 0;
+	min-width: 480px;
+}
+/* 斑马纹：偶数行淡一档底色，长表逐行好读。 */
+.markdown tbody tr:nth-child(even) td {
+	background: color-mix(in srgb, var(--text) 3%, transparent);
+}
+/* hover 行高亮：桌面端快速对行。 */
+.markdown tbody tr {
+	transition: background var(--dur-fast) var(--ease-out);
+}
+.markdown tbody tr:hover td {
+	background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+/* round9 F9：夜间自动柔化。22:00–6:00 且亮色主题时，画布极光降到 55% 亮度。
+   开关由渲染层在 <html> 上写 data-night-dim="on|off"（缺省 on；设置→个性化可关）。
+   只动亮色块 —— 暗色主题本身已是低亮度，不需要再柔化。 */
+html[data-night-dim="on"]:not([data-theme="dark"]) .app > * {
+	/* 画布底图整体降档：极光层与 canvas-floor 同源，这里用 filter 压亮度最省事
+	   且不影响前景对比度（只作用于背景图层容器）。 */
+	filter: brightness(0.96) saturate(0.82);
+}
+html[data-night-dim="on"]:not([data-theme="dark"]) .app::before {
+	opacity: 0.55;
+}
+@media (prefers-reduced-motion: reduce) {
+	html[data-night-dim="on"]:not([data-theme="dark"]) .app::before {
+		transition: none;
+	}
+}

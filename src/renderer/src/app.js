@@ -30818,7 +30818,10 @@ function CodeBlockCard({ children }) {
   const foldable = lineCount > 18;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block", "data-folded": foldable && !expanded ? "true" : "false", "data-lines": lineCount, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-head", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lang", children: language }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "code-block-lang", children: [
+        language,
+        lineCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lines", children: `${lineCount} 行` })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -30914,6 +30917,8 @@ const Markdown = React.memo(function Markdown2({
         // 只覆盖 pre（围栏块）成行卡片；行内 code 走下面的 code 覆盖。
         pre: CodeBlockCard,
         code: renderCode,
+        // round9 F3：宽表横向可滚 —— 表格套一层 .table-scroll，窄窗口不再挤爆版心。
+        table: ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "table-scroll", children: /* @__PURE__ */ jsxRuntimeExports.jsx("table", { children }) }),
         // 链接一律交给主进程白名单（window.open → openWindowHandler → openExternal）。
         a: ({ href, children }) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "a",
@@ -32845,6 +32850,8 @@ function AssistantActions({
   onExecutePlan,
   // #290 F9：会话路径 + 条目 id，两者齐备时工具条出现「导出为图片」。
   exportCard,
+  // round9 F6：把这条回答作为引用填进输入框（「接着上面说」）。齐备才出现。
+  onQuote,
 
   // 「留为会话」一类**列级**动作挂进这一行的领衔槽位（对比屏专用；文字动作在前、
   // 图标动作在后的次序与「执行计划」同型）。由调用方传节点，聊天页不传，行为不变。
@@ -32878,6 +32885,17 @@ function AssistantActions({
           });
         },
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconImage, { size: 16 })
+      }
+    ),
+    onQuote !== void 0 && copyable && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: "bar-btn",
+        "aria-label": "引用回复",
+        title: "把这条回答作为引用填进输入框，接着它说",
+        onClick: () => onQuote(text2),
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCornerUpLeft, { size: 16 })
       }
     ),
     showExecutePlan && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn bar-btn-text", onClick: onExecutePlan, children: "执行计划" }),
@@ -33394,7 +33412,8 @@ function TurnHeader({
   assistantName,
   collapsible,
   expanded,
-  onToggle
+  onToggle,
+  onCopyTurn
 }) {
   const [now, setNow] = reactExports.useState(() => Date.now());
   reactExports.useEffect(() => {
@@ -33408,7 +33427,41 @@ function TurnHeader({
   } else if (turn !== void 0 && turn.endedAt !== void 0) {
     duration = turn.cancelled === true ? `已取消 ${formatDuration$1(turn.endedAt - turn.startedAt)}` : `已完成 ${formatDuration$1(turn.endedAt - turn.startedAt)}`;
   }
+  /* round9 F5：复制整轮。折叠分支的 header 本体是 <button>，HTML 不许按钮嵌按钮
+     —— 所以那里用 span role=button 并挡住冒泡，避免点了复制顺手把过程折叠了。 */
+  const copyTurnControl = onCopyTurn === void 0 ? null : collapsible ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "span",
+    {
+      role: "button",
+      tabIndex: 0,
+      className: "turn-copy-turn",
+      "aria-label": "复制本轮对话",
+      title: "复制本轮对话",
+      onClick: (e) => {
+        e.stopPropagation();
+        onCopyTurn();
+      },
+      onKeyDown: (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.stopPropagation();
+          onCopyTurn();
+        }
+      },
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 12 })
+    }
+  ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "button",
+    {
+      type: "button",
+      className: "turn-copy-turn",
+      "aria-label": "复制本轮对话",
+      title: "复制本轮对话",
+      onClick: onCopyTurn,
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 12 })
+    }
+  );
   const body = /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    copyTurnControl,
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "turn-avatar", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("img", { className: "turn-avatar-img", src: APP_LOGO, alt: "" }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "turn-meta", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "turn-agent", children: assistantName }),
@@ -33682,10 +33735,74 @@ function ChatView({
   const [showJumpToBottom, setShowJumpToBottom] = reactExports.useState(false);
   /* #290 F8：右缘时间线标尺的滚动进度（void 0 = 隐藏）；rAF 节流句柄。 */
   const [rulerPct, setRulerPct] = reactExports.useState(void 0);
+  /* round9 F7：会话统计。轮数=以 user 开头的视图数；字数=user+assistant 正文；
+     时长=各轮 endedAt-startedAt 之和（流式中的轮不计入总和，避免来回跳）。 */
+  const sessionStats = reactExports.useMemo(() => {
+    let turns = 0;
+    let chars = 0;
+    let ms = 0;
+    for (const view of turnViews) {
+      if (view.startsWithUser) turns += 1;
+      if (view.userEntry !== void 0) chars += (view.userEntry.text ?? "").length;
+      for (const item of view.plan.items) {
+        if (item.kind === "assistant" && item.entry !== void 0) chars += (item.entry.text ?? "").length;
+      }
+      const turnId = view.turnId;
+      const timing = turnId === void 0 ? void 0 : conversation.turnTimings?.[turnId];
+      if (timing !== void 0 && timing.startedAt !== void 0 && timing.endedAt !== void 0) {
+        ms += Math.max(0, timing.endedAt - timing.startedAt);
+      }
+    }
+    const minutes = Math.round(ms / 60000);
+    return { turns, chars, duration: minutes >= 1 ? `${minutes} 分钟` : ms > 0 ? "不到 1 分钟" : "" };
+  }, [turnViews, conversation.turnTimings]);
+
+  /* round9 F5：复制整轮对话。user 提问 + assistant 回答拼成一段纯文本——
+     用户要把「一次问答」贴给同事或存档时，不必再两条各复制一遍。 */
+  const copyTurn = reactExports.useCallback((entryId) => {
+    const view = turnViews.find((candidate) => candidate.userEntry?.id === entryId);
+    if (view === void 0) return;
+    const parts = [];
+    if (view.userEntry !== void 0) parts.push(`【问】${view.userEntry.text ?? ""}`);
+    const answer = view.plan.items.map((item) => {
+      if (item.kind !== "assistant" || item.entry === void 0) return "";
+      return item.entry.text ?? "";
+    }).filter((t) => t !== "").join("\n\n");
+    if (answer !== "") parts.push(`【答】${answer}`);
+    if (parts.length === 0) return;
+    void navigator.clipboard.writeText(parts.join("\n\n")).then(() => {
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "本轮对话已复制" }] }));
+    });
+  }, [turnViews]);
   const rulerRafRef = reactExports.useRef(0);
+  const readPosTimerRef = reactExports.useRef(0);
   reactExports.useLayoutEffect(() => {
     followRef.current = true;
     setShowJumpToBottom(false);
+    /* round9 F2：重开会话恢复上次读到的位置。rAF 两帧等首屏渲染完；
+       位置过旧（会话已更新到接近底部）就不打扰 —— 那种情况用户要的是新消息。 */
+    const node2 = scrollRef.current;
+    if (node2 === null) return;
+    let saved = 0;
+    try {
+      saved = Number(window.localStorage.getItem(`zw:readpos:${sessionId}`) ?? "0") || 0;
+    } catch {
+      saved = 0;
+    }
+    if (saved <= 0) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const n = scrollRef.current;
+        if (n === null) return;
+        const maxScroll = n.scrollHeight - n.clientHeight;
+        if (saved < maxScroll - 240) {
+          n.scrollTop = saved;
+          setShowJumpToBottom(true);
+          followRef.current = false;
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: "已定位到上次阅读的位置" }] }));
+        }
+      });
+    });
   }, [sessionId]);
   const [pendingAlign, setPendingAlign] = reactExports.useState(void 0);
   const handleStreamScroll = () => {
@@ -33694,6 +33811,19 @@ function ChatView({
     const atBottom = node2.scrollHeight - node2.scrollTop - node2.clientHeight < BOTTOM_THRESHOLD_PX;
     followRef.current = atBottom;
     setShowJumpToBottom(!atBottom);
+    /* round9 F2：阅读进度记忆。800ms 防抖写 localStorage；滚到近底视为读完即清除。
+       key 带会话 id，互不串位；恢复动作在 sessionId 切换的 layout effect 里。 */
+    if (readPosTimerRef.current !== 0) window.clearTimeout(readPosTimerRef.current);
+    const sid = sessionId;
+    const ratio = node2.scrollHeight <= node2.clientHeight ? 1 : node2.scrollTop / (node2.scrollHeight - node2.clientHeight);
+    readPosTimerRef.current = window.setTimeout(() => {
+      try {
+        if (ratio > 0.95) window.localStorage.removeItem(`zw:readpos:${sid}`);
+        else window.localStorage.setItem(`zw:readpos:${sid}`, String(node2.scrollTop));
+      } catch {
+        /* 存储满/隐私模式：进度记忆属增强功能，静默放弃 */
+      }
+    }, 800);
     /* #290 F8 时间线标尺：滚得多（>1.5 屏）才浮现；内容不足 3 屏不出现。
      * 节流用 rAF 标志位，scroll 事件本身高频，直接 setState 会抖。 */
     const range = node2.scrollHeight - node2.clientHeight;
@@ -33709,6 +33839,7 @@ function ChatView({
   };
   reactExports.useEffect(() => () => {
     if (rulerRafRef.current !== 0) cancelAnimationFrame(rulerRafRef.current);
+    if (readPosTimerRef.current !== 0) window.clearTimeout(readPosTimerRef.current);
   }, []);
   const releaseFollowForExpand = () => {
     followRef.current = false;
@@ -33801,7 +33932,7 @@ function ChatView({
   // 轨迹条「点击定位」：目标行可能藏在折叠组里（收起态跳过渲染，见
   // .metafold-body:not(.open) 的注释），先展开再定位，否则滚到的位置是空的。
   // 两帧 rAF 等折叠展开挂载；flash 是一次性动画，animationend 即摘除。
-  const focusEntryInTurn = (view, entryId) => {
+  const focusEntryInTurn = (view, entryId, highlightQuery) => {
     for (const item of view.plan.items) {
       if (item.entries === void 0) continue;
       if (!item.entries.some((e) => e.id === entryId)) continue;
@@ -33817,6 +33948,44 @@ function ChatView({
         void el.offsetWidth;
         el.classList.add("entry-flash");
         el.addEventListener("animationend", () => el.classList.remove("entry-flash"), { once: true });
+        /* round9 F1：把命中词在那条消息里高亮。只查纯文本节点，不碰已有的
+           mark/代码结构；2.5s 后自动摘除 —— 高亮是「指路」，不是永久标记。 */
+        if (typeof highlightQuery === "string" && highlightQuery.length >= 2) {
+          const walk = (node) => {
+            for (const child of [...node.childNodes]) {
+              if (child.nodeType === Node.TEXT_NODE) {
+                const text2 = child.nodeValue ?? "";
+                const lower = text2.toLowerCase();
+                const needle = highlightQuery.toLowerCase();
+                const at = lower.indexOf(needle);
+                if (at < 0) continue;
+                const frag = document.createDocumentFragment();
+                let cursor = 0;
+                let idx = at;
+                let guard = 0;
+                while (idx >= 0 && guard < 20) {
+                  guard += 1;
+                  if (idx > cursor) frag.appendChild(document.createTextNode(text2.slice(cursor, idx)));
+                  const mark = document.createElement("mark");
+                  mark.className = "search-hit";
+                  mark.textContent = text2.slice(idx, idx + needle.length);
+                  frag.appendChild(mark);
+                  cursor = idx + needle.length;
+                  idx = lower.indexOf(needle, cursor);
+                }
+                if (cursor < text2.length) frag.appendChild(document.createTextNode(text2.slice(cursor)));
+                child.replaceWith(frag);
+                window.setTimeout(() => {
+                  el.querySelectorAll("mark.search-hit").forEach((m) => m.replaceWith(document.createTextNode(m.textContent ?? "")));
+                  el.normalize();
+                }, 2500);
+              } else if (child.nodeType === Node.ELEMENT_NODE && !["MARK", "CODE", "PRE", "BUTTON"].includes(child.tagName)) {
+                walk(child);
+              }
+            }
+          };
+          walk(el);
+        }
       });
     });
   };
@@ -33841,9 +34010,24 @@ function ChatView({
       if (focusEntry.sessionId !== void 0 && focusEntry.sessionId !== sessionId) return;
       const view = turnViews.find((candidate) => candidate.plan.items.some((item) => item.entry?.id === focusEntry.entryId || item.entries?.some((entry) => entry.id === focusEntry.entryId)));
       if (view !== void 0) {
-        focusEntryInTurn(view, focusEntry.entryId);
+        focusEntryInTurn(view, focusEntry.entryId, focusEntry.query);
         onFocusHandled(true);
         return;
+      }
+      /* round9 F1 兜底：⌘K「正文命中」带的 entryId 来自磁盘 jsonl（pi 会话
+         树的 8 位短 id），与渲染层 session-host 的内存 id（"assistant-g1-3"）
+         不是同一套 —— 精确匹配永远落空。改按 query 在正文里模糊定位：第一条
+         含查询词的 assistant entry 即目标。 */
+      if (typeof focusEntry.query === "string" && focusEntry.query !== "") {
+        const needle = focusEntry.query.toLowerCase();
+        const matchesItem = (item) => item.entry !== void 0 && item.entry.role === "assistant" && (item.entry.text ?? "").toLowerCase().includes(needle);
+        const fuzzyView = turnViews.find((candidate) => candidate.plan.items.some(matchesItem));
+        const fuzzyItem = fuzzyView === void 0 ? void 0 : fuzzyView.plan.items.find(matchesItem);
+        if (fuzzyView !== void 0 && fuzzyItem !== void 0 && fuzzyItem.entry !== void 0) {
+          focusEntryInTurn(fuzzyView, fuzzyItem.entry.id, focusEntry.query);
+          onFocusHandled(true);
+          return;
+        }
       }
       attempts += 1;
       if (attempts >= 20) {
@@ -33932,6 +34116,11 @@ function ChatView({
           text: entry.text,
           modelId: entry.id === metricsAnchorId ? conversation.state.modelId : void 0,
           exportCard: currentSessionPath != null ? { entryId: entry.id, meta: `${new Date(entry.at ?? Date.now()).toLocaleString("zh-CN")} · ZeroWork` } : void 0,
+          onQuote: (text2) => {
+            const quoted = text2.length > 120 ? text2.slice(0, 120) + "…" : text2;
+            const block = quoted.split("\n").map((line) => `> ${line}`).join("\n");
+            composerRef.current?.fillText(`${block}\n`);
+          },
           showExecutePlan: conversation.state.interactionId === "plan" && !streaming && entry.id === lastEntry?.id,
           onExecutePlan: executePlan,
           showBranch: branchReady && entry.id === metricsAnchorId && retryTarget !== void 0,
@@ -34088,6 +34277,16 @@ function ChatView({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-crumb-sep", "aria-hidden": "true", children: "/" })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-title", title, children: title }),
+          /* round9 F7：会话统计。有内容才显，避免空会话一上来就是「0 轮」。 */
+          sessionStats.turns > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-session-stats", children: [
+            `${sessionStats.turns} 轮`,
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-session-stats-sep", "aria-hidden": "true", children: "·" }),
+            `${sessionStats.chars} 字`,
+            sessionStats.duration !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.Fragment, { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-session-stats-sep", "aria-hidden": "true", children: "·" }),
+              sessionStats.duration
+            ] })
+          ] }),
           headerActions
         ] }),
         memberView !== void 0 && onBackToLeader !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "member-focus-bar", role: "status", children: [
@@ -34141,7 +34340,8 @@ function ChatView({
                         turn: streaming && turnId === lastUserId ? conversation.turn : conversation.turnTimings?.[turnId],
                         collapsible: view.plan.hasTurnFold,
                         expanded: turnFoldExpanded(turnFolds, turnId),
-                        onToggle: () => toggleTurn(turnId)
+                        onToggle: () => toggleTurn(turnId),
+                        onCopyTurn: userEntry !== void 0 && !(streaming && turnId === lastUserId) ? () => copyTurn(userEntry.id) : void 0
                       }
                     ),
                     // 轨迹条在 plan.items 之外：回合「过程」折叠时正文隐藏，它仍完整显示
@@ -36646,6 +36846,7 @@ class KeyboardManager {
 }
 class ColorManager {
   static _colorsMapping = /* @__PURE__ */ new Map([["CanvasText", [0, 0, 0]], ["Canvas", [255, 255, 255]]]);
+
   get _colors() {
     const colors = /* @__PURE__ */ new Map([["CanvasText", null], ["Canvas", null]]);
     getColorValues(colors);
@@ -64696,8 +64897,43 @@ function BehaviorSection({
   info: info2,
   onToggle
 }) {
+  /* round9 F9：夜间自动柔化开关。偏好存 localStorage（zw:night-dim），与
+     求值器同 key；改后立即广播重估 —— 不走 daemon，纯本机显示习惯。 */
+  const [nightDim, setNightDim] = reactExports.useState(() => {
+    try {
+      return window.localStorage.getItem("zw:night-dim") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const toggleNightDim = (next) => {
+    setNightDim(next);
+    try {
+      window.localStorage.setItem("zw:night-dim", next ? "on" : "off");
+    } catch {
+      /* 忽略存储异常 */
+    }
+    if (typeof applyNightDim === "function") applyNightDim();
+  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "对话体验" }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "夜间自动柔化" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "22 点到清晨 6 点，画布极光自动降到柔和亮度" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "mcp-switch", title: nightDim ? "点击停用" : "点击启用", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "checkbox",
+            checked: nightDim,
+            "aria-label": "夜间自动柔化",
+            onChange: (e) => toggleNightDim(e.currentTarget.checked)
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-thumb" }) })
+      ] })
+    ] }) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "加载欢迎语" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "会话加载较慢时，用一句问候陪你等待" }),
@@ -71897,6 +72133,7 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
     }
     const seq = hitSeqRef.current + 1;
     hitSeqRef.current = seq;
+    window.__hitGate = { open, len: trimmed.length };
     const timer = window.setTimeout(() => {
       void window.kami.searchSessions(trimmed, { limit: 5, hitsPerSession: 1 }).then(
         (result) => {
@@ -71907,7 +72144,7 @@ function CommandPalette({ open, onClose, entries, idleEntries, memory, onRun, on
             const hits = session && Array.isArray(session.hits) ? session.hits : [];
             const hit = hits[0];
             if (hit === void 0 || hit === null) continue;
-            rows.push({ session, hit });
+            rows.push({ session, hit, query: trimmed });
           }
           setContentHits(rows);
         },
@@ -73198,8 +73435,12 @@ function App() {
     // 全局 toast 通道（#288）：非 App 作用域的组件（如 StatsView）报错误用。
     // detail 形如 { type: "error" | "success" | "info", text }，缺省 info。
     const onGlobalToast = (event) => {
-      const detail = event.detail;
-      if (detail === void 0 || typeof detail.text !== "string") return;
+      /* 形状兼容：仓库里既有裸对象 {type,text}（StatsView 时代）也有
+         [ {type,text} ]（round9 起的部分派发点照抄了 Toast 的 messages 数组
+         形状）。消费端统一剥一层，比要求 7 个派发点记同一形状可靠。 */
+      const raw = event.detail;
+      const detail = Array.isArray(raw) ? raw[0] : raw;
+      if (detail === void 0 || detail === null || typeof detail.text !== "string") return;
       showToast(detail.text, detail.type === "error" || detail.type === "success" ? detail.type : "info");
     };
     window.addEventListener("zw:palette-open", openPalette);
@@ -73774,6 +74015,9 @@ function App() {
     setSearchFocus({
       sessionId: hit.sessionId,
       entryId: hit.entryId,
+      /* 命中词随定位请求一并下发：ChatView 定位成功后在那条消息里把关键词
+         高亮（round9 F1）——用户不只想「回到那条」，还想立刻看到「为什么命中」。 */
+      query: typeof hit.query === "string" && hit.query.trim() !== "" ? hit.query.trim() : void 0,
       nonce: `${Date.now()}-${Math.random()}`
     });
     void Promise.resolve(resumeTask(hit.path)).catch((error) => {
@@ -73878,6 +74122,7 @@ function App() {
    * 条目构造（含 Enter 分派）收在 entries 组装里，跳回原消息复用 openSearchHit。 */
   const [paletteContentHits, setPaletteContentHits] = reactExports.useState([]);
   const handlePaletteSearchHits = reactExports.useCallback((rows) => {
+    window.__hitsRows = rows.map((r) => r.hit?.snippet?.slice(0, 20));
     setPaletteContentHits((current) => (current.length === 0 && rows.length === 0 ? current : rows));
   }, []);
   const paletteEntries = reactExports.useMemo(() => {
@@ -73945,13 +74190,13 @@ function App() {
       keywords: [task.prompt ?? ""],
       run: () => openAutomations()
     }));
-    const hitEntries = paletteContentHits.map(({ session, hit }) => ({
+    const hitEntries = paletteContentHits.map(({ session, hit, query }) => ({
       id: `hit:${session.sessionId}:${hit.entryId ?? "0"}`,
       kind: "hit",
       title: session.title === void 0 || session.title === "" ? "未命名会话" : session.title,
       subtitle: hit.snippet ?? "正文命中",
       keywords: [],
-      run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path })
+      run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path, query })
     }));
     return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...hitEntries];
     // 依赖数组**只能靠人维护**：本文件不在 eslint 的覆盖内（eslint.config.mjs 的
@@ -74559,6 +74804,25 @@ function applyTheme(pref) {
   themePreference = pref;
   document.documentElement.setAttribute("data-theme", resolveTheme(pref));
 }
+/* round9 F9：夜间自动柔化。22:00–6:00 给 <html> 挂 data-night-dim="on"，
+   画布极光降到 55%（CSS 段 §26）。用户可在设置→个性化里关掉；关掉后属性
+   直接写 "off"，CSS 永不生效 —— 偏好与求值分离，改偏好不用改求值器。 */
+function applyNightDim() {
+  let enabled = true;
+  try {
+    enabled = window.localStorage.getItem("zw:night-dim") !== "off";
+  } catch {
+    enabled = true;
+  }
+  const hour = new Date().getHours();
+  const night = hour >= 22 || hour < 6;
+  document.documentElement.setAttribute("data-night-dim", enabled && night ? "on" : "off");
+}
+function initNightDim() {
+  applyNightDim();
+  window.setInterval(applyNightDim, 60 * 1000);
+  window.addEventListener("zw:theme-changed", applyNightDim);
+}
 function initTheme() {
   const stored = localStorage.getItem(THEME_STORAGE_KEY);
   applyTheme(THEME_PREFS.includes(stored) ? stored : "light");
@@ -74591,7 +74855,7 @@ function setThemePreference(pref) {
   window.dispatchEvent(new CustomEvent("zw:theme-changed"));
   return window.kami.setThemePreference(pref);
 }
-initTheme();
+initNightDim();initTheme();
 initPalette();
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root 不存在");
