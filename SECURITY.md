@@ -203,17 +203,38 @@ Dependabot 告警与安全更新已启用；版本更新只覆盖**仓库根**�
 
 **但上面这套机制有一处结构性覆盖不到的地方**，见下一节。
 
-### 依赖告警的分级处置（2026-10-06 复核）
+### 依赖告警的分级处置（2026-11-01 复核）
 
 Dependabot 的**条数不是风险量级** —— 同一批告警里，有的随包发给用户、有的只在你本机
 构建时存在、有的根本不是本工程的源码。所以这里按**归属与影响面**分四类，写清每类的动作。
 
-| 类别 | 当前条数 | 处置 |
+| 类别 | 当前条数（2026-11-01） | 处置 |
 | --- | --- | --- |
-| **随包原样分发的第三方模板**（`resources/**` 的三个 manifest + 一个 Python 引擎） | **76** | **不走升级这条路**：那是随包的第三方内容，不参与本仓库的 lint 与测试，改它们的 lockfile 只会让副本与上游不一致。登记在 `THIRD_PARTY_NOTICES.md`，告警按本节的理由逐条判定并关闭 |
-| **本仓库的开发依赖**（vitest / electron-builder / monaco / echarts / pptx-preview 等） | 25（全量 `npm audit`） | **交给 Dependabot 例行升级**。它们的修复跨主版本（vitest 4.1→5、electron-builder 26.17→26.5 等），要单独评估，不塞进某个功能 PR。2026-10-06 已跑过一轮 `npm audit fix`（非破坏性：28 → 26） |
-| **无 npm 修复版的**（`xlsx`） | 1 | **已处置**：随包那份 vendored bundle 升到 0.20.3（见下节与 #61）。npm 上的 `xlsx` 停在 0.18.5，只用于**测试夹具**（`tests/e2e/preview-renderers.mjs` 造 xlsx），不随包 |
+| **随包原样分发的第三方模板**（`resources/**` 的三个 manifest + 一个 Python 引擎） | **39**（其中 `docx-engine` 的 Pillow 占 35） | **不走升级这条路**：那是随包的第三方内容，不参与本仓库的 lint 与测试，改它们的 lockfile 只会让副本与上游不一致。登记在 `THIRD_PARTY_NOTICES.md`，告警按本节的理由逐条判定并关闭 |
+| **本仓库的依赖**（仓库根 `package-lock.json`） | **36**（`npm audit` 口径：4 low / 31 moderate / **1 high / 0 critical**） | **交给 Dependabot 例行升级**。2026-11-01 这一轮把 **critical 清零**：`npm audit fix`（electron / zod / body-parser）+ 两处定向 `overrides`（见下）。剩下的 1 个 high 是 dev-only 的 `xlsx`，见下一行 |
+| **无 npm 修复版的**（`xlsx`） | **1（dev-only，不随包）** | npm 上的 `xlsx` 停在 0.18.5，唯一用途是 e2e 夹具：`tests/e2e/preview-renderers.mjs` 的 `writeXlsx()` 用它**现场生成真实 xlsx**。2026-11-01 曾按「代码里没有 import」删除它，CI 的 `preview-renderers` 以 `MODULE_NOT_FOUND` 立刻打回 —— 它走的是 `createRequire(import.meta.url)` 得到的 `require_` 变量，**按包名 grep 很容易漏掉**。已恢复；随包那份 vendored bundle 仍按 #61 升到 0.20.3 |
 | **审计工具看不见的**（`src/renderer/src/vendor-*.js`） | 0（原 2 个 high） | **已处置**：升级 + 静态门禁 + 每周 OSV 巡检（见下节） |
+
+**2026-11-01 的两处定向 override（各自带理由）**
+
+| 包 | 此前 | 现在 | 为什么不靠升级上游 |
+| --- | --- | --- | --- |
+| `dompurify` | 3.4.15（**1 critical**） | 3.4.17 | 它来自 `monaco-editor@0.57.0`，而 0.57.0 **已经是最新版**、仍把 dompurify 钉在 3.4.15。修复在 dompurify 3.4.17（patch 级），只能由本仓库直接换 |
+| `undici`（pi 内核子树） | 8.10.2（**1 high**） | 8.12.3 | `pi-coding-agent@1.3.0` 把 undici **精确锁定**在 8.10.2（无 `^`），npm 无法 dedupe 到根依赖的 8.12.3。受影响范围是 `8.0.0 - 8.12.1`；同为 8.x patch，用定向 override 收敛 |
+
+> 与下面 `brace-expansion` 的教训对照：那次**刻意不加** override，是因为修复版只发 ESM，
+> 加了会真的打断构建。这次两处都是**同一大版本内的 patch 级**，不存在模块格式差异 ——
+> 属于「上游把一个可安全抬高的版本钉死了」，加 override 是正确处置，不是掩盖问题。
+
+**仍未处置、需要一次真实验证的一项：`resources/docx-engine` 的 Pillow**
+
+`pyproject.toml` 声明 `Pillow>=10.3,<11`，对应 **3 critical + 20 余条 high**。修复版本是
+**13.0.0**，跨越三个大版本；而 `resources/**` 不参与本仓库的 lint / 测试，
+升级后没有任何测试能验证 `html-for-docx` / `python-docx` 与 Pillow 13 的兼容性。
+
+因此本轮**不动它**，按既有原则登记并在
+[Issue #308](https://github.com/liang-zhenxiang/zerowork/issues/308) 里保留待办：
+需要先跑一次真实的 docx 生成/转换验证，再决定是否抬约束。
 
 **随包那一半的高危：`brace-expansion`（已由上游修复，2026-10-12）**
 
