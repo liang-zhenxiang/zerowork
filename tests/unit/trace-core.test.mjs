@@ -79,17 +79,19 @@ describe("buildTurnTrace：分类表", () => {
 });
 
 describe("buildTurnTrace：相邻合并与顺序", () => {
-	it("相邻同类合并并计数；隔开的同类不跨段合并（保序）", () => {
+	it("同 kind 全并并计数（#310：隔开的同类也跨段合并）", () => {
 		const trace = buildTurnTrace([
 			tool("1", "read"),
 			tool("2", "read"),
 			tool("3", "write"),
 			tool("4", "read")
 		]);
-		expect(trace.segments.map((s) => s.kind)).toEqual(["read", "write", "read"]);
-		expect(trace.segments[0].count).toBe(2);
-		expect(trace.segments[0].entryIds).toEqual(["1", "2"]);
-		expect(trace.segments[2].entryIds).toEqual(["4"]);
+		// 旧契约「隔开的同类不跨段合并」在长会话里会铺出几十个 chip（用户实测
+		// 49 步铺满三行，#310）；新契约按 kind 聚合为一段，计数真实累加。
+		expect(trace.segments.map((s) => s.kind)).toEqual(["read", "write"]);
+		expect(trace.segments[0].count).toBe(3);
+		expect(trace.segments[0].entryIds).toEqual(["1", "2", "4"]);
+		expect(trace.segments[1].entryIds).toEqual(["3"]);
 		expect(trace.totals.calls).toBe(4);
 	});
 
@@ -110,7 +112,7 @@ describe("buildTurnTrace：状态聚合", () => {
 		expect(trace.segments[0].status).toBe("ok");
 	});
 
-	it("含 error 的同类串拆出独立 bad 段（失败不被成功稀释）", () => {
+	it("bad 按 kind 独立聚合（失败不被成功稀释，#310 同 kind 全并下仍保持）", () => {
 		const trace = buildTurnTrace([
 			tool("1", "read", "ok"),
 			tool("2", "read", "error"),
@@ -118,9 +120,10 @@ describe("buildTurnTrace：状态聚合", () => {
 		]);
 		expect(trace.segments.map((s) => [s.kind, s.status])).toEqual([
 			["read", "ok"],
-			["read", "bad"],
-			["read", "ok"]
+			["read", "bad"]
 		]);
+		expect(trace.segments[0].count).toBe(2);
+		expect(trace.segments[1].count).toBe(1);
 		expect(trace.totals.bad).toBe(1);
 	});
 
