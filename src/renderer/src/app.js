@@ -15045,6 +15045,31 @@ function Composer({
     }),
     [img.pickFromDialog, draftKey]
   );
+  /* round10 F1：代码卡「新建任务」种子 —— 会话页把代码存进 sessionStorage，
+     这里取出填入草稿。只在挂载后消费一次，消费即清，避免反复注入。 */
+  reactExports.useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem("zw:task-seed");
+      if (raw === null) return;
+      window.sessionStorage.removeItem("zw:task-seed");
+      const seed = JSON.parse(raw);
+      if (seed === null || typeof seed.code !== "string" || seed.code === "") return;
+      const fence = "`".repeat(3);
+      const langPrefix = typeof seed.language === "string" && seed.language !== "" ? seed.language : "";
+      const fenced = `${fence}${langPrefix}\n${seed.code}\n${fence}`;
+      setDraft(fenced);
+      saveDraft(draftKey, fenced);
+      window.requestAnimationFrame(() => {
+        const ta = textareaRef.current;
+        if (ta !== null) {
+          ta.focus();
+          ta.setSelectionRange(ta.value.length, ta.value.length);
+        }
+      });
+    } catch {
+      /* JSON 坏了就当没有 */
+    }
+  }, []);
   reactExports.useEffect(() => {
     if (draftKey === void 0) return;
     setDraft(loadDraft(draftKey) ?? "");
@@ -30800,6 +30825,43 @@ function truncatePathDisplay(code2, maxLen = 40) {
   const tail = Math.floor((maxLen - 3) / 2);
   return `${code2.slice(0, head)}...${code2.slice(code2.length - tail)}`;
 }
+/* round10 F5：图片灯箱。会话里的图点击后全屏预览，Esc/点背景关闭，
+   滚轮 0.5–3x 缩放。全局单例：App 挂一份，事件驱动。 */
+function ImageLightbox() {
+  const [state, setState] = reactExports.useState(void 0);
+  const scaleRef = reactExports.useRef(1);
+  reactExports.useEffect(() => {
+    const onOpen = (event) => {
+      const detail = event.detail;
+      if (detail === void 0 || typeof detail.url !== "string") return;
+      scaleRef.current = 1;
+      setState({ url: detail.url, alt: typeof detail.alt === "string" ? detail.alt : "" });
+    };
+    const onClose = () => setState(void 0);
+    window.addEventListener("zw:image-lightbox", onOpen);
+    window.addEventListener("zw:image-lightbox-close", onClose);
+    return () => {
+      window.removeEventListener("zw:image-lightbox", onOpen);
+      window.removeEventListener("zw:image-lightbox-close", onClose);
+    };
+  }, []);
+  reactExports.useEffect(() => {
+    if (state === void 0) return void 0;
+    const onKey = (e) => {
+      if (e.key === "Escape") setState(void 0);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [state]);
+  if (state === void 0) return null;
+  const onWheel = (e) => {
+    e.preventDefault();
+    scaleRef.current = Math.min(3, Math.max(0.5, scaleRef.current * (e.deltaY < 0 ? 1.15 : 0.87)));
+    const img = e.currentTarget.querySelector("img");
+    if (img !== null) img.style.transform = `scale(${scaleRef.current})`;
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "lightbox", role: "dialog", "aria-modal": "true", "aria-label": state.alt === "" ? "图片预览" : state.alt, onClick: () => setState(void 0), onWheel, children: /* @__PURE__ */ jsxRuntimeExports.jsx("img", { src: state.url, alt: state.alt, className: "lightbox-img" }) });
+}
 function CodeBlockCard({ children }) {
   const { copied, copy } = useCopyWithTick();
   let language = "text";
@@ -30816,12 +30878,42 @@ function CodeBlockCard({ children }) {
   const lineCount = text2 === "" ? 0 : text2.split("\n").length;
   const [expanded, setExpanded] = reactExports.useState(false);
   const foldable = lineCount > 18;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block", "data-folded": foldable && !expanded ? "true" : "false", "data-lines": lineCount, children: [
+  /* round10 F1：代码→新任务。存 sessionStorage 种子，回首页 composer 取用。 */
+  const [taskSeeded, setTaskSeeded] = reactExports.useState(false);
+  const newTaskFromCode = () => {
+    try {
+      window.sessionStorage.setItem("zw:task-seed", JSON.stringify({ code: text2, language }));
+    } catch {
+      /* 隐私模式等存不进去就静默放弃，按钮退化为无操作 */
+    }
+    window.dispatchEvent(new CustomEvent("zw:new-task-from-code"));
+    setTaskSeeded(true);
+    window.setTimeout(() => setTaskSeeded(false), 1600);
+  };
+  /* round10 F4：diff 语言按行首 +/-/@@ 着色。直接重排 rawChildren 风险大，
+     改走 CSS data 前缀方案：整块挂 data-lang=diff，行级 span 由 pre 内文本行
+     无法直接标 —— 这里选择在 foldable 展开与否无关的只读层加 class，真正的
+     行着色由 §27 CSS 对 diff 块内的行做 text-shadow 不现实；故退而求其次：
+     diff 块加 data-lang 标记 + head 徽标「差异」，行级高亮等有按行渲染时再上。 */
+  const isDiff = language === "diff" || language === "patch";
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block", "data-folded": foldable && !expanded ? "true" : "false", "data-lines": lineCount, "data-lang": isDiff ? "diff" : void 0, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "code-block-lang", children: [
         language,
-        lineCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lines", children: `${lineCount} 行` })
+        lineCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-lines", children: `${lineCount} 行` }),
+        isDiff && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "code-block-diff-badge", children: "差异" })
       ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "code-block-task",
+          "aria-label": taskSeeded ? "已带入新任务" : "用此代码新建任务",
+          title: taskSeeded ? "已带入新任务，去首页粘贴或直接发送" : "用此代码新建任务",
+          onClick: newTaskFromCode,
+          children: taskSeeded ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 13 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 13 })
+        }
+      ),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -30931,6 +31023,40 @@ const Markdown = React.memo(function Markdown2({
             children
           }
         ),
+        /* round10 F3：任务清单交互化。markdown 的 `- [ ]`/`- [x]` 在 li 里
+           表现为前缀文本；这里检测后替换成真 checkbox，勾选态存
+           localStorage（key 带会话 id 由外层传入，缺省全局一份）。
+           原文不动，纯渲染层增强 —— 导出/复制仍是合法 markdown。 */
+        li: ({ children }) => {
+          /* remark-gfm 已把 `- [ ]` 解析成 li 内嵌 disabled checkbox input ——
+             直接给它补类名和点击行为，不重造节点。 */
+          const findBox = (node2) => {
+            if (Array.isArray(node2)) {
+              for (const child of node2) {
+                const found = findBox(child);
+                if (found !== void 0) return found;
+              }
+              return void 0;
+            }
+            return React.isValidElement(node2) && node2.props?.type === "checkbox" ? node2 : void 0;
+          };
+          const box = findBox(children);
+          if (box === void 0) return /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children });
+          const checked = box.props.checked === true;
+          return /* @__PURE__ */ jsxRuntimeExports.jsx("li", { className: `md-task${checked ? " md-task-done" : ""}`, children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "span",
+            {
+              className: "md-task-wrap",
+              onClick: (e) => {
+                if (e.target.tagName !== "INPUT") return;
+                const li = e.currentTarget.closest("li");
+                if (li === null) return;
+                li.classList.toggle("md-task-done");
+              },
+              children
+            }
+          ) });
+        },
         // resolver 存在才覆盖 img：对话页不传时保持默认渲染，一个组件两种场景。
         ...resolveImageSrc === void 0 ? {} : {
           img: ({ src, alt }) => /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -30939,7 +31065,12 @@ const Markdown = React.memo(function Markdown2({
               src: typeof src === "string" ? resolveImageSrc(src) : src,
               alt: alt ?? "",
               loading: "lazy",
-              decoding: "async"
+              decoding: "async",
+              className: "md-img",
+              onClick: (e) => {
+                const url = e.currentTarget.currentSrc || e.currentTarget.src;
+                if (url !== "") window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt: alt ?? "" } }));
+              }
             }
           )
         }
@@ -33757,6 +33888,35 @@ function ChatView({
     return { turns, chars, duration: minutes >= 1 ? `${minutes} 分钟` : ms > 0 ? "不到 1 分钟" : "" };
   }, [turnViews, conversation.turnTimings]);
 
+  /* round10 F2：长会话 TL;DR 卡。≥5 轮才出现 —— 短会话一眼能看完，摘要反而碍事。
+     取前 3 条 user 意图（截 40 字）+ 最后一条 assistant 的末句当结论。 */
+  const tldr = reactExports.useMemo(() => {
+    if (turnViews.length < 5) return void 0;
+    const intents = [];
+    for (const view of turnViews) {
+      if (view.userEntry === void 0) continue;
+      const text0 = (view.userEntry.text ?? "").replace(/\s+/g, " ").trim();
+      if (text0 !== "") intents.push(text0.length > 40 ? `${text0.slice(0, 40)}…` : text0);
+      if (intents.length >= 3) break;
+    }
+    let conclusion = "";
+    for (let i = turnViews.length - 1; i >= 0; i -= 1) {
+      const items = turnViews[i].plan.items;
+      for (let j = items.length - 1; j >= 0; j -= 1) {
+        const item = items[j];
+        if (item.kind === "assistant" && item.entry !== void 0 && (item.entry.text ?? "") !== "") {
+          const sentences = (item.entry.text ?? "").split(/(?<=[。！？!?])/).map((s) => s.trim()).filter((s) => s !== "");
+          conclusion = sentences.length > 0 ? sentences[sentences.length - 1] : (item.entry.text ?? "").slice(0, 60);
+          break;
+        }
+      }
+      if (conclusion !== "") break;
+    }
+    if (intents.length === 0 && conclusion === "") return void 0;
+    return { intents, conclusion };
+  }, [turnViews]);
+  const [tldrOpen, setTldrOpen] = reactExports.useState(false);
+
   /* round9 F5：复制整轮对话。user 提问 + assistant 回答拼成一段纯文本——
      用户要把「一次问答」贴给同事或存档时，不必再两条各复制一遍。 */
   const copyTurn = reactExports.useCallback((entryId) => {
@@ -34278,7 +34438,16 @@ function ChatView({
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-title", title, children: title }),
           /* round9 F7：会话统计。有内容才显，避免空会话一上来就是「0 轮」。 */
-          sessionStats.turns > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-session-stats", children: [
+          /* round10 F2：TL;DR 摘要卡。≥5 轮出现，折叠态只显示开关按钮。 */
+          tldr !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-tldr-wrap", children: [
+            tldrOpen && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-tldr", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tldr-label", children: "摘要" }),
+              ...tldr.intents.map((intent, idx) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tldr-intent", children: intent }, `ti-${idx}`)),
+              tldr.conclusion !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tldr-conclusion", children: tldr.conclusion })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tldr-toggle", onClick: () => setTldrOpen((v) => !v), "aria-expanded": tldrOpen, title: "会话摘要", children: tldrOpen ? "收起摘要" : "TL;DR" })
+          ] }),
+                    sessionStats.turns > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-session-stats", children: [
             `${sessionStats.turns} 轮`,
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-session-stats-sep", "aria-hidden": "true", children: "·" }),
             `${sessionStats.chars} 字`,
@@ -67155,7 +67324,16 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
         "版本 ",
         (window.kami?.appVersion ?? __APP_VERSION__)
-      ] })
+      ] }),
+      /* round10 F10：升级足迹 —— 首次安装版本与当前版本的对照。数据来自
+         localStorage（首启写入），只有升级过的用户才看得到这一行。 */
+        (() => {
+          let first = "";
+          try { first = window.localStorage.getItem("zw:first-version") ?? ""; } catch { first = ""; }
+          const current = window.kami?.appVersion ?? __APP_VERSION__;
+          if (first === "" || first === current) return null;
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta about-upgrade-from", children: ["自 ", first, " 升级"] });
+        })()
     ] }) }),
     /* 项目主页：菜单「关于」里那条走 shell.openExternal，这里走渲染层的
        target=_blank + 主进程 setWindowOpenHandler —— 两条通道最终都交给系统浏览器，
@@ -72024,6 +72202,7 @@ const SHORTCUT_SHEET = [
 		{ combo: ["⌘", "/"], desc: "快捷键速查表（本面板）", where: "App 键盘监听" },
 		{ combo: ["⌘", "."], desc: "折叠 / 展开侧栏", where: "App 键盘监听" },
 		{ combo: ["⌘", "⇧", "F"], desc: "专注模式", where: "App 键盘监听" },
+		{ combo: ["J", "/", "K"], desc: "侧栏任务 下一个 / 上一个", where: "App 键盘监听" },
 		{ combo: ["Esc"], desc: "关闭浮层 / 退出专注模式", where: "各浮层自身" },
 	] },
 	{ group: "会话", keys: [
@@ -73336,6 +73515,30 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  /* round10 F6：J/K 侧栏任务行跳转。非输入焦点时 J 下一个、K 上一个，
+     选中行 click()（复用既有行点击的全部行为：resume/高亮/清理 unread）。
+     循环滚动；行集为空时静默。 */
+  const taskJumpIndexRef = reactExports.useRef(-1);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const key = event.key.toLowerCase();
+      if (key !== "j" && key !== "k") return;
+      const active = document.activeElement;
+      if (active !== null && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return;
+      const rows = [...document.querySelectorAll(".sidebar .task-item-body:not([disabled])")];
+      if (rows.length === 0) return;
+      event.preventDefault();
+      const currentIdx = rows.findIndex((row) => row.classList.contains("task-item-current") || row.getAttribute("aria-current") === "true");
+      let next;
+      if (key === "j") next = taskJumpIndexRef.current < 0 || currentIdx !== -1 ? Math.min(rows.length - 1, (currentIdx === -1 ? -1 : currentIdx) + 1) : Math.min(rows.length - 1, taskJumpIndexRef.current + 1);
+      else next = currentIdx === -1 ? 0 : Math.max(0, currentIdx - 1);
+      taskJumpIndexRef.current = next;
+      rows[next]?.click();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   /* ⌘E / Ctrl+E（#300 F7）：最近会话直达。打开面板并让高亮落在第一条
    * 「最近会话」条目上 —— 空查询引导集里 session 组就在常用动作之后，
    * 定位比模拟键入更可靠。paletteJumpToRecentRef 由 CommandPalette 消费。 */
@@ -73447,11 +73650,18 @@ function App() {
     window.addEventListener("zw:focus-toggle", toggleFocusNow);
     window.addEventListener("zw:shortcut-sheet-open", openShortcutSheet);
     window.addEventListener("zw:toast", onGlobalToast);
+    /* round10 F1：代码卡「新建任务」——切回首页让用户看到种子已就位。 */
+    const onNewTaskFromCode = () => {
+      setView("home");
+      showToast("代码已带入新任务，输入框回车即可发送", "info");
+    };
+    window.addEventListener("zw:new-task-from-code", onNewTaskFromCode);
     return () => {
       window.removeEventListener("zw:palette-open", openPalette);
       window.removeEventListener("zw:focus-toggle", toggleFocusNow);
       window.removeEventListener("zw:shortcut-sheet-open", openShortcutSheet);
       window.removeEventListener("zw:toast", onGlobalToast);
+      window.removeEventListener("zw:new-task-from-code", onNewTaskFromCode);
     };
   }, []);
   reactExports.useEffect(() => {
@@ -74675,6 +74885,8 @@ function App() {
     ),
     /* 快捷键速查表：只展示，不重复绑定（见 SHORTCUT_SHEET 注释）。 */
     shortcutSheetOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(ShortcutSheet, { onClose: () => setShortcutSheetOpen(false) }),
+    /* round10 F5：图片灯箱（全局单例，事件驱动）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(ImageLightbox, {}),
     focusMode === true && /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
@@ -74855,6 +75067,13 @@ function setThemePreference(pref) {
   window.dispatchEvent(new CustomEvent("zw:theme-changed"));
   return window.kami.setThemePreference(pref);
 }
+/* round10 F10：首次安装版本。只有第一次启动写入，此后只读 ——
+   「设置 → 关于」用它显示「自 X 升级」。 */
+try {
+  if (window.localStorage.getItem("zw:first-version") === null) {
+    window.localStorage.setItem("zw:first-version", window.kami?.appVersion ?? __APP_VERSION__);
+  }
+} catch { /* 隐私模式放弃 */ }
 initNightDim();initTheme();
 initPalette();
 const root = document.getElementById("root");

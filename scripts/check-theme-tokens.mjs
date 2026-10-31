@@ -459,6 +459,12 @@ const COLOR_LITERAL_ALLOWED = [
 		pattern: /rgb\(0 0 0 \/ 20%\)/,
 		reason: "档外阴影：开关滑块的贴边投影（DESIGN §10.3.2）",
 	},
+	{
+		selector: /^\.lightbox$/,
+		prop: "background",
+		pattern: /rgb\(0 0 0 \/ 72%\)/,
+		reason: "图片灯箱遮罩：亮暗同值的刻意例外（#304，DESIGN §27）",
+	},
 ];
 
 /**

@@ -16663,3 +16663,70 @@ html[data-night-dim="on"]:not([data-theme="dark"]) .app::before {
 		transition: none;
 	}
 }
+
+/* ── §27 第十轮十连（#304） ─────────────────────────────────────── */
+/* F1 代码→新任务按钮：与复制按钮同族，accent 提示「这是动作不是拷贝」。 */
+.code-block-task {
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 26px; height: 26px; border-radius: var(--radius-sm);
+	color: var(--text-secondary); background: none; border: none; cursor: pointer;
+	transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.code-block-task:hover { background: var(--accent-soft); color: var(--accent); }
+/* F4 diff 徽标 */
+.code-block-diff-badge {
+	margin-left: var(--space-2);
+	padding: 0 var(--space-2);
+	border-radius: var(--radius-sm);
+	font-size: var(--font-size-xs);
+	color: var(--accent);
+	background: var(--accent-soft);
+}
+.code-block[data-lang="diff"] .code-gutter + pre { border-left: 2px solid var(--border); }
+/* F2 会话速览卡 */
+.chat-tldr {
+	margin: 0 var(--space-4) var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	display: grid; gap: var(--space-2);
+}
+.chat-tldr-title { font-size: var(--font-size-xs); color: var(--text-secondary); letter-spacing: 0.04em; }
+.chat-tldr-intent { display: flex; gap: var(--space-2); align-items: baseline; font-size: var(--font-size-sm); }
+.chat-tldr-n {
+	flex: none; width: 18px; height: 18px; border-radius: 50%;
+	display: inline-flex; align-items: center; justify-content: center;
+	font-size: 11px; color: var(--accent); background: var(--accent-soft);
+}
+.chat-tldr-conclusion { font-size: var(--font-size-sm); color: var(--text); padding-top: var(--space-1); border-top: 1px dashed var(--border); }
+.chat-tldr-tag {
+	margin-right: var(--space-2); padding: 0 var(--space-2);
+	border-radius: var(--radius-sm); font-size: 11px;
+	color: var(--accent); border: 1px solid var(--accent);
+}
+.chat-tldr-toggle {
+	margin: 0 var(--space-4) var(--space-2); align-self: flex-start;
+	background: none; border: none; cursor: pointer;
+	color: var(--text-faint); font-size: var(--font-size-xs);
+}
+.chat-tldr-toggle:hover { color: var(--accent); }
+/* F3 任务清单 */
+li.md-task { display: flex; gap: var(--space-2); align-items: baseline; list-style: none; }
+.md-task-box { accent-color: var(--accent); flex: none; translate: 0 2px; }
+li.md-task-done .md-task-text { color: var(--text-faint); text-decoration: line-through; }
+/* F5 灯箱 */
+.lightbox {
+	position: fixed; inset: 0; z-index: 200;
+	background: rgb(0 0 0 / 72%);
+	display: flex; align-items: center; justify-content: center;
+	cursor: zoom-out;
+}
+.lightbox-img {
+	max-width: 90vw; max-height: 88vh; border-radius: var(--radius-md);
+	background: var(--bg-elevated); transition: transform var(--dur-fast) var(--ease-out);
+	cursor: grab;
+}
+.markdown img.md-img { cursor: zoom-in; border-radius: var(--radius-sm); }
+/* F10 关于页升级足迹 */
+.about-upgrade-from { margin-left: var(--space-3); color: var(--accent); }
