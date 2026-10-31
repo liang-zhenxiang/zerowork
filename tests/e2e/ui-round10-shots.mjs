@@ -52,7 +52,7 @@ await win.evaluate(async ({ baseUrl, ws }) => {
 }, { baseUrl: mock.baseUrl, ws: h.WORKSPACE_DIR });
 const composer = win.locator('[aria-label="消息输入框"]');
 await composer.fill("验证第十轮功能");
-await composer.press("Enter");
+await win.evaluate(() => document.querySelector(".send-btn")?.click());
 await waitUntil(() => win.evaluate(() => [...document.querySelectorAll(".entry.assistant")].some((el) => (el.textContent ?? "").includes("收尾段"))), { timeout: 20000, desc: "回答完成" });
 await win.waitForTimeout(400);
 

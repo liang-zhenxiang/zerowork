@@ -16730,3 +16730,244 @@ li.md-task-done .md-task-text { color: var(--text-faint); text-decoration: line-
 .markdown img.md-img { cursor: zoom-in; border-radius: var(--radius-sm); }
 /* F10 关于页升级足迹 */
 .about-upgrade-from { margin-left: var(--space-3); color: var(--accent); }
+
+/* ── §28 第十一轮十连（#312） ───────────────────────────────────── */
+/* F9 会话字号：A-/A+ 调节，默认 14px。作用域 .chat 内的问答正文与工具卡，
+   侧栏/顶栏不随动（它们是导航不是阅读面）。 */
+.chat {
+  font-size: var(--chat-font-size, 14px);
+}
+
+/* F2 会话工具条：与统计行同一条底部信息带；单行、居中、弱化（secondary 色）。 */
+.chat-tools {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) 0 0;
+  font-size: var(--text-meta);
+  color: var(--text-secondary);
+}
+.chat-tool-btn {
+  padding: 1px var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-chip);
+  color: var(--text-secondary);
+  font-size: var(--text-meta);
+  line-height: 1.6;
+}
+.chat-tool-btn:hover {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text);
+  border-color: var(--border);
+}
+.chat-tools-sep {
+  margin: 0 var(--space-2);
+  opacity: 0.55;
+}
+.chat-tool-font {
+  font-family: var(--font-mono);
+  min-width: 5ch;
+}
+
+/* F7 打印样式：⌘P 只留问答正文。display:none 的都是 chrome（导航/输入/度量），
+   正文强制 static + 黑字白底；卡片描边去掉，长代码块允许跨页断行。 */
+@media print {
+  .sidebar,
+  .chat-header,
+  .composer,
+  .chat-tools,
+  .session-stats,
+  .turn-trace,
+  .turn-nav,
+  .stream-fade,
+  .jump-to-bottom,
+  .activity-rail,
+  .time-ruler,
+  .entry-toolbar-right,
+  .toast-stack {
+    display: none !important;
+  }
+  :root {
+    --bg: #fff;
+    --text: #000;
+  }
+  .chat,
+  .stream-wrap,
+  .stream {
+    display: block;
+    position: static;
+    overflow: visible;
+    height: auto;
+    max-height: none;
+    background: #fff;
+    color: #000;
+  }
+  .entry,
+  .md-body {
+    color: #000;
+    background: transparent;
+  }
+  .code-block-card,
+  .case-cover,
+  .markdown .table-scroll {
+    break-inside: avoid;
+  }
+}
+
+/* F3 会话内查找：命中 mark 用暖黄（不与 search-hit 的 accent 混淆）。 */
+mark.find-hit {
+	background: color-mix(in srgb, var(--accent) 24%, transparent);
+	color: inherit;
+	border-radius: 2px;
+	padding: 0 1px;
+}
+.chat-find {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+}
+.chat-find-input {
+	width: 11ch;
+	padding: 1px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	color: var(--text);
+	font-size: var(--text-meta);
+}
+.chat-find-input:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+.chat-find-count {
+	font-family: var(--font-mono);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+/* F4/F5 折叠条：虚线边框弱视觉；展开/收起是文字按钮。 */
+/* 折叠容器：正文 max-height 12ex 收起 + 底部渐隐遮罩；信息条压在正文下缘。 */
+.answer-fold {
+	position: relative;
+	margin: var(--space-1) 0;
+}
+.answer-fold-body {
+	max-height: 12ex;
+	overflow: hidden;
+	mask-image: linear-gradient(to bottom, #000 60%, transparent 100%);
+}
+.answer-fold-bar {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin-top: calc(-1 * var(--space-2));
+	padding: var(--space-1) var(--space-3);
+	border: 1px dashed var(--border);
+	border-radius: var(--radius-sm);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	background: var(--bg-chip);
+}
+.answer-fold-toggle {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: var(--accent);
+	font-size: var(--text-meta);
+	cursor: pointer;
+}
+.answer-fold-toggle:hover {
+	text-decoration: underline;
+}
+.answer-fold-collapse {
+	display: block;
+	margin: var(--space-1) 0 var(--space-2);
+}
+
+/* F6 标题锚点：hover 才现；色 accent，字号随标题。 */
+.markdown h2, .markdown h3 {
+	position: relative;
+}
+.heading-anchor {
+	position: absolute;
+	left: -1.4em;
+	top: 50%;
+	transform: translateY(-50%);
+	padding: 0 var(--space-1);
+	border: 0;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 0.75em;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity var(--dur-fast) var(--ease-standard);
+}
+.markdown h2:hover .heading-anchor,
+.markdown h3:hover .heading-anchor {
+	opacity: 1;
+	color: var(--accent);
+}
+.heading-anchor:focus-visible {
+	opacity: 1;
+}
+/* F1 会话大纲浮层 */
+.outline-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-toast);
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding-top: 12vh;
+	background: rgb(0 0 0 / 72%);
+}
+.outline-sheet {
+	width: min(520px, 86vw);
+	max-height: 64vh;
+	display: flex;
+	flex-direction: column;
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-lg);
+	overflow: hidden;
+}
+.outline-head {
+	padding: var(--space-3) var(--space-4);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	border-bottom: 1px solid var(--border);
+}
+.outline-list {
+	overflow-y: auto;
+	padding: var(--space-1);
+}
+.outline-item {
+	display: flex;
+	gap: var(--space-2);
+	align-items: baseline;
+	width: 100%;
+	padding: var(--space-2) var(--space-3);
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text);
+	text-align: left;
+	font-size: var(--text-sm);
+	cursor: pointer;
+}
+.outline-item:hover {
+	background: var(--bg-hover, color-mix(in srgb, var(--text) 6%, transparent));
+}
+.outline-ordinal {
+	flex: 0 0 2ch;
+	font-family: var(--font-mono);
+	color: var(--text-faint);
+}
+.outline-prompt {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
