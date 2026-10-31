@@ -30992,7 +30992,9 @@ const Markdown = React.memo(function Markdown2({
   text: text2,
   resolveImageSrc,
   cwd: cwd2,
-  onPathClick
+  onPathClick,
+  /* round10 F5：传入后 img 点击直派发灯箱事件（会话页用；预览页走 resolveImageSrc）。 */
+  onClickImage
 }) {
   const renderCode = reactExports.useMemo(
     () => ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsx(InlineCode, { cwd: cwd2, onPathClick, children }),
@@ -31005,6 +31007,10 @@ const Markdown = React.memo(function Markdown2({
       // rehype-katex 在 hast 层把 math 节点渲染成 KaTeX 的 HTML+MathML
       //（颜色继承 currentColor，双主题直接可用）。
       rehypePlugins: [rehypeKatex],
+      // defaultUrlTransform 的白名单只有 http/ircs/mailto/xmpp，data:image 会被
+      // 洗成空串 —— 模型回复的内联示意图（data URL）因此全都加载不出来。
+      // 放行 data:image/*，其余维持默认安全策略（#304 round10 F5）。
+      urlTransform: (value, key, node) => (key === "src" && /^data:image\//i.test(value) ? value : defaultUrlTransform(value)),
       components: {
         // 只覆盖 pre（围栏块）成行卡片；行内 code 走下面的 code 覆盖。
         pre: CodeBlockCard,
@@ -31057,23 +31063,24 @@ const Markdown = React.memo(function Markdown2({
             }
           ) });
         },
-        // resolver 存在才覆盖 img：对话页不传时保持默认渲染，一个组件两种场景。
-        ...resolveImageSrc === void 0 ? {} : {
+        // img 覆盖：灯箱点击（对话页传 onClickImage）或自定义解析（预览页传
+        // resolveImageSrc）任一存在即启用；都没有时保持 react-markdown 默认 <img>。
+        ...(onClickImage === void 0 && resolveImageSrc === void 0 ? {} : {
           img: ({ src, alt }) => /* @__PURE__ */ jsxRuntimeExports.jsx(
             "img",
             {
-              src: typeof src === "string" ? resolveImageSrc(src) : src,
+              src: typeof src === "string" && resolveImageSrc !== void 0 ? resolveImageSrc(src) : src,
               alt: alt ?? "",
               loading: "lazy",
               decoding: "async",
               className: "md-img",
               onClick: (e) => {
                 const url = e.currentTarget.currentSrc || e.currentTarget.src;
-                if (url !== "") window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt: alt ?? "" } }));
+                if (url !== "" && typeof onClickImage === "function") onClickImage(url, alt ?? "");
               }
             }
           )
-        }
+        })
       },
       children: text2
     }
@@ -34267,7 +34274,8 @@ function ChatView({
         {
           text: entry.text,
           cwd: conversation.state.cwd,
-          onPathClick
+          onPathClick,
+          onClickImage: (url, alt) => window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt } }))
         }
       ),
       actionsAnchorIds.has(entry.id) && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -72841,7 +72849,10 @@ function CompareView({
   };
   const renderAnswerEntry = (column, entry) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `entry ${entry.role}`, "data-entry-id": entry.id, children: [
     column.thinking !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingBlock, { text: column.thinking, streaming: column.status === "running" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Markdown, { text: entry.text }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Markdown, {
+      text: entry.text,
+      onClickImage: (url, alt) => window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt } }))
+    }),
     // 操作条：完成态多一枚「留为会话」（keepSlot，领衔槽位），其余只留「复制」。
     // 不传 metrics：读数已搬到列头（四列要落在同一条水平线上才可比）。
     /* @__PURE__ */ jsxRuntimeExports.jsx(AssistantActions, { text: entry.text, keepSlot: renderKeepSlot(column) })
