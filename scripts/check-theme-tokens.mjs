@@ -357,6 +357,15 @@ function colorLiteralsIn(value, prop = "") {
  */
 const COLOR_LITERAL_ALLOWED = [
 	{
+		// 打印样式（#312 round11 F7）：@media print 块里的 #fff/#000 是「纸」的
+		// 物理语义，不随亮暗主题变 —— 打印机没有主题。selector 通配（块内涉及
+		// :root/.chat/.stream-wrap/.stream），值只放行纯黑白（var() fallback 不算）。
+		selector: /^(?::root|\.chat|\.stream-wrap|\.stream|\.entry|\.md-body)$/,
+		prop: /^(?:--bg|--text|background|color)$/,
+		pattern: /^#(?:fff|000)$/,
+		reason: "打印黑白是纸张语义（@media print 块专用），#312 round11 F7",
+	},
+	{
 		// PDF 注释层 / 文字层：app.css 开头那一整段是 **pdf.js 的原样复制**
 		// （文件第 1 行就是 Mozilla 的 Apache-2.0 版权头）。选区高亮、
 		// 链接黄框、表单必填红框、popup 的米黄底都是它的原生观感，
@@ -460,10 +469,10 @@ const COLOR_LITERAL_ALLOWED = [
 		reason: "档外阴影：开关滑块的贴边投影（DESIGN §10.3.2）",
 	},
 	{
-		selector: /^\.lightbox$/,
+		selector: /^\.(?:lightbox|outline-backdrop)$/,
 		prop: "background",
 		pattern: /rgb\(0 0 0 \/ 72%\)/,
-		reason: "图片灯箱遮罩：亮暗同值的刻意例外（#304，DESIGN §27）",
+		reason: "模态遮罩 scrim（图片灯箱 #304 / 会话大纲 #312）：亮暗同值的刻意例外，DESIGN §27",
 	},
 ];
 

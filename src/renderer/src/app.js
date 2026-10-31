@@ -30994,7 +30994,9 @@ const Markdown = React.memo(function Markdown2({
   cwd: cwd2,
   onPathClick,
   /* round10 F5：传入后 img 点击直派发灯箱事件（会话页用；预览页走 resolveImageSrc）。 */
-  onClickImage
+  onClickImage,
+  /* #312 F6：传入后 h2/h3 出现 ⚓ 按钮，点击复制 `${base}#${slug}` 深链。 */
+  headingAnchorBase
 }) {
   const renderCode = reactExports.useMemo(
     () => ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsx(InlineCode, { cwd: cwd2, onPathClick, children }),
@@ -31080,12 +31082,39 @@ const Markdown = React.memo(function Markdown2({
               }
             }
           )
+        }),
+        ...(headingAnchorBase === void 0 ? {} : {
+          h2: HeadingAnchor("h2", headingAnchorBase),
+          h3: HeadingAnchor("h3", headingAnchorBase)
         })
       },
       children: text2
     }
   ) });
 });
+/* #312 F6：heading 锚点组件工厂。slug 用文本转小写、非字词替换 -；
+   中文标题保留原字（剪贴板里原样可读）。 */
+function slugifyHeading(element) {
+  return (element.textContent ?? "").trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "") || "section";
+}
+function HeadingAnchor(Tag, base) {
+  return function HeadingAnchorComp({ children }) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(Tag, { children: [
+      children,
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "heading-anchor",
+        "aria-label": "复制标题链接",
+        title: "复制标题链接",
+        onClick: (e) => {
+          const slug = slugifyHeading(e.currentTarget.parentElement);
+          navigator.clipboard.writeText(`${base}#${slug}`).then(() => window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制标题链接" }] })));
+        },
+        children: "⚓"
+      })
+    ] });
+  };
+}
 function activePendingAlign(pending, sessionId) {
   return pending !== void 0 && pending.sessionId === sessionId ? pending : void 0;
 }
@@ -31689,6 +31718,11 @@ function toggleTurnFold(map2, turnId) {
 }
 function collapseAllTurnFolds(map2) {
   return map2.size === 0 ? map2 : /* @__PURE__ */ new Map();
+}
+/* #312 F2：全部展开（与 collapseAllTurnFolds 对偶）。折叠语义是「白名单展开」，
+   全展开即把缓存清空 —— 默认态就是展开。 */
+function expandAllTurnFolds() {
+  return EMPTY_TURN_FOLDS;
 }
 const PREVIEW_PROMPT_CHARS = 120;
 const PREVIEW_RESPONSE_CHARS = 240;
@@ -33194,6 +33228,64 @@ function blockedCommandOf(card) {
  *  · 状态色只给 bad/running（DESIGN.md §2.4：分类不是状态，不许借状态色），
  *    bad 段同时有 IconAlert 形态 + aria 文案——不看颜色也读得出（§7.6）。
  */
+/* #312 F4/F5：超长回答折叠。>LONG_ANSWER_LINES 行默认收起；摘要条带阅读时长
+   （中文 400 字/分钟向上取整）。展开状态存组件内 state —— 不跨会话记忆（阅读进度
+   已由 round9 的 readpos 负责，两套机制不叠加）。 */
+const LONG_ANSWER_LINES = 60;
+function estimateReadMinutes(text2) {
+  return Math.max(1, Math.ceil((text2 ?? "").length / 400));
+}
+function LongAnswerFold({ text: text2, children }) {
+  const lines = (text2 ?? "").split("\n").length;
+  const over = lines > LONG_ANSWER_LINES;
+  const [open, setOpen] = reactExports.useState(!over);
+  /* 流式回复是「文本逐步增长」：组件首挂时可能还没超阈值（open=true），
+     长到越过阈值后要**自动收起** —— 不然折叠永远不出现（#312 实测）。 */
+  reactExports.useEffect(() => {
+    if (over) setOpen(false);
+  }, [over]);
+  if (!over) return children;
+  /* 折叠用 CSS（max-height + 渐隐遮罩），正文始终在 DOM —— 查找、复制、导出、
+     既有 e2e 的「收尾段」断言都不受影响；display:none 会把这一切全弄坏（实测）。 */
+  if (!open) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "answer-fold", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "answer-fold-body", children }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "answer-fold-bar", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "answer-fold-hint", children: `已折叠 · 约 ${lines} 行 · 读约 ${estimateReadMinutes(text2)} 分钟` }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "answer-fold-toggle", onClick: () => setOpen(true), children: "展开全文" })
+      ] })
+    ] });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    children,
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "answer-fold-toggle answer-fold-collapse", onClick: () => setOpen(false), children: "收起全文" })
+  ] });
+}
+/* #312 F1：会话大纲浮层（⌘P）。列出全部轮次的提问（编号 + 截断预览），
+   点选平滑跳到该轮；Esc 关闭。数据就是 turnViews —— 不造第二份数据源。 */
+function OutlineSheet({ views, onClose, onJump }) {
+  const items = buildTurnNavItems(views);
+  if (items.length === 0) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "outline-backdrop", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "outline-sheet", role: "dialog", "aria-label": "会话大纲", onClick: (e) => e.stopPropagation(), children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "outline-head", children: `会话大纲 · ${items.length} 轮` }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "outline-list", children: items.map((item, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        className: "outline-item",
+        onClick: () => {
+          onJump(item.key);
+          onClose();
+        },
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "outline-ordinal", children: `${index2 + 1}` }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "outline-prompt", children: item.prompt === "" ? `第 ${item.ordinal} 轮` : item.prompt })
+        ]
+      },
+      item.key
+    )) })
+  ] }) });
+}
 function TurnTraceBar({ trace, onFocusEntry }) {
   if (trace === void 0 || trace.empty) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "turn-trace", "aria-label": "本轮工作轨迹", children: trace.segments.map((seg, index2) => {
@@ -33861,6 +33953,27 @@ function ChatView({
   const [turnFolds, setTurnFolds] = reactExports.useState(
     () => turnFoldCache.current.get(sessionId) ?? EMPTY_TURN_FOLDS
   );
+  /* #312 F1：会话大纲浮层（⌘P）。 */
+  const [outlineOpen, setOutlineOpen] = reactExports.useState(false);
+  const jumpToTurn = reactExports.useCallback((key) => {
+    const el = scrollRef.current?.querySelector(`[data-turn-key="${CSS.escape(key)}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+  reactExports.useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") setOutlineOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  reactExports.useEffect(() => {
+    const onOpen = () => setOutlineOpen(true);
+    window.addEventListener("zw:outline-open", onOpen);
+    return () => window.removeEventListener("zw:outline-open", onOpen);
+  }, []);
+  /* #312 F3：会话内查找。findQuery 非空时对 .stream 里的文本节点打
+     <mark class="find-hit">，清除时 normalize 还原。与 round9 的命中跳转
+     （search-hit）互不干扰：两个 class、两套清理。 */
   const writeTurnFolds = (next) => {
     turnFoldCache.current.set(sessionId, next);
     setTurnFolds(next);
@@ -33882,6 +33995,81 @@ function ChatView({
   const [rulerPct, setRulerPct] = reactExports.useState(void 0);
   /* round9 F7：会话统计。轮数=以 user 开头的视图数；字数=user+assistant 正文；
      时长=各轮 endedAt-startedAt 之和（流式中的轮不计入总和，避免来回跳）。 */
+  /* #312 F9：会话字号 13–18px（localStorage zw:chat-font-size 记忆）。 */
+  const [chatFontSize, setChatFontSizeState] = reactExports.useState(() => {
+    try {
+      const saved = Number(window.localStorage.getItem("zw:chat-font-size"));
+      return saved >= 13 && saved <= 18 ? Math.round(saved) : 14;
+    } catch {
+      return 14;
+    }
+  });
+  /* #312 F3：会话内查找。findQuery 非空时对 .stream 里的文本节点打
+     <mark class="find-hit">，清除时 normalize 还原。与 round9 的命中跳转
+     （search-hit）互不干扰：两个 class、两套清理。 */
+  const [findQuery, setFindQuery] = reactExports.useState("");
+  const [findCount, setFindCount] = reactExports.useState(0);
+  reactExports.useEffect(() => {
+    const root = scrollRef.current;
+    if (root === null) return;
+    const clear = () => {
+      for (const mark of [...root.querySelectorAll("mark.find-hit")]) {
+        const parent = mark.parentNode;
+        if (parent === null) continue;
+        parent.replaceChild(document.createTextNode(mark.textContent ?? ""), mark);
+        parent.normalize();
+      }
+    };
+    clear();
+    const needle = findQuery.trim().toLowerCase();
+    if (needle === "") {
+      setFindCount(0);
+      return;
+    }
+    let count = 0;
+    const walk = (node) => {
+      for (const child of [...node.childNodes]) {
+        if (child.nodeType === 1) {
+          const tag = child.tagName;
+          if (tag === "MARK" || tag === "CODE" || tag === "PRE" || tag === "BUTTON" || tag === "TEXTAREA" || tag === "INPUT") continue;
+          walk(child);
+          continue;
+        }
+        if (child.nodeType !== 3) continue;
+        const text2 = child.textContent ?? "";
+        const lower = text2.toLowerCase();
+        const first = lower.indexOf(needle);
+        if (first === -1) continue;
+        const frag = document.createDocumentFragment();
+        let cursor = 0;
+        let at = first;
+        while (at !== -1) {
+          frag.appendChild(document.createTextNode(text2.slice(cursor, at)));
+          const mark = document.createElement("mark");
+          mark.className = "find-hit";
+          mark.textContent = text2.slice(at, at + needle.length);
+          frag.appendChild(mark);
+          count += 1;
+          cursor = at + needle.length;
+          at = lower.indexOf(needle, cursor);
+        }
+        frag.appendChild(document.createTextNode(text2.slice(cursor)));
+        child.replaceWith(frag);
+      }
+    };
+    walk(root);
+    setFindCount(count);
+    return clear;
+  }, [findQuery, entries]);
+  const setChatFontSize = reactExports.useCallback((next) => {
+    const clamped = Math.min(18, Math.max(13, Math.round(next)));
+    setChatFontSizeState(clamped);
+    try {
+      window.localStorage.setItem("zw:chat-font-size", String(clamped));
+    } catch {
+      /* 隐私模式：字号记忆属增强功能，静默放弃 */
+    }
+  }, []);
   const sessionStats = reactExports.useMemo(() => {
     let turns = 0;
     let chars = 0;
@@ -34277,12 +34465,19 @@ function ChatView({
         }
       ),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
-        Markdown,
+        LongAnswerFold,
         {
           text: entry.text,
-          cwd: conversation.state.cwd,
-          onPathClick,
-          onClickImage: (url, alt) => window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt } }))
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+            Markdown,
+            {
+              text: entry.text,
+              cwd: conversation.state.cwd,
+              onPathClick,
+              headingAnchorBase: currentSessionPath,
+              onClickImage: (url, alt) => window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt } }))
+            }
+          )
         }
       ),
       actionsAnchorIds.has(entry.id) && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -34441,7 +34636,11 @@ function ChatView({
     {
       className: "chat",
       ref: chatRef,
-      style: { "--chat-content-width": `${focusMode === true ? focusContentWidth(contentWidth) : contentWidth}px` },
+      style: {
+        "--chat-content-width": `${focusMode === true ? focusContentWidth(contentWidth) : contentWidth}px`,
+        /* #312 F9：会话正文字号（A-/A+ 调节，13–18px） */
+        "--chat-font-size": `${chatFontSize}px`
+      },
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "chat-header", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回首页", onClick: onBack, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
@@ -34707,6 +34906,33 @@ function ChatView({
                   ]
                 }
               ),
+              outlineOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(OutlineSheet, { views: turnViews, onClose: () => setOutlineOpen(false), onJump: jumpToTurn }),
+              /* #312 F2/F9：会话工具条（折叠全部/展开全部 + 字号）。与统计行同一条
+                 底部信息带，只在多轮会话出现；折叠语义见 collapseAllTurnFolds。 */
+              turnViews.length >= 2 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chat-tools", children: [
+                /* #312 F3 会话内查找 */
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-find", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+                    type: "text",
+                    className: "chat-find-input",
+                    placeholder: "在会话中查找…",
+                    "aria-label": "在会话中查找",
+                    value: findQuery,
+                    onChange: (e) => setFindQuery(e.target.value),
+                    onKeyDown: (e) => {
+                      if (e.key === "Escape") setFindQuery("");
+                    }
+                  }),
+                  findQuery.trim() !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-find-count", children: `${findCount} 处` })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tools-sep", "aria-hidden": "true", children: "·" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tool-btn", onClick: () => writeTurnFolds(collapseAllTurnFolds(turnFolds)), children: "折叠全部" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tool-btn", onClick: () => writeTurnFolds(expandAllTurnFolds()), children: "展开全部" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tools-sep", "aria-hidden": "true", children: "·" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tool-btn", "aria-label": "缩小会话字号", onClick: () => setChatFontSize(chatFontSize - 1), children: "A−" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tool-btn", "aria-label": "放大会话字号", onClick: () => setChatFontSize(chatFontSize + 1), children: "A+" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tool-font", children: `${chatFontSize}px` })
+              ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(SessionStatsLine, { stats: conversation.sessionStats })
             ] })
           )
@@ -72855,10 +73081,16 @@ function CompareView({
   };
   const renderAnswerEntry = (column, entry) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `entry ${entry.role}`, "data-entry-id": entry.id, children: [
     column.thinking !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx(ThinkingBlock, { text: column.thinking, streaming: column.status === "running" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Markdown, {
-      text: entry.text,
-      onClickImage: (url, alt) => window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt } }))
-    }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      LongAnswerFold,
+      {
+        text: entry.text,
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Markdown, {
+          text: entry.text,
+          onClickImage: (url, alt) => window.dispatchEvent(new CustomEvent("zw:image-lightbox", { detail: { url, alt } }))
+        })
+      }
+    ),
     // 操作条：完成态多一枚「留为会话」（keepSlot，领衔槽位），其余只留「复制」。
     // 不传 metrics：读数已搬到列头（四列要落在同一条水平线上才可比）。
     /* @__PURE__ */ jsxRuntimeExports.jsx(AssistantActions, { text: entry.text, keepSlot: renderKeepSlot(column) })
@@ -73508,6 +73740,19 @@ function App() {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
       event.preventDefault();
       setPaletteOpen((value) => !value);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  /* #312 F1：⌘P 会话大纲 —— 只在会话视图（viewRef.current === "chat"）响应；
+     首页没有「轮」可列。用 ref 免去 view 依赖导致的重复注册。 */
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key.toLowerCase() !== "p") return;
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return;
+      if (viewRef.current !== "chat") return;
+      event.preventDefault();
+      window.dispatchEvent(new CustomEvent("zw:outline-open"));
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

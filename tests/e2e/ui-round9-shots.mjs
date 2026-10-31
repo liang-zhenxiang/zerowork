@@ -62,7 +62,7 @@ await win.waitForTimeout(600);
 
 const composer = win.locator('[aria-label="消息输入框"]');
 await composer.fill("帮我看看第九轮的功能");
-await composer.press("Enter");
+await win.evaluate(() => document.querySelector(".send-btn")?.click());
 // 等回答出现（.entry.assistant 的文本包含「收尾段」）
 await waitUntil(
   () => win.evaluate(() => [...document.querySelectorAll(".entry.assistant")].some((el) => (el.textContent ?? "").includes("收尾段"))),
