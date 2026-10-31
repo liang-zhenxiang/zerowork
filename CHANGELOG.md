@@ -22,7 +22,7 @@
 
 ### 安全
 
-- 依赖告警的 critical 与 high 清零（`npm audit`：1 critical + 5 high → 0 / 0）。做法分三类：删除**没有任何代码引用**的 `xlsx` devDependency（`src/` 与 `tests/` 都不 import 它）；用 `overrides` 把 `monaco-editor` 钉死在 3.4.15 的 `dompurify` 抬到 3.4.17、把 pi 内核精确锁定的 `undici` 8.10.2 收敛到根依赖的 8.12.3；`npm audit fix` 升级 electron / zod / body-parser。`resources/docx-engine` 的 Pillow 修复跨三个大版本、且该目录不参与本项目测试，留待单独验证（#308）。
+- 依赖告警的 critical 清零（`npm audit`：1 critical + 5 high → **0 critical + 1 high**）。用 `overrides` 把 `monaco-editor` 钉死在 3.4.15 的 `dompurify` 抬到 3.4.17、把 pi 内核精确锁定的 `undici` 8.10.2 收敛到根依赖的 8.12.3；`npm audit fix` 升级 electron / zod / body-parser。剩下的 1 个 high 是 dev-only 的 `xlsx`（e2e 现场生成 xlsx 夹具，不随包，npm 上无修复版）。`resources/docx-engine` 的 Pillow 修复跨三个大版本、且该目录不参与本项目测试，留待单独验证（#308）。
 
 （下一个版本的变更写在这里；发布时整段移入新版本标题下。）
 

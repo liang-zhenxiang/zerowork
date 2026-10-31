@@ -211,8 +211,8 @@ Dependabot 的**条数不是风险量级** —— 同一批告警里，有的随
 | 类别 | 当前条数（2026-11-01） | 处置 |
 | --- | --- | --- |
 | **随包原样分发的第三方模板**（`resources/**` 的三个 manifest + 一个 Python 引擎） | **39**（其中 `docx-engine` 的 Pillow 占 35） | **不走升级这条路**：那是随包的第三方内容，不参与本仓库的 lint 与测试，改它们的 lockfile 只会让副本与上游不一致。登记在 `THIRD_PARTY_NOTICES.md`，告警按本节的理由逐条判定并关闭 |
-| **本仓库的依赖**（仓库根 `package-lock.json`） | **26**（`npm audit` 口径：35 = 4 low / 31 moderate / **0 high / 0 critical**） | **交给 Dependabot 例行升级**。2026-11-01 这一轮把 **critical 与 high 清零**：删除未使用的 `xlsx`、`npm audit fix`（electron / zod / body-parser）、两处定向 `overrides`（见下） |
-| **无 npm 修复版的**（`xlsx`） | **0（已删除）** | 2026-11-01 复核发现它只是一个**孤立声明**：`npm ls xlsx` 只显示它自己，`src/` 与 `tests/` 都没有 `import` 它（测试里的 `.xlsx` 由 `buildXlsx()` 现场构造 OOXML，不依赖该包）。已从 `devDependencies` 移除；随包那份 vendored bundle 仍按 #61 升到 0.20.3 |
+| **本仓库的依赖**（仓库根 `package-lock.json`） | **36**（`npm audit` 口径：4 low / 31 moderate / **1 high / 0 critical**） | **交给 Dependabot 例行升级**。2026-11-01 这一轮把 **critical 清零**：`npm audit fix`（electron / zod / body-parser）+ 两处定向 `overrides`（见下）。剩下的 1 个 high 是 dev-only 的 `xlsx`，见下一行 |
+| **无 npm 修复版的**（`xlsx`） | **1（dev-only，不随包）** | npm 上的 `xlsx` 停在 0.18.5，唯一用途是 e2e 夹具：`tests/e2e/preview-renderers.mjs` 的 `writeXlsx()` 用它**现场生成真实 xlsx**。2026-11-01 曾按「代码里没有 import」删除它，CI 的 `preview-renderers` 以 `MODULE_NOT_FOUND` 立刻打回 —— 它走的是 `createRequire(import.meta.url)` 得到的 `require_` 变量，**按包名 grep 很容易漏掉**。已恢复；随包那份 vendored bundle 仍按 #61 升到 0.20.3 |
 | **审计工具看不见的**（`src/renderer/src/vendor-*.js`） | 0（原 2 个 high） | **已处置**：升级 + 静态门禁 + 每周 OSV 巡检（见下节） |
 
 **2026-11-01 的两处定向 override（各自带理由）**
