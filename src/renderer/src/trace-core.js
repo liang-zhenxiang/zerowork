@@ -173,6 +173,25 @@ export function buildTurnTrace(entries) {
 }
 
 function finalizeSegments(segments, calls, bad) {
+	// #310：同 kind 聚合为一段（bad 优先保留为独立段）。旧逻辑只合并「相邻同类同态」，
+	// 长会话里「检索—写—检索—写…」会铺出几十个 chip（用户实测 49 步铺满三行）。
+	// 聚合后每类一段、计数真实累加；段内 entryIds 保留全部，点击定位到该类第一次调用。
+	const byKind = /* @__PURE__ */ new Map();
+	const merged = [];
+	for (const seg of segments) {
+		const key = seg.status === "bad" ? `${seg.kind}:bad` : seg.kind;
+		const prev = byKind.get(key);
+		if (prev === void 0) {
+			byKind.set(key, seg);
+			merged.push(seg);
+			continue;
+		}
+		prev.count += seg.count;
+		prev.entryIds.push(...seg.entryIds);
+		prev.tooltipLines.push(...seg.tooltipLines);
+	}
+	segments.length = 0;
+	segments.push(...merged);
 	// 最后一段若仍是 running（最后一个动作 outcome 未定），保留 running；
 	// 其余段的 running 在构建期只可能出现在末段（工具按顺序落定 outcome），
 	// 防御性地把非末段的 running 视作 ok 处理（不猜失败）。

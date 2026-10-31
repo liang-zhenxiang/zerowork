@@ -15020,7 +15020,7 @@ function Composer({
       }
     } catch {
     }
-    return ["总结一下刚才的结论", "列���接下来的待办", "把上面的方案写进文档"];
+    return ["总结一下刚才的结论", "列出接下来的待办", "把上面的方案写进文档"];
   }, []);
   const applyChip = reactExports.useCallback((text2) => {
     setDraft(text2);
@@ -31795,34 +31795,40 @@ function formatCost$2(usd) {
   return usd >= 0.01 ? `$${usd.toFixed(2)}` : `$${usd.toFixed(4)}`;
 }
 function sessionStatsGroups(stats) {
+  /* #310 审计：底部分度行此前堆 10+ 指标，窄窗口必然 ellipsis 截断，
+     且被截掉的恰是后半段（缓存/token）。收敛为「过程 + 速度 + 用量」三组：
+     - 过程：N 轮 · N 步 · LLM x · 工具 x
+     - 速度：220 tok/s（首 token 平均挪进悬停）
+     - 用量：输入/输出 tok（缓存命中率挪进悬停）
+     悬停 title 仍给全量（SessionStatsLine 已有 truncated→title 机制）。 */
   const groups = [];
+  const hover = [];
   if (stats.turns > 0) {
-    groups.push(`${stats.runs} 轮 · ${stats.turns} 步`);
+    /* daemon 的 turns 是 LLM 调用次数（foldLlmCall 每次 +1），不是用户语义的
+       「步/轮」——49 步那种读数其实是 49 次 LLM 调用（#310 用户困惑点）。
+       用户语义的「轮」是 stats.runs（run 卡片数）。模型调用数挪进悬停。 */
+    groups.push(`${stats.runs} 轮`);
     const durations = [];
     if (stats.llmMs > 0) durations.push(`LLM ${formatSpan(stats.llmMs)}`);
     if (stats.toolMs > 0) durations.push(`工具调用 ${formatSpan(stats.toolMs)}`);
     if (durations.length > 0) groups.push(durations.join(" · "));
-    const speeds = [];
-    const ttft = averageTtftMs(stats);
-    if (ttft !== void 0) speeds.push(`首 token 平均 ${formatSpan(ttft)}`);
     const throughput = decodeTokensPerSecond(stats);
-    if (throughput !== void 0) speeds.push(`${formatThroughput(throughput)} tok/s`);
-    if (speeds.length > 0) groups.push(speeds.join(" · "));
+    if (throughput !== void 0) groups.push(`${formatThroughput(throughput)} tok/s`);
+    const ttft = averageTtftMs(stats);
+    if (ttft !== void 0) hover.push(`首 token 平均 ${formatSpan(ttft)}`);
+    hover.push(`模型调用 ${stats.turns} 次`);
   }
   const billed = billedInputTokens(stats.usage);
   if (billed > 0 || stats.usage.output > 0) {
+    groups.push(`输入 ${formatTokenCount(billed)} tok · 输出 ${formatTokenCount(stats.usage.output)} tok`);
     if (stats.cacheHitRate !== void 0) {
-      groups.push(`缓存命中 ${(stats.cacheHitRate * 100).toFixed(1)}%`);
+      hover.push(`缓存命中 ${(stats.cacheHitRate * 100).toFixed(1)}%`);
     }
     if (stats.cacheReported) {
-      groups.push(
-        `缓存浪费 ${formatTokenCount(stats.cacheMissedTokens)} tok · ${stats.cacheMissCount} 次`
-      );
+      hover.push(`缓存浪费 ${formatTokenCount(stats.cacheMissedTokens)} tok · ${stats.cacheMissCount} 次`);
     }
-    groups.push(
-      `输入 ${formatTokenCount(billed)} tok · 输出 ${formatTokenCount(stats.usage.output)} tok`
-    );
   }
+  if (hover.length > 0) stats.hoverExtras = hover.join(" · ");
   return groups;
 }
 function SessionStatsLine({
@@ -31834,6 +31840,7 @@ function SessionStatsLine({
   // 分隔符约定：统计行里只用 ` · `。此前这里用 `|`、组内用 ` · `，
 	// 同一行读出两种并列记号（评审提的「分隔符混用」）；比例才用 `/`。
   const line = groups.join(" · ");
+  const fullLine = stats?.hoverExtras !== void 0 && stats.hoverExtras !== "" ? `${line} · ${stats.hoverExtras}` : line;
   reactExports.useLayoutEffect(() => {
     const element2 = rootRef.current;
     if (element2 === null) return;
@@ -31845,7 +31852,7 @@ function SessionStatsLine({
     return () => observer.disconnect();
   }, [line]);
   if (groups.length === 0) return null;
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: rootRef, className: "session-stats", title: truncated ? line : void 0, children: groups.map((group, index2) => (
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { ref: rootRef, className: "session-stats", title: stats?.hoverExtras !== void 0 && stats.hoverExtras !== "" ? fullLine : truncated ? line : void 0, children: groups.map((group, index2) => (
     // key 用分组文本：分组是「按内容生成的」，文本本身即最稳的标识。
     /* @__PURE__ */ jsxRuntimeExports.jsxs(reactExports.Fragment, { children: [
       index2 > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "session-stats-sep", "aria-hidden": "true", children: "·" }),
@@ -34540,10 +34547,9 @@ function ChatView({
             }),
             turnViews.length === 0 && streamTail
           ] }, sessionId),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(ActivityRail, { view: [...turnViews].reverse().find((v) => v.trace !== void 0 && !v.trace.empty), onFocusEntry: (entryId) => {
-            const view = turnViews.find((candidate) => candidate.trace?.segments.some((seg) => seg.entryIds.includes(entryId)));
-            if (view !== void 0) focusEntryInTurn(view, entryId);
-          } }),
+          /* #310 审计：右缘 ActivityRail 已移除 —— 轮头 TraceBar（聚合后每类一段）
+             与右缘 TurnNavRail（轮级导航）已覆盖它的全部信息，三处并陈是重复噪音。
+             组件定义保留（ActivityRail），后续若做「实时活动」浮层可复用。 */
           /* @__PURE__ */ jsxRuntimeExports.jsx(TurnNav, { views: turnViews, scrollRef }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "stream-fade", "data-visible": showJumpToBottom }),
           showJumpToBottom && /* @__PURE__ */ jsxRuntimeExports.jsx(
