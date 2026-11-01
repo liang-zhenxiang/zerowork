@@ -120,6 +120,8 @@ const INVOKE = {
    * 返回导出文件的绝对路径。
    */
   sessionExport: "session:export",
+  sessionExportTxt: "session:export-txt",
+  exportsList: "exports:list",
   /** 使用统计分享卡：渲染层把 canvas 生成的 PNG（dataURL）落进 exports/ 目录。 */
   statsShare: "stats:share",
   /** UI 缩放（#300 F10）：读写 preferences.uiScale（80–150 整数百分比）。 */
@@ -689,8 +691,10 @@ const bridge = {
   archiveSession: (path, archived) => ipcRenderer.invoke(INVOKE.sessionArchive, path, archived),
   pinSession: (path, pinned) => ipcRenderer.invoke(INVOKE.sessionPin, path, pinned),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
-  shareStatsCard: (base64Png, kind) => ipcRenderer.invoke(INVOKE.statsShare, base64Png, kind),
+  shareStatsCard: (base64Png, kind, ext) => ipcRenderer.invoke(INVOKE.statsShare, base64Png, kind, ext),
   exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
+  exportSessionTxt: (path) => ipcRenderer.invoke(INVOKE.sessionExportTxt, path),
+  listExports: () => ipcRenderer.invoke(INVOKE.exportsList),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),
   // 文件时光机：入参统一是 `{ key, id? }`（design.md §3.1），返回值里失败用 ok:false 表达。
   listFileHistory: () => ipcRenderer.invoke(INVOKE.fileHistoryList),

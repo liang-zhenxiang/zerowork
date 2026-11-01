@@ -149,6 +149,10 @@ const INVOKE = {
    * 与 sessionExport（HTML）同形：path 定位会话，返回 { outputPath }。
    */
   sessionExportMarkdown: "session:export-markdown",
+  /* #315 round12 F6：纯文本导出（.txt，剥 markdown 标记）。 */
+  sessionExportTxt: "session:export-txt",
+  /* #315 round12 F8：列出 exports/ 内的导出产物（设置→数据可视化用）。 */
+  exportsList: "exports:list",
   /**
    * 资料库：汇总全部会话交付过的产物（跨会话去重，带来源会话与失效标记）。
    *

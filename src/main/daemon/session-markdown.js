@@ -381,7 +381,22 @@ function renderSessionMarkdown({ title, header, entries, now = new Date() }) {
   meta.push("- 由 ZeroWork 导出");
 
   const blocks = renderSessionBlocks(list);
-  return [`# ${heading}`, meta.join("\n"), ...blocks].join("\n\n") + "\n";
+  /* #315 round12 F1：目录 + 轮次分隔线。目录只收「## 」级标题（每轮的「你 /
+     ZeroWork」小标题）；分隔线插在每段之间，长文档里轮次边界一眼可辨。
+     目录放在元信息之后、正文之前。 */
+  const toc = blocks
+    .map((block, index2) => {
+      const m = /^## (.+)$/m.exec(block);
+      return m === null ? null : { index: index2, label: m[1] };
+    })
+    .filter((item) => item !== null);
+  const tocLines = toc.length > 0 ? ["## 目录", ...toc.map((item) => `${item.index + 1}. ${item.label}`), ""] : [];
+  const separated = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    if (i > 0) separated.push("---");
+    separated.push(blocks[i]);
+  }
+  return [`# ${heading}`, meta.join("\n"), ...tocLines, ...separated].join("\n\n") + "\n";
 }
 
 export {

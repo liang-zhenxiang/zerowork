@@ -74,7 +74,7 @@ import {
 	unmarkReviewed,
 	writeReviewState,
 } from "./review.js";
-import { hasExportableContent, renderSessionMarkdown } from "./session-markdown.js";
+import { hasExportableContent, renderSessionBlocks, renderSessionMarkdown } from "./session-markdown.js";
 import {
 	loadMemorySystemPrompt,
 	profilePath,
@@ -4519,18 +4519,27 @@ const handlers = {
    * 文件系统），也不弹系统保存框（exports/ 是本项目既定的导出目录，
    * 会话导出/审计导出都落这里，用户已经知道去哪找）。
    * base64 解码失败要抛可诊断错误，不静默写半个文件。 */
-  [INVOKE.statsShare]: async ([base64Png, kind]) => {
+  [INVOKE.statsShare]: async ([base64Png, kind, ext]) => {
     if (typeof base64Png !== "string" || base64Png.length === 0) {
       throw new Error("分享卡内容为空，请重试");
+    }
+    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
+    mkdirSync(exportsDir, { recursive: true });
+    /* #315 round12 F4：kind === "file" 是代码块「存为文件」——base64 是
+       text/plain（渲染层已 UTF-8 编码），扩展名由第三参指定（白名单校验）。 */
+    if (kind === "file") {
+      const safeExt = typeof ext === "string" && /^[a-z0-9]{1,8}$/i.test(ext) ? ext : "txt";
+      const buffer = Buffer.from(base64Png.replace(/^data:[^,]*base64,/, ""), "base64");
+      const outputPath = buildExportPath(exportsDir, "ZeroWork-代码片段", new Date(), `.${safeExt}`);
+      writeFileSync(outputPath, buffer);
+      return { outputPath };
     }
     const payload = base64Png.replace(/^data:image\/png;base64,/, "");
     const buffer = Buffer.from(payload, "base64");
     if (buffer.length < 1024) throw new Error("分享卡数据不完整（小于 1KB），请重试");
-    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
-    mkdirSync(exportsDir, { recursive: true });
     /* #290：第二参 kind 决定文件名前缀——"message" 是单条消息导出卡，
      * 缺省仍是统计分享卡（旧调用方零改动）。 */
-    const prefix = kind === "message" ? "ZeroWork-消息卡片" : "ZeroWork-统计分享卡";
+    const prefix = kind === "message" ? "ZeroWork-消息卡片" : kind === "poster" ? "ZeroWork-会话海报" : "ZeroWork-统计分享卡";
     const outputPath = buildExportPath(exportsDir, prefix, /* @__PURE__ */ new Date(), ".png");
     writeFileSync(outputPath, buffer);
     return { outputPath };
@@ -4964,6 +4973,17 @@ const handlers = {
     const title = summary?.title ?? bucket.sessionId;
     const outputPath = buildExportPath(exportsDir, title, /* @__PURE__ */ new Date());
     await host.exportHtml(outputPath);
+    /* #315 round12 F10：HTML 水印 —— </body> 前插一行页脚（pi 的模板没有
+       水印钩子，文本替换是最小侵入；找不到闭合标签就原样保留）。 */
+    const { app: electronApp } = await import("electron");
+    const footer = `<footer style="text-align:center;color:#999;font-size:12px;padding:16px 0">由 ZeroWork 生成 · v${electronApp.getVersion()}</footer>\n`;
+    try {
+      const html = readFileSync(outputPath, "utf8");
+      const idx = html.lastIndexOf("</body>");
+      writeFileSync(outputPath, idx === -1 ? html + footer : html.slice(0, idx) + footer + html.slice(idx), "utf8");
+    } catch {
+      /* 水印失败不阻塞导出 */
+    }
     return { outputPath };
   },
   /**
@@ -5022,8 +5042,70 @@ const handlers = {
       entries,
       now,
     });
-    writeFileSync(outputPath, markdown, "utf8");
+    /* #315 round12 F10：导出水印。页脚一行「由 ZeroWork 生成 · vX.Y.Z」。
+       daemon 是 utilityProcess 的独立 Node 进程，`import("electron")` 拿不到 app ——
+       版本走 daemonEnv 显式传入的 ZEROWORK_APP_VERSION（main/index.js daemonEnv）。 */
+    const watermark = `---\n\n由 ZeroWork 生成 · v${process.env.ZEROWORK_APP_VERSION ?? "0.0.0-dev"}\n`;
+    writeFileSync(outputPath, markdown + watermark, "utf8");
     return { outputPath };
+  },
+  /* #315 round12 F6：纯文本导出（.txt）。与 Markdown 同源数据，但剥掉
+     markdown 标记：标题行去 #、分隔线去掉、强调/代码反引号去掉。段间空行保留。 */
+  [INVOKE.sessionExportTxt]: async ([path]) => {
+    const target = path;
+    const pathError = validateSessionFilePath(target, getSessionsDir());
+    if (pathError !== void 0) throw new Error(pathError);
+    const bucket = findBucketByFile(target);
+    const hostPromise = bucket?.hostPromise;
+    const resolvedTarget = resolve(target);
+    const summary = (await listSessions()).find((s) => resolve(s.path) === resolvedTarget);
+    let entries;
+    let cwd;
+    if (hostPromise !== void 0) {
+      const host = await hostPromise;
+      entries = host.branchEntries();
+      cwd = summary?.cwd ?? bucket.cwd;
+    } else {
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+      const manager = SessionManager.open(target, getSessionsDir());
+      entries = manager.getBranch();
+      cwd = manager.getHeader()?.cwd ?? summary?.cwd ?? "";
+    }
+    if (!hasExportableContent(entries)) throw new Error("该会话还没有内容可导出");
+    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
+    mkdirSync(exportsDir, { recursive: true });
+    const title = summary?.title ?? "";
+    const now = new Date();
+    const blocks = renderSessionBlocks(entries);
+    const plain = blocks
+      .map((block) => block
+        .replace(/^#{1,6} /gm, "")
+        .replace(/^---$/gm, "")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/`([^`]+)`/g, "$1"))
+      .join("\n\n");
+    const header2 = `${title || "会话记录"}\n导出时间：${now.toLocaleString("zh-CN")}\n工作空间：${cwd}\n`;
+    const outputPath = buildExportPath(exportsDir, title, now, ".txt");
+    writeFileSync(outputPath, `${header2}\n${plain}\n\n由 ZeroWork 生成 · v${process.env.ZEROWORK_APP_VERSION ?? "0.0.0-dev"}\n`, "utf8");
+    return { outputPath };
+  },
+  /* #315 round12 F8：导出产物列表。名字/大小/修改时间，最近 20 个（新在前）。 */
+  [INVOKE.exportsList]: async () => {
+    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
+    if (!existsSync(exportsDir)) return [];
+    const names = readdirSync(exportsDir).filter((n) => !n.startsWith("."));
+    const items = [];
+    for (const name of names) {
+      try {
+        const stat = statSync(join(exportsDir, name));
+        if (!stat.isFile()) continue;
+        items.push({ name, size: stat.size, modifiedAt: stat.mtimeMs });
+      } catch {
+        /* 竞态：文件刚被删——跳过 */
+      }
+    }
+    items.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    return items.slice(0, 20);
   },
   /*
    * worktree（对齐清单 C22 / L27）。两者都不碰既有会话：

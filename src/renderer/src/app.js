@@ -13376,6 +13376,7 @@ function Sidebar({
   onPinTask,
   onExportTask,
   onExportMarkdownTask,
+  onExportTxtTask,
   onNewTaskInSpace,
   onRenameWorkspace,
   onRemoveWorkspace,
@@ -13719,6 +13720,22 @@ function Sidebar({
                 onExportMarkdownTask(task.path);
               },
               children: "导出为 Markdown"
+            }
+          ),
+          /* #315 round12 F6：纯文本导出。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              title: "导出为纯文本（.txt，无格式，任何编辑器都能打开）",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                onExportTxtTask(task.path);
+              },
+              children: "导出为纯文本"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -30924,6 +30941,28 @@ function CodeBlockCard({ children }) {
           onClick: () => void copy(text2),
           children: copied ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 13 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 13 })
         }
+      ),
+      /* #315 round12 F4：存为文件。扩展名按语言映射（未知名落 .txt），
+         dataURL 用 window.btoa + encodeURIComponent 处理中文/emoji 等非 Latin1。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "code-block-save",
+          "aria-label": "存为文件",
+          title: "存为文件（exports/ 目录）",
+          onClick: () => {
+            const extMap = { javascript: "js", typescript: "ts", python: "py", json: "json", html: "html", css: "css", bash: "sh", shell: "sh", yaml: "yaml", markdown: "md", diff: "diff", sql: "sql" };
+            const ext = extMap[language] ?? "txt";
+            const dataUrl = `data:text/plain;charset=utf-8;base64,${window.btoa(String.fromCharCode(...new TextEncoder().encode(text2)))}`;
+            window.kami.shareStatsCard(dataUrl, "file", ext).then(({ outputPath }) => {
+              window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: `已存到 ${outputPath}` }] }));
+            }, (error) => {
+              window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: `存文件失败：${String(error).slice(0, 80)}` }] }));
+            });
+          },
+          children: "存为文件"
+        }
       )
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "code-block-body", children: [
@@ -31018,7 +31057,26 @@ const Markdown = React.memo(function Markdown2({
         pre: CodeBlockCard,
         code: renderCode,
         // round9 F3：宽表横向可滚 —— 表格套一层 .table-scroll，窄窗口不再挤爆版心。
-        table: ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "table-scroll", children: /* @__PURE__ */ jsxRuntimeExports.jsx("table", { children }) }),
+        // #315 round12 F3：容器 hover 出现「复制 CSV」——从渲染后的 DOM 读行列
+        // （render 期拿不到结构化数据），逗号/引号/换行按 CSV 规则转义。
+        table: ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "table-scroll", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("table", { children }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+            type: "button",
+            className: "table-csv-btn",
+            "aria-label": "复制表格为 CSV",
+            onClick: (e) => {
+              const table = e.currentTarget.parentElement.querySelector("table");
+              if (table === null) return;
+              const rows = [...table.querySelectorAll("tr")].map((tr) => [...tr.querySelectorAll("th,td")].map((cell) => {
+                const text2 = (cell.textContent ?? "").trim();
+                return /[",\n]/.test(text2) ? `"${text2.replaceAll('"', '""')}"` : text2;
+              }).join(","));
+              navigator.clipboard.writeText(rows.join("\n")).then(() => window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制 CSV" }] })));
+            },
+            children: "复制 CSV"
+          })
+        ] }),
         // 链接一律交给主进程白名单（window.open → openWindowHandler → openExternal）。
         a: ({ href, children }) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "a",
@@ -33235,6 +33293,53 @@ const LONG_ANSWER_LINES = 60;
 function estimateReadMinutes(text2) {
   return Math.max(1, Math.ceil((text2 ?? "").length / 400));
 }
+/* #315 round12 F5：会话海报。1200×1600 竖版：标题 + 轮数/日期 + 前 6 条提问。
+   复用统计分享卡的视觉语言（深墨底 + 极光）。 */
+function drawSessionPoster(title, prompts) {
+  const c = document.createElement("canvas");
+  c.width = 1200;
+  c.height = 1600;
+  const ctx = c.getContext("2d");
+  if (ctx === null) return c.toDataURL("image/png");
+  ctx.fillStyle = "#14102A";
+  ctx.fillRect(0, 0, 1200, 1600);
+  const aurora = ctx.createRadialGradient(950, 200, 60, 950, 200, 520);
+  aurora.addColorStop(0, "rgba(109, 74, 255, 0.45)");
+  aurora.addColorStop(1, "rgba(109, 74, 255, 0)");
+  ctx.fillStyle = aurora;
+  ctx.fillRect(0, 0, 1200, 1600);
+  const aurora2 = ctx.createRadialGradient(220, 1450, 60, 220, 1450, 560);
+  aurora2.addColorStop(0, "rgba(0, 194, 168, 0.4)");
+  aurora2.addColorStop(1, "rgba(0, 194, 168, 0)");
+  ctx.fillStyle = aurora2;
+  ctx.fillRect(0, 0, 1200, 1600);
+  ctx.strokeStyle = "rgba(109, 74, 255, 0.5)";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(36, 36, 1128, 1528);
+  ctx.fillStyle = "#F4F1FC";
+  ctx.font = "600 56px system-ui, -apple-system, 'PingFang SC', sans-serif";
+  const titleClip = title.length > 18 ? `${title.slice(0, 18)}…` : title;
+  ctx.fillText(titleClip, 84, 220);
+  ctx.font = "400 30px system-ui, -apple-system, 'PingFang SC', sans-serif";
+  ctx.fillStyle = "rgba(244, 241, 252, 0.72)";
+  ctx.fillText(`${prompts.length} 个提问 · ${new Date().toLocaleDateString("zh-CN")}`, 84, 280);
+  ctx.fillStyle = "#00C2A8";
+  ctx.fillRect(84, 330, 96, 8);
+  let y = 430;
+  ctx.font = "400 34px system-ui, -apple-system, 'PingFang SC', sans-serif";
+  for (let i = 0; i < Math.min(6, prompts.length); i += 1) {
+    ctx.fillStyle = "#6D4AFF";
+    ctx.fillText(`${i + 1}`, 84, y);
+    ctx.fillStyle = "#EDEAF8";
+    const line = prompts[i].length > 26 ? `${prompts[i].slice(0, 26)}…` : prompts[i];
+    ctx.fillText(line, 130, y);
+    y += 96;
+  }
+  ctx.fillStyle = "rgba(244, 241, 252, 0.55)";
+  ctx.font = "400 26px system-ui, -apple-system, 'PingFang SC', sans-serif";
+  ctx.fillText("由 ZeroWork 生成", 84, 1516);
+  return c.toDataURL("image/png");
+}
 function LongAnswerFold({ text: text2, children }) {
   const lines = (text2 ?? "").split("\n").length;
   const over = lines > LONG_ANSWER_LINES;
@@ -34009,6 +34114,32 @@ function ChatView({
      （search-hit）互不干扰：两个 class、两套清理。 */
   const [findQuery, setFindQuery] = reactExports.useState("");
   const [findCount, setFindCount] = reactExports.useState(0);
+  /* #315 round12 F2：选中存为片段。只在 .stream 内选中文本时出现浮条。 */
+  const [selState, setSelState] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    const onSel = () => {
+      const sel = window.getSelection();
+      if (sel === null || sel.isCollapsed) {
+        setSelState(void 0);
+        return;
+      }
+      const text2 = sel.toString().trim();
+      if (text2 === "") {
+        setSelState(void 0);
+        return;
+      }
+      const range = sel.getRangeAt(0);
+      const host = range.commonAncestorContainer instanceof Element ? range.commonAncestorContainer : range.commonAncestorContainer.parentElement;
+      if (host === null || host.closest(".stream") === null) {
+        setSelState(void 0);
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      setSelState({ text: text2.slice(0, 2000), x: rect.left + rect.width / 2, top: rect.top });
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => document.removeEventListener("selectionchange", onSel);
+  }, []);
   reactExports.useEffect(() => {
     const root = scrollRef.current;
     if (root === null) return;
@@ -34157,7 +34288,10 @@ function ChatView({
         const n = scrollRef.current;
         if (n === null) return;
         const maxScroll = n.scrollHeight - n.clientHeight;
-        if (saved < maxScroll - 240) {
+        /* 判据改造（#312）：240 的「别打扰」余量在折叠态（LongAnswerFold 把
+           回答夹到 12ex）下把 maxScroll 压到 123 —— saved 永远过不了线。
+           改为：位置有效且不是「已到底」，就值得恢复。 */
+        if (saved > 0 && saved < maxScroll - 24) {
           n.scrollTop = saved;
           setShowJumpToBottom(true);
           followRef.current = false;
@@ -34931,9 +35065,57 @@ function ChatView({
                 /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tools-sep", "aria-hidden": "true", children: "·" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tool-btn", "aria-label": "缩小会话字号", onClick: () => setChatFontSize(chatFontSize - 1), children: "A−" }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tool-btn", "aria-label": "放大会话字号", onClick: () => setChatFontSize(chatFontSize + 1), children: "A+" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tool-font", children: `${chatFontSize}px` })
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tool-font", children: `${chatFontSize}px` }),
+                /* #315 round12 F5：会话海报 */
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tools-sep", "aria-hidden": "true", children: "·" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+                  type: "button",
+                  className: "chat-tool-btn",
+                  onClick: () => {
+                    const prompts = turnViews.filter((v) => v.userEntry !== void 0).map((v) => v.userEntry.text ?? "").filter((t) => t !== "");
+                    const posterTitle = prompts[0] !== void 0 && prompts[0] !== "" ? prompts[0] : "ZeroWork 会话";
+                    const dataUrl = drawSessionPoster(posterTitle, prompts);
+                    window.kami.shareStatsCard(dataUrl, "poster").then(({ outputPath }) => {
+                      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: `海报已存到 ${outputPath}` }] }));
+                    }, (error) => {
+                      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: `海报生成失败：${String(error).slice(0, 80)}` }] }));
+                    });
+                  },
+                  children: "生成海报"
+                })
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SessionStatsLine, { stats: conversation.sessionStats })
+              /* @__PURE__ */ jsxRuntimeExports.jsx(SessionStatsLine, { stats: conversation.sessionStats }),
+              /* #315 round12 F2：选中浮条（存片段 / 复制）。 */
+              selState !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "selection-bar", style: { left: selState.x, top: selState.top - 44 }, children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+                  type: "button",
+                  onClick: () => {
+                    try {
+                      const raw = window.localStorage.getItem("zw:snippets");
+                      const list = raw === null ? [] : JSON.parse(raw);
+                      const next = [{ text: selState.text, at: Date.now() }, ...Array.isArray(list) ? list : []].slice(0, 50);
+                      window.localStorage.setItem("zw:snippets", JSON.stringify(next));
+                      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已存为片段（⌘K 搜「片段」可取用）" }] }));
+                    } catch {
+                      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "片段保存失败（存储不可用）" }] }));
+                    }
+                    window.getSelection()?.removeAllRanges();
+                    setSelState(void 0);
+                  },
+                  children: "存为片段"
+                }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+                  type: "button",
+                  onClick: () => {
+                    navigator.clipboard.writeText(selState.text).then(() => {
+                      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制" }] }));
+                      window.getSelection()?.removeAllRanges();
+                      setSelState(void 0);
+                    });
+                  },
+                  children: "复制"
+                })
+              ] })
             ] })
           )
         ] })
@@ -65404,6 +65586,60 @@ function BehaviorSection({
     ] }) })
   ] });
 }
+/* #315 round12 F9：首页快捷短语管理器（增删改，≤4 条，localStorage 持久化）。
+   与 Composer 的 quickChips 读同一 key（zw:quick-chips），保存即时生效。 */
+const QUICK_CHIPS_LIMIT = 4;
+function QuickChipsEditor() {
+  const [chips, setChips] = reactExports.useState(() => {
+    try {
+      const raw = window.localStorage.getItem("zw:quick-chips");
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.every((s) => typeof s === "string")) return parsed;
+      }
+    } catch {
+    }
+    return ["总结一下刚才的结论", "列出接下来的待办", "把上面的方案写进文档"];
+  });
+  const [saved, setSaved] = reactExports.useState(false);
+  const persist = (next) => {
+    setChips(next);
+    try {
+      window.localStorage.setItem("zw:quick-chips", JSON.stringify(next));
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1500);
+    } catch {
+      /* 隐私模式：静默放弃 */
+    }
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "settings-section", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-card", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "首页快捷短语" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-hint", children: "首页输入框上方的一键短语（最多 4 条）。" }),
+    chips.map((chip, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "chip-edit-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        type: "text",
+        value: chip,
+        maxLength: 24,
+        "aria-label": `短语 ${index + 1}`,
+        onChange: (e) => persist(chips.map((c, i2) => i2 === index ? e.target.value : c))
+      }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "chip-edit-del",
+        "aria-label": `删除短语 ${index + 1}`,
+        onClick: () => persist(chips.filter((_, i2) => i2 !== index)),
+        children: "删除"
+      })
+    ] }, `${index}-${chip}`)),
+    chips.length < QUICK_CHIPS_LIMIT && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      type: "button",
+      className: "chip-edit-add",
+      onClick: () => persist([...chips, "新短语"]),
+      children: "添加一条"
+    }),
+    saved && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chip-edit-saved", children: "已保存" })
+  ] }) });
+}
 function PersonalizationSection({ busy }) {
   const [info2, setInfo] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
@@ -65433,7 +65669,9 @@ function PersonalizationSection({ busy }) {
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "settings-section", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(CustomInstructionsSection, { busy, saved: info2.customInstructions, onSubmit: submit }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(IdentitySection, { busy, saved: info2, onSubmit: submit }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(BehaviorSection, { busy, info: info2, onToggle: toggle })
+      /* @__PURE__ */ jsxRuntimeExports.jsx(BehaviorSection, { busy, info: info2, onToggle: toggle }),
+      /* #315 round12 F9：首页快捷短语管理 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(QuickChipsEditor, {})
     ] })
   ] });
 }
@@ -67047,6 +67285,11 @@ function DataManagementSection() {
   const [error, setError] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
   const [busy, setBusy] = reactExports.useState(false);
+  /* #315 round12 F8：导出产物列表（exports/ 目录最近 20 个）。 */
+  const [exportItems, setExportItems] = reactExports.useState([]);
+  reactExports.useEffect(() => {
+    window.kami.listExports?.().then((items) => setExportItems(Array.isArray(items) ? items : [])).catch(() => setExportItems([]));
+  }, []);
   const load = reactExports.useCallback(async () => {
     try {
       setSessions(await window.kami.listSessions());
@@ -67133,6 +67376,15 @@ function DataManagementSection() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-bar-fill", style: { width: `${sessions.length === 0 ? 0 : Math.round(archived.length / sessions.length * 100)}%` } }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-bar-text", children: sessions.length === 0 ? "暂无数据" : `归档占比 ${Math.round(archived.length / sessions.length * 100)}%` })
       ] })
+    ] }),
+    /* #315 round12 F8：导出产物（exports/ 目录最近 20 个）。 */
+    exportItems.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "导出产物" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-hint", children: "exports/ 目录里最近的 20 个文件（分享卡、海报、代码片段、导出的会话）。" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "exports-list", children: exportItems.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "exports-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "exports-name", title: item.name, children: item.name }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "exports-meta", children: `${item.size >= 1024 ? `${(item.size / 1024).toFixed(1)} KB` : `${item.size} B`} · ${new Date(item.modifiedAt).toLocaleString("zh-CN")}` })
+      ] }, item.name)) })
     ] }),
     error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : sessions === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取会话…" }) : archived.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "没有已归档的任务。在任务行的 ⋯ 菜单里选择「归档」即可收进这里。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "preview-segments", children: archived.map((task) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "seg-card", children: confirmingPath === task.path ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "seg-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "确认删除？文件将移入回收目录。" }),
@@ -74357,6 +74609,20 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [openArtifact]
   );
+  /* #315 round12 F6：纯文本导出（与 exportMarkdownTask 同一套进度/成功/失败 toast）。 */
+  const exportTxtTask = reactExports.useCallback(
+    (path2) => {
+      showToast("正在导出纯文本…", "loading");
+      window.kami.exportSessionTxt(path2).then(({ outputPath }) => {
+        showToast(`已导出：${outputPath}`, "success");
+        openArtifact(outputPath);
+      }).catch((error) => {
+        showToast(error instanceof Error ? error.message : String(error), "error");
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [openArtifact]
+  );
   const branchFromUserMessage = reactExports.useCallback(
     (mode, userIndex, refillText, opts) => {
       const path2 = taskListRef.current?.find((item) => item.current)?.path;
@@ -74819,6 +75085,7 @@ function App() {
         onPinTask: pinTask,
         onExportTask: exportTask,
         onExportMarkdownTask: exportMarkdownTask,
+        onExportTxtTask: exportTxtTask,
         onNewTaskInSpace: newTaskInSpace,
         onRenameWorkspace: renameWorkspace,
         onRemoveWorkspace: removeWorkspace,

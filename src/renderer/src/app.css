@@ -4952,9 +4952,13 @@ textarea:focus-visible {
 }
 
 .markdown blockquote {
+	/* #315 round12 F7 统一：accent 竖条 + 弱底 + 圆角（引用块原本只有灰边条，
+	   与「引用回复」草稿的视觉不一致）。 */
 	margin: var(--space-3) 0;
-	padding: var(--space-1) var(--space-4);
-	border-left: 3px solid var(--border);
+	padding: var(--space-3) var(--space-4);
+	border-left: 3px solid var(--accent);
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	background: color-mix(in srgb, var(--accent) 6%, transparent);
 	color: var(--text-secondary);
 }
 
@@ -16970,4 +16974,148 @@ mark.find-hit {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+
+/* ── §29 第十二轮十连（#315） ───────────────────────────────────── */
+/* F3 表格复制 CSV：容器 hover 才现，右上角小字按钮。 */
+.table-scroll {
+	position: relative;
+}
+.table-csv-btn {
+	position: absolute;
+	right: var(--space-2);
+	top: var(--space-1);
+	padding: 0 var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	opacity: 0;
+	transition: opacity var(--dur-fast) var(--ease-standard);
+}
+.table-scroll:hover .table-csv-btn {
+	opacity: 1;
+}
+.table-csv-btn:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+.table-csv-btn:focus-visible {
+	opacity: 1;
+}
+
+/* F4 代码块存为文件：与复制按钮同排同型（文字型）。 */
+.code-block-save {
+	padding: 1px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+}
+.code-block-save:hover {
+	background: color-mix(in srgb, var(--text) 12%, transparent);
+	color: var(--text);
+	border-color: var(--border);
+}
+
+/* F9 快捷短语编辑器 */
+.chip-edit-row {
+	display: flex;
+	gap: var(--space-2);
+	margin-bottom: var(--space-2);
+}
+.chip-edit-row input {
+	flex: 1;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	color: var(--text);
+	font-size: var(--text-sm);
+}
+.chip-edit-row input:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+.chip-edit-del,
+.chip-edit-add {
+	padding: var(--space-1) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+.chip-edit-del:hover {
+	color: var(--danger);
+	border-color: var(--danger);
+}
+.chip-edit-add:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+.chip-edit-saved {
+	margin-left: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--accent);
+}
+
+/* F2 选中浮条：跟随选区中点上方；两枚小按钮。 */
+.selection-bar {
+	position: fixed;
+	transform: translateX(-50%);
+	z-index: var(--z-toast);
+	display: flex;
+	gap: var(--space-1);
+	padding: var(--space-1);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	box-shadow: var(--shadow-md);
+}
+.selection-bar button {
+	padding: var(--space-1) var(--space-2);
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text);
+	font-size: var(--text-meta);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.selection-bar button:hover {
+	background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* F8 导出产物列表 */
+.exports-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+.exports-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+}
+.exports-name {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-sm);
+	color: var(--text);
+}
+.exports-meta {
+	flex: none;
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+	color: var(--text-faint);
 }

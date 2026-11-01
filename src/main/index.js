@@ -280,7 +280,7 @@ async function applyInitialProxy() {
 }
 
 function daemonEnv() {
-  const env = { ...process.env, ZEROWORK_APP_DIR: app.getAppPath() };
+  const env = { ...process.env, ZEROWORK_APP_DIR: app.getAppPath(), ZEROWORK_APP_VERSION: app.getVersion() };
   // ── 代理（spec: proxy-settings）──────────────────────────────────
   // daemon 里的 pi 内核通过 undici 的 EnvHttpProxyAgent 读这两个变量
   // （见 daemon/network.js）。直连时显式删掉：父进程环境里残留的代理变量
