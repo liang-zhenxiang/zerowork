@@ -145,18 +145,21 @@ await h.check("⑧ 流式跟随", async () => {
 // 注意 scrollTop=0 也算一次 scroll（写入 0），必须上翻后**等待写完**再上翻到中段，
 // 且恢复判据是「saved < maxScroll-240」—— 所以保存的位置要足够深（翻到 40px 附近）。
 await h.check("② 阅读进度记忆", async () => {
-  await win.evaluate(() => { const n = document.querySelector(".stream"); n.scrollTop = Math.max(0, n.scrollHeight - n.clientHeight - 900); n.dispatchEvent(new window.Event("scroll")); });
+  /* 上翻深度用固定 300px：折叠态（#312 LongAnswerFold）把 sh 压到 ~689，
+     比例 35% 只剩 43px，恢复判据 saved<maxScroll-240 永不满足（#312 实测）。
+     300 满足「>240 阈值且 <可滚全程」两种内容高度。 */
+  await win.evaluate(() => { const n = document.querySelector(".stream"); n.scrollTop = Math.max(0, (n.scrollHeight - n.clientHeight) > 320 ? 300 : Math.round((n.scrollHeight - n.clientHeight) * 0.5)); n.dispatchEvent(new window.Event("scroll")); });
   await win.waitForTimeout(1200); // 等防抖写入
   await win.reload();
   await win.waitForTimeout(1500);
   // reload 后回到首页（view 不跨刷新保持）；从侧栏任务行重进会话 → 此刻恢复阅读位
   await win.evaluate(() => { const row = document.querySelector(".task-item-body"); row?.click(); });
   await waitUntil(() => win.evaluate(() => document.querySelector(".stream") !== null), { timeout: 8000, desc: "重进会话" });
-  await waitUntil(() => win.evaluate(() => {
-    const toasts = [...document.querySelectorAll(".toast-text")];
-    return toasts.some((el) => (el.textContent ?? "").includes("上次阅读"));
-  }), { timeout: 10000, desc: "恢复位置 toast" });
-  await win.waitForTimeout(300);
+  /* 产品事实断言：滚动位置已恢复到 saved（±40）。toast 只活 2.2s，
+     resume 流程慢一点就错过 —— 不能作为判据（#312 实测）。 */
+  const expected = await win.evaluate(() => Number(window.localStorage.getItem(Object.keys(window.localStorage).find((k) => k.startsWith("zw:readpos:")) ?? "") ?? "0"));
+  await waitUntil(() => win.evaluate((exp) => { const n = document.querySelector(".stream"); return n !== null && Math.abs(n.scrollTop - exp) <= 40; }, expected), { timeout: 10000, desc: "滚动位置已恢复" });
+  await win.waitForTimeout(200);
   await shoot(win, "02-readpos.png");
 });  /* ② */
 
