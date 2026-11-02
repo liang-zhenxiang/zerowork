@@ -31,6 +31,7 @@
 
 ### 变更
 
+- 构建工具升到 vite 8（rolldown 内核）：本地全量构建从约 30 秒降到 5 秒，随包载荷从 165 MB 降到 142 MB，端到端测试与产物契约不变。electron-vite 同步升到 6；`dependabot.yml` 里针对 `vite` 与 `@vitejs/plugin-react` 的两条 major ignore 已移除，此后它们的大版本会照常提 PR（#182）
 - 引用块（blockquote）统一样式：左缘强调竖条 + 弱底色
 
 ## [0.16.0] - 2026-11-01
