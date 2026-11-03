@@ -13346,6 +13346,9 @@ const NAV_ITEMS$1 = [
   { icon: IconLibrary, label: "资料库", ready: true },
   { icon: IconMore, label: "更多", ready: false }
 ];
+/** 「规划中」分组的成员。默认折叠：这两项不可点，展开后才有意义；
+ * 常驻展开会在 860 逻辑高下把最后一项切在中间（侧栏导航区要滚动才能看全）。 */
+const PLANNED_NAV_ITEMS = NAV_ITEMS$1.filter((item) => !item.ready);
 const TASKS_COLLAPSED_COUNT = 5;
 /**
  * 会话行 ⋯ 菜单翻转判定的余量（px）。等于 `--space-3`（8px）那一档 ——
@@ -13428,6 +13431,9 @@ function Sidebar({
   const [renamingCwd, setRenamingCwd] = reactExports.useState(void 0);
   const [removingCwd, setRemovingCwd] = reactExports.useState(void 0);
   const [tasksCollapsed, setTasksCollapsed] = reactExports.useState(false);
+  /* 「规划中」默认收起：两项都不可点，展开只会把导航区撑到需要滚动，
+     而滚动容器的可视高度又恰好会切在其中一项中间（视觉上像坏了）。 */
+  const [planningCollapsed, setPlanningCollapsed] = reactExports.useState(true);
   /* #300 F4'：侧栏任务即时过滤。过滤词非空时窗口全开（过滤本身就说明
    * 用户在找具体某条，「查看更多」再藏一半是反作用）；清空恢复原窗口。 */
   const [taskFilter, setTaskFilter] = reactExports.useState("");
@@ -14159,8 +14165,20 @@ function Sidebar({
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setSelectedPaths(/* @__PURE__ */ new Set()), children: "取消" })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "section-title", children: "规划中" }),
-        NAV_ITEMS$1.filter((item) => !item.ready).map(renderNavItem)
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            className: "section-title section-title-btn",
+            "aria-expanded": !planningCollapsed,
+            onClick: () => setPlanningCollapsed((prev) => !prev),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 12, className: planningCollapsed ? "section-chevron section-chevron-collapsed" : "section-chevron" }),
+              `规划中 (${PLANNED_NAV_ITEMS.length})`
+            ]
+          }
+        ),
+        !planningCollapsed && PLANNED_NAV_ITEMS.map(renderNavItem)
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-scroll", children: [
