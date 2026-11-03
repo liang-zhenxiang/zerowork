@@ -15882,6 +15882,10 @@ function OnboardingChecklist({
       go: onFocusComposer
     }
   ];
+  /* 未全部完成时只列「还差什么」：已完成的行留在首屏，除了占掉一块高度、
+     把下方的案例区推得更远，没有别的信息增量（它已经不影响用户下一步做什么）。
+     全部完成后用户主动展开（allDone && expanded）时才把三项都列出来，作为回顾。 */
+  const visibleRows = allDone ? rows : rows.filter((row) => !row.done);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     allDone && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "context-row", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
@@ -15893,7 +15897,7 @@ function OnboardingChecklist({
       }
     ) }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-guide", role: "status", children: [
-      rows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      visibleRows.map((row) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "div",
         {
           /* 整行可点（issue #72）：未完成行点击 = 该行 go 的同一动作——静态状态

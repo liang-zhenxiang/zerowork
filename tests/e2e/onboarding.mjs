@@ -227,7 +227,7 @@ await h.check("点清单里的工作空间去处，工作空间下拉被顶开",
 	});
 });
 
-await h.check("在下拉里新建一个工作空间，清单那一项随即变成已完成", async () => {
+await h.check("在下拉里新建一个工作空间，清单随即收起那一行", async () => {
 	// 走真实交互（playwright 的 fill / click），不用页面里造事件那套 ——
 	// 受控输入靠手工 dispatchEvent 更容易写错，也测不出组件是不是真的接住了输入。
 	await win.locator(".ws-action").filter({ hasText: "新建工作空间" }).click();
@@ -246,10 +246,13 @@ await h.check("在下拉里新建一个工作空间，清单那一项随即变�
 	);
 	await waitUntil(async () => (await readChecklist()).actionCount === 2, {
 		timeout: 30_000,
-		desc: "清单里未完成的项从 3 变成 2（工作空间那项勾上了）",
+		desc: "清单里未完成的项从 3 变成 2",
 	});
 	const now = await readChecklist();
-	assert.ok(now.text.includes("已有工作空间"), `工作空间那一项没有变成已完成：${now.text}`);
+	/* 2026-11-04：已完成的行从清单里收起（只列还差什么），所以这里断言的是
+	   「该行消失」而不是「出现勾」。行数从 4 降到 3（两项待办 + 本地优先）。 */
+	assert.ok(!now.text.includes("已有工作空间"), `工作空间完成后该行应从清单里收起：${now.text}`);
+	assert.equal(now.rowCount, 3, `清单应从 4 行降到 3 行（两项待办 + 本地优先），实为 ${now.rowCount}`);
 	await h.shoot("checklist-after-workspace");
 });
 
