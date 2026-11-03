@@ -361,6 +361,28 @@ await h.check("点「上手清单」能再调出来，且三项都标成已完�
 // 属性」「「项目」没有 disabled 属性」）。未就绪组剩下 2 项，断言口径不变；
 // 实装项转入下方「已就绪」的正断言。
 await h.check("侧栏未就绪项带 disabled、指针不是 pointer、降灰那一档还在", async () => {
+	// 「规划中」2026-11-03 起默认折叠：先展开，再核对两项的禁用态。
+	// 折叠的理由写在 app.js 的 PLANNED_NAV_ITEMS 注释里 —— 常驻展开时导航区
+	// 需要滚动，而滚动容器的可视高度恰好会把最后一项切在中间（看着像坏了）。
+	const collapsedByDefault = await win.evaluate(() => {
+		const btn = [...document.querySelectorAll(".sidebar-nav .section-title-btn")].find(
+			(b) => (b.textContent || "").includes("规划中"),
+		);
+		return btn !== undefined && btn.getAttribute("aria-expanded") === "false";
+	});
+	assert.equal(collapsedByDefault, true, "「规划中」应默认折叠（展开会把最后一项切在滚动边界上）");
+
+	const expanded = await win.evaluate(() => {
+		const btn = [...document.querySelectorAll(".sidebar-nav .section-title-btn")].find(
+			(b) => (b.textContent || "").includes("规划中"),
+		);
+		if (btn === undefined) return false;
+		if (btn.getAttribute("aria-expanded") !== "true") btn.click();
+		return true;
+	});
+	assert.ok(expanded, "侧栏没有可展开的「规划中」分组标题");
+	await new Promise((resolve) => setTimeout(resolve, 60));
+
 	for (const label of ["助理", "更多"]) {
 		const item = await readNavItem(label);
 		assert.ok(item !== null, `侧栏没有「${label}」`);
