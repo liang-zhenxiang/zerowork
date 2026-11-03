@@ -6,7 +6,7 @@
  *
  *   ① delivered 态:会话以交付收尾(present_files 后模型无文本)→ 摘要「已交付 …」;
  *   ② text 态:会话以文本收尾 → 摘要是末句;
- *   ③ fallback 态:纯工具流、无交付无文本 → 「最近 N 轮对话」(错误态不伪装成加载态);
+ *   ③ fallback 态:纯工具流、无交付无文本 → 摘要行省略,条数由注脚给出;
  *   ④ running 链路:回合进行中回首页 → 卡带 is-running 与「进行中」文字;
  *      回合收尾后(sessionListPush → 重拉 digest)→ 信号消失、摘要为终态。
  *
@@ -241,16 +241,18 @@ await h.check("文本收尾的会话,摘要呈现末句", async () => {
 });
 
 // ── ③ fallback 态 ────────────────────────────────────────────
-await h.check("纯工具流的会话,摘要退化为「最近 N 条消息」而非骨架", async () => {
+await h.check("纯工具流的会话：摘要行省略，条数只由注脚给出", async () => {
 	await startFreshSession();
 	await sendTurn("静默模式下读一下文件");
 	await backHome();
 	const deck = await waitForDeck(
-		(d) => d.present && d.cards.some((c) => /最近 \d+ 条消息/.test(c.digest)),
-		"摘要出现「最近 N 条消息」"
+		(d) => d.present && d.cards.some((c) => c.digestEmpty && c.meta.includes("条消息")),
+		"出现「摘要留空、注脚有条数」的卡"
 	);
-	const card = deck.cards.find((c) => /最近 \d+ 条消息/.test(c.digest));
-	assert.equal(card.digestEmpty, false, "fallback 不是骨架——错误/退化态不伪装成加载态");
+	const card = deck.cards.find((c) => c.digestEmpty && c.meta.includes("条消息"));
+	/* 没有交付物也没有文本摘要时，摘要行整行不渲染：条数已经写在注脚里，
+	   再写一句「最近 N 条消息」就是同一张卡上把同一件事说两遍（2026-11-03 视觉巡检）。 */
+	assert.equal(card.digestEmpty, true, "无交付无文本时摘要行应整行省略");
 	/* 注脚单位:messageCount 是 user+assistant 条数之和,不是轮数(评审 R1)——
 	   「N 条消息」与摘要同源同量纲;0 条时注脚省略该项(R3),时间项永远在。 */
 	assert.ok(card.meta.includes("条消息"), `注脚应以「条消息」为单位:${card.meta}`);
