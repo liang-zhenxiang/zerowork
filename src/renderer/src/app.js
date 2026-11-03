@@ -15616,15 +15616,17 @@ function pickBestLocalCandidate(candidates) {
  */
 function homeDigestFallbackText(task) {
   const count = task.messageCount ?? 0;
-  /* 单位是「条消息」不是「轮」:messageCount 是 user+assistant 条数之和(1 问 1 答
-     计 2),写「轮」数字会说谎(设计评审 R1,2026-10-12)。 */
-  return count > 0 ? `最近 ${count} 条消息` : "还没有对话";
+  /* 有消息、但没有交付物也没有文本摘要时返回 null（调用方整行不渲染）：
+     条数已经由 meta 行的「N 条消息」给出，摘要行再写一遍「最近 N 条消息」
+     就是同一张卡上把同一件事说两遍（2026-11-03 视觉巡检）。
+     0 条时保留「还没有对话」——那份 meta 会省略条数，不构成重复。 */
+  return count > 0 ? null : "还没有对话";
 }
 /*
  * 摘要行的文案。返回 undefined 表示「还没到」（调用方渲染同尺寸骨架，数据到达时
  * 同一片区域被填上，不是整块替换）；delivered / text 按 digest 的事实呈现；
- * fallback / error / 整体拉取失败都落到「最近 N 条消息」——错误态不伪装成加载态，
- * 卡内高度稳定（App 层在拉取失败时会把每个 path 归一成 fallback，见那边注释）。
+ * fallback / error / 整体拉取失败返回 null（调用方整行不渲染，条数由 meta 行给出，
+ * 不在同一张卡上把同一件事说两遍）。
  */
 function homeDigestText(digest, task) {
   if (digest === void 0) return void 0;
@@ -15686,7 +15688,7 @@ function HomeResumeDeck({ sessions, digests, onResume, onClear }) {
                 "进行中"
               ] })
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-digest", children: summary === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: GUIDE_SKELETON_TEXT_STYLE, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "72%" }) }) : summary }),
+            /* @__PURE__ */ summary !== null && jsxRuntimeExports.jsx("span", { className: "home-resume-digest", children: summary === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { style: GUIDE_SKELETON_TEXT_STYLE, children: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: "72%" }) }) : summary }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-resume-meta", children: [
               workspace !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-resume-meta-ws", children: workspace }),
               workspace !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { "aria-hidden": "true", children: "·" }),
