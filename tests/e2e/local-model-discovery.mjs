@@ -619,10 +619,8 @@ await h.check("命中：首页命中态在深色下也正常渲染（截图 + �
 });
 
 /* ══════════════════════════════════════════════════════════════════════
- * ③ 接入：连点两下只发生一次（进行中守卫），一步变成已完成
+ * ③ 接入：连点两下只发生一次（进行中守卫），这一步完成后从清单里收起
  * ══════════════════════════════════════════════════════════════════════ */
-
-const iconBefore = ((await readGuideRows())[1] ?? {}).iconLen;
 
 await h.check("连点两下「接上」只接入一次（mock 侧 /models 请求增量 = 1）", async () => {
 	/*
@@ -670,10 +668,16 @@ await h.check("连点两下「接上」只接入一次（mock 侧 /models 请求
 	});
 	// ② 再等界面收口
 	try {
-		await waitUntil(async () => (await readGuideRows())[1]?.text === "已选定可用模型", {
-			timeout: 30_000,
-			desc: "接入完成后第 2 步变成「已选定可用模型」",
-		});
+		await waitUntil(
+			async () => {
+				const rows = await readGuideRows();
+				return rows.length === 3 && !rows.some((row) => row.text.includes("模型"));
+			},
+			{
+				timeout: 30_000,
+				desc: "接入完成后「模型」这一步从清单里收起",
+			},
+		);
 	} catch (error) {
 		// 把现场读出来再抛：这几种形态指向的原因完全不同（toast 里有 daemon 给的原因，
 		// usable 里有没有那个模型键则区分「配置没写成」与「写成了但判据没认」）。
@@ -701,18 +705,17 @@ await h.check("连点两下「接上」只接入一次（mock 侧 /models 请求
 	);
 });
 
-await h.check("接入后首页第 2 步变成已完成（文案 + 对勾 + 不见按钮）", async () => {
+await h.check("接入后「模型」这一步从清单里收起（已完成项不占首屏）", async () => {
 	await h.shoot("home-connected-light");
 	const rows = await readGuideRows();
-	const model = rows[1];
-	assert.equal(model.text, "已选定可用模型", `接入后第 2 步文案不对：${JSON.stringify(model.text)}`);
-	assert.equal(model.action, null, `已完成的行还留着动作按钮：${JSON.stringify(model.action)}`);
-	assert.equal(model.clickable, false, "已完成的行不该再挂 .home-guide-row-action");
-	assert.notEqual(
-		model.iconLen,
-		iconBefore,
-		"接入后行图标没有换成对勾（innerHTML 长度与接入前一致）—— 这一步看上去没完成",
+	/* 2026-11-04：已完成的行收起，只列还差什么。原来这条断言的是「文案换成
+	   『已选定可用模型』+ 对勾 + 不见按钮」，现在这一步整行消失 —— 它已经完成，
+	   留在首屏只会把下面的案例区推得更远。 */
+	assert.ok(
+		!rows.some((row) => row.text.includes("模型")),
+		`「模型」这一步接入成功后仍留在清单里：${JSON.stringify(rows.map((r) => r.text))}`,
 	);
+	assert.equal(rows.length, 3, `清单应从 4 行降到 3 行（两项待办 + 本地优先），实为 ${rows.length}`);
 });
 
 await h.check("接入后发一条消息真的走通：mock 收到 /chat/completions，且用的就是被接入的那个模型", async () => {
