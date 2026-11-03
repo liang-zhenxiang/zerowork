@@ -76,6 +76,16 @@ async function snapshot() {
 	}));
 }
 
+// 「规划中」2026-11-03 起默认折叠：未就绪项（助理 / 更多）要先展开才会渲染。
+// 本文件要逐个导航到它们，所以在这里一次性展开，后面不必逐个处理。
+await win.evaluate(() => {
+	const btn = [...document.querySelectorAll(".sidebar-nav .section-title-btn")].find(
+		(b) => (b.textContent || "").includes("规划中"),
+	);
+	if (btn !== undefined && btn.getAttribute("aria-expanded") !== "true") btn.click();
+});
+await h.waitForSettled();
+
 // 记录基线：欢迎页
 const baseline = await snapshot();
 console.log(`基线（欢迎页）: ${baseline.elementCount} 元素, ${baseline.textLen} 字符`);
