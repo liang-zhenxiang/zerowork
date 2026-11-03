@@ -1,0 +1,9 @@
+{
+  "id": "10-24-focus-mode",
+  "name": "focus-mode",
+  "title": "专注模式：把会话区从「工具界面」切成「阅读界面」",
+  "status": "completed",
+  "createdAt": "2026-10-24",
+  "branch": "feat/focus-mode",
+  "completedAt": "2026-11-03"
+}
