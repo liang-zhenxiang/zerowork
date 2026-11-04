@@ -13361,10 +13361,91 @@ const TASK_SKELETON_TITLE_STYLE = {
   alignItems: "center",
   minHeight: "1lh"
 };
+/* #327 round13 F1：并行面板。运行中 ≥2 时从聚合条弹出的任务清单：
+   名字 + 已运行时长，点击行切到该会话。数据就是 taskList 的 running 子集 ——
+   不造第二份数据源。 */
+/* #327 round13 F5：会话标签预设（名字+颜色）。行菜单循环切换，侧栏显示色点。 */
+const TASK_LABEL_PRESETS = [
+  { name: "工作", color: "#3b82f6" },
+  { name: "学习", color: "#8b5cf6" },
+  { name: "生活", color: "#10b981" },
+  { name: "紧急", color: "#ef4444" },
+  { name: "灵感", color: "#f59e0b" },
+  { name: "归档", color: "#6b7280" }
+];
+function ParallelPanel({ tasks, onClose, onOpen }) {
+  const running = tasks.filter((t) => t.running);
+  const now = Date.now();
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "parallel-panel", role: "dialog", "aria-label": "并行任务", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "parallel-panel-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `并行运行中 · ${running.length}` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "parallel-panel-close", "aria-label": "关闭并行面板", onClick: onClose, children: "×" })
+    ] }),
+    running.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+      type: "button",
+      className: "parallel-panel-item",
+      onClick: () => {
+        onClose();
+        onOpen(t.path);
+      },
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 10 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "parallel-panel-name", children: t.title || "未命名任务" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "parallel-panel-time", children: [
+          t.startedAt !== void 0 ? `${Math.max(1, Math.round((now - t.startedAt) / 60000))} 分钟` : "—"
+        ] })
+      ]
+    }, t.id))
+  ] });
+}
+/* #327 round13 F8：会话比较浮层。并排显示两个会话的标题/轮数/首问预览/状态。
+   数据全部来自侧栏已有的 taskList 行（title/entries/running/startedAt），
+   不再发一次 IPC —— 展示型面板不新增数据源。 */
+function CompareSheet({ paths, tasks, onClose }) {
+  const picks = paths.map((p) => tasks.find((t) => t.path === p)).filter((t) => t !== void 0);
+  if (picks.length !== 2) return null;
+  const cellOf = (t) => {
+    const entries = t.entries ?? [];
+    const firstUser = entries.find((e) => e.role === "user");
+    const turns = entries.filter((e) => e.role === "user").length;
+    const chars = entries.reduce((acc, e) => acc + (e.text ?? "").length, 0);
+    const minutes = t.startedAt !== void 0 ? Math.max(1, Math.round((Date.now() - t.startedAt) / 60000)) : 0;
+    return { title: t.title || "未命名任务", first: (firstUser?.text ?? "").slice(0, 60), turns, chars, minutes, running: t.running === true };
+  };
+  const left = cellOf(picks[0]);
+  const right = cellOf(picks[1]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-backdrop", onClick: onClose, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-sheet", role: "dialog", "aria-label": "会话比较", onClick: (event) => event.stopPropagation(), children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "compare-head", children: "会话比较" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-grid", children: [
+        [left, right].map((c, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "compare-cell", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "compare-title", children: c.title }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "compare-first", children: c.first === "" ? "（无提问）" : c.first }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("dl", { className: "compare-stats", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { children: "轮数" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: c.turns })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { children: "总字数" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: c.chars })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("dt", { children: c.running ? "已运行" : "时长" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("dd", { children: c.running ? `${c.minutes} 分钟（运行中）` : c.minutes > 0 ? `${c.minutes} 分钟` : "—" })
+            ] })
+          ] })
+        ] }, `cmp-${i}`))
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "compare-close", onClick: onClose, children: "关闭" })
+    ] })
+  ] });
+}
 function Sidebar({
   link: link2,
   groups,
   runningCount,
+  taskList,
   currentCwd,
   tasksError,
   onReloadTasks,
@@ -13405,6 +13486,11 @@ function Sidebar({
   const [editingPath, setEditingPath] = reactExports.useState(void 0);
   const [confirmingPath, setConfirmingPath] = reactExports.useState(void 0);
   const [tasksExpanded, setTasksExpanded] = reactExports.useState(false);
+  /* #327 round13 F8：会话比较。Ctrl/Cmd 点选最多两个会话行，浮条触发并排对比。 */
+  const [compareSel, setCompareSel] = reactExports.useState([]);
+  const [compareOpen, setCompareOpen] = reactExports.useState(false);
+  /* #327 round13 F1：并行面板开合。 */
+  const [parallelOpen, setParallelOpen] = reactExports.useState(false);
   /*
    * 分组折叠记忆（§20）：跨启动记住哪些空间分组被手动收起。
    * 走 localStorage（设备本地姿势，不是跨设备偏好）；坏 JSON 直接当空集，
@@ -13449,7 +13535,22 @@ function Sidebar({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedPaths.size]);
-  const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
+  /* #327 round13 F5：标签色点。读 zw:labels（path→标签名），色值查预设表。 */
+  const [labelStore, setLabelStore] = reactExports.useState({});
+  reactExports.useEffect(() => {
+    const read2 = () => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem("zw:labels") ?? "{}");
+        setLabelStore(typeof parsed === "object" && parsed !== null ? parsed : {});
+      } catch {
+        setLabelStore({});
+      }
+    };
+    read2();
+    window.addEventListener("zw:labels-changed", read2);
+    return () => window.removeEventListener("zw:labels-changed", read2);
+  }, []);
+const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
   /*
    * 会话行的 ⋯ 菜单：下方放不下时翻到行的上方（`.space-menu-up`）。
    *
@@ -13599,6 +13700,15 @@ function Sidebar({
           className: "task-item-body",
           title: sessionRowTitle(task, origin),
           onClick: (event) => {
+            /* #327 round13 F8：Shift+⌘/Ctrl 点选两个会话 → 底部浮条「比较」。 */
+            if ((event.metaKey || event.ctrlKey) && event.shiftKey) {
+              event.preventDefault();
+              setCompareSel((prev) => {
+                if (prev.includes(task.path)) return prev.filter((p) => p !== task.path);
+                return [...prev, task.path].slice(-2);
+              });
+              return;
+            }
             /* #300 F6：⌘点进入/切换多选；已处于多选态时普通点击也切换。 */
             if (event.metaKey || event.ctrlKey || selectedPaths.size > 0) {
               event.preventDefault();
@@ -13616,6 +13726,8 @@ function Sidebar({
           },
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "task-item-title", children: [
+            /* #327 round13 F5：标签色点（有标签才渲染）。 */
+            labelStore[task.path] !== void 0 && TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]) !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-label-dot", style: { background: TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]).color }, title: labelStore[task.path] }),
               /*
                * 置顶标记（形态承担状态，docs/DESIGN.md §2.1）：与未读点 / 转圈 / 分支标记
                * 同一组「标题前缀」，压在标题文本之前 —— 放行尾会被 text-overflow 的省略号裁掉。
@@ -13742,6 +13854,136 @@ function Sidebar({
                 onExportTxtTask(task.path);
               },
               children: "导出为纯文本"
+            }
+          ),
+          /* #327 round13 F10：会话备注。window.prompt 收文本，空串=清除。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              title: "给这个会话写一条备注（显示在会话顶部）",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                const existing = (() => {
+                  try {
+                    return window.localStorage.getItem(`zw:note:${task.path}`) ?? "";
+                  } catch {
+                    return "";
+                  }
+                })();
+                const note = window.prompt("会话备注（留空清除）：", existing);
+                if (note === null) return;
+                try {
+                  if (note.trim() === "") window.localStorage.removeItem(`zw:note:${task.path}`);
+                  else window.localStorage.setItem(`zw:note:${task.path}`, note.trim());
+                } catch {
+                }
+                window.dispatchEvent(new CustomEvent("zw:note-changed", { detail: { path: task.path, note: note.trim() } }));
+              },
+              children: "添加备注"
+            }
+          ),
+          /* #327 round13 F2：存为模板。取会话标题+首条用户提问存 localStorage
+             zw:templates（≤5 个，新的挤掉最旧的），新任务时在首页快捷短语行尾部出现。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              title: "把这个会话的开头存成模板（新任务时一键套用）",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                const entries = task.entries ?? [];
+                const firstUser = entries.find((e) => e.role === "user");
+                const text2 = (firstUser?.text ?? "").trim();
+                if (text2.length < 4) {
+                  window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "这个会话还没有可复用的提问" }] }));
+                  return;
+                }
+                let list = [];
+                try {
+                  list = JSON.parse(window.localStorage.getItem("zw:templates") ?? "[]");
+                } catch {
+                  list = [];
+                }
+                if (!Array.isArray(list)) list = [];
+                const item = { title: (task.title ?? "模板").slice(0, 24), text: text2.slice(0, 2000) };
+                list = [item, ...list.filter((t) => t.text !== item.text)].slice(0, 5);
+                try {
+                  window.localStorage.setItem("zw:templates", JSON.stringify(list));
+                } catch {
+                }
+                window.dispatchEvent(new CustomEvent("zw:templates-changed", { detail: list }));
+                window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已存为模板" }] }));
+              },
+              children: "存为模板"
+            }
+          ),
+          /* #327 round13 F7：从会话创建定时任务。ZeroWork 的定时任务由系统调度器
+             管理（设置→通用），这里只做三件事：把首条提问复制到剪贴板、提示去哪儿配、
+             不在客户端另造一套调度真源（单一真源原则）。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              title: "把这条会话的第一句提问交给系统的定时任务",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                const firstUser = (task.entries ?? []).find((e) => e.role === "user");
+                const text2 = (firstUser?.text ?? "").trim();
+                if (text2.length === 0) {
+                  window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "这个会话还没有可复用的提问" }] }));
+                  return;
+                }
+                navigator.clipboard.writeText(text2).then(() => {
+                  window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "提问已复制——去 设置→通用 的定时任务里粘贴即可" }] }));
+                }, () => {
+                  window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "剪贴板不可用" }] }));
+                });
+              },
+              children: "创建定时任务…"
+            }
+          ),
+          /* #327 round13 F5：会话标签。六色循环切换；显示在会话行标题前的小色点。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              title: "给会话打个彩色标签（再点一次切换到下一个颜色）",
+              onClick: () => {
+                setMenuPath(void 0);
+                setEditingPath(void 0);
+                setConfirmingPath(void 0);
+                const names = TASK_LABEL_PRESETS;
+                let store = {};
+                try {
+                  store = JSON.parse(window.localStorage.getItem("zw:labels") ?? "{}");
+                } catch {
+                  store = {};
+                }
+                if (typeof store !== "object" || store === null) store = {};
+                const currentName = store[task.path];
+                const idx = names.findIndex((n) => n.name === currentName);
+                const next = names[(idx + 1) % (names.length + 1)];
+                if (next === void 0) delete store[task.path];
+                else store[task.path] = next.name;
+                try {
+                  window.localStorage.setItem("zw:labels", JSON.stringify(store));
+                } catch {
+                }
+                window.dispatchEvent(new CustomEvent("zw:labels-changed", { detail: store }));
+                window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: next === void 0 ? "标签已清除" : `标签：${next.name}` }] }));
+              },
+              children: "设置标签"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -14262,21 +14504,35 @@ function Sidebar({
         !spacesCollapsed && (groups !== void 0 ? spaces.map(renderSpaceGroup) : groupsUnavailable ? null : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取空间…" }))
       ] })
     ] }),
-    /* #300 F9：多任务聚合条。≥2 个任务运行时才出现 —— 一个任务有自己的
-     * 转圈就够了，聚合的价值在「数不过来」的时刻。点击滚动到任务区顶部
-     * （所有运行中的行都在各自空间组里，回到列表头即一屏可见）。 */
-    runningCount >= 2 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
-      type: "button",
-      className: "running-strip",
-      onClick: () => {
-        document.querySelector(".sidebar-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
-      },
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "running-strip-text", children: [runningCount, " 个任务运行中"] })
-      ]
-    }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-footer", children: [
+    /* #300 F9：多任务聚合条（#327 round13 F1 升级：点击弹出并行面板，
+       列出每个运行中任务的名称与已运行时长，点击行切到该会话）。 */
+    runningCount >= 2 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { key: "running-strip", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "running-strip",
+        onClick: () => setParallelOpen(!parallelOpen),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 11 }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "running-strip-text", children: [runningCount, " 个任务运行中"] })
+        ]
+      }),
+      parallelOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(ParallelPanel, { tasks: taskList ?? [], onClose: () => setParallelOpen(false), onOpen: onResumeTask })
+    ] }),
+    /* #327 round13 F8：会话比较。Shift+⌘点选两个会话后，底部浮条确认并排对比。 */
+    compareSel.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { key: "compare-bar", className: "compare-bar", role: "status", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+        "已选 ",
+        compareSel.length,
+        " / 2 个会话"
+      ] }),
+      compareSel.length === 2 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "compare-bar-go", onClick: () => setCompareOpen(true), children: "比较" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "compare-bar-cancel", "aria-label": "取消比较选择", onClick: () => setCompareSel([]), children: "×" })
+    ] }),
+    compareOpen && compareSel.length === 2 && /* @__PURE__ */ jsxRuntimeExports.jsx(CompareSheet, { paths: compareSel, tasks: taskList ?? [], onClose: () => {
+      setCompareOpen(false);
+      setCompareSel([]);
+    } }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { key: "sidebar-footer", className: "sidebar-footer", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("img", { className: "footer-brand", src: APP_LOGO, width: 22, height: 22, alt: "" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `link-dot link-dot-${link2.kind}` }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "footer-text", children: [
@@ -15045,6 +15301,22 @@ function Composer({
   }, [draft]);
   /* §21.7 快速回复模板：三条默认短语，点击整句填入（不是追加）。存
    * localStorage——模板是个人习惯，不上 daemon 配置，重装不跟走。 */
+  /* #327 round13 F2：会话模板。行菜单「存为模板」写 zw:templates；
+     空草稿时在快捷短语行尾部出现「📋 模板名」组，点击整段填入。 */
+  const [templates, setTemplates] = reactExports.useState([]);
+  reactExports.useEffect(() => {
+    const read2 = () => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem("zw:templates") ?? "[]");
+        setTemplates(Array.isArray(parsed) ? parsed.slice(0, 5) : []);
+      } catch {
+        setTemplates([]);
+      }
+    };
+    read2();
+    window.addEventListener("zw:templates-changed", read2);
+    return () => window.removeEventListener("zw:templates-changed", read2);
+  }, []);
   const quickChips = reactExports.useMemo(() => {
     try {
       const raw = window.localStorage.getItem("zw:quick-chips");
@@ -15128,6 +15400,59 @@ function Composer({
   reactExports.useEffect(() => {
     if (streaming !== true) setStopConfirm((current) => current.phase === "pending" ? stopConfirmIdle : current);
   }, [streaming]);
+  /* #327 round13 F3：批量提问队列。草稿里独立成行的 "---" 是分隔符：
+     拆出的每段按顺序排队发送 —— 首条立即发，后续每条等上一条完成后再发
+     （onSubmit 的 promise resolve 即视为完成）。队列在组件卸载/新会话时清空。 */
+  const queueRef = reactExports.useRef([]);
+  const [queueLen, setQueueLen] = reactExports.useState(0);
+  /* #327 round13 F4：历史相似提示。首条提问发出前，用提问前 12 个字（去空白）
+     在现有会话标题里找包含关系 —— 命中且不是当前会话时 toast 提醒一次。
+     纯字符串包含，零依赖；提示不阻断发送。 */
+  /* #327 round13 F6：运行时长提醒。任一任务连续 running 超 5 分钟时 toast
+     一次；提醒按 path+startedAt 记账，同一次运行不重复打扰。 */
+  const longRunWarnedRef = reactExports.useRef(new Set());
+  const runningTasksRef = reactExports.useRef([]);
+  reactExports.useEffect(() => {
+    runningTasksRef.current = ((window.__zwTaskList ?? [])).filter((task) => task.running === true);
+  }, []);
+  reactExports.useEffect(() => {
+    const timer = setInterval(() => {
+      for (const task of runningTasksRef.current) {
+        const key = `${task.path}:${task.startedAt ?? ""}`;
+        if (longRunWarnedRef.current.has(key)) continue;
+        const startedAt = typeof task.startedAt === "number" ? task.startedAt : Date.now();
+        if (Date.now() - startedAt > 300000) {
+          longRunWarnedRef.current.add(key);
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: `「${task.title ?? "任务"}」已运行超过 5 分钟` }] }));
+        }
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
+  const warnSimilarTask = reactExports.useCallback((text2) => {
+    const probe = text2.replace(/\s+/g, "").slice(0, 12);
+    if (probe.length < 6) return;
+    const hit = ((window.__zwTaskList ?? [])).find(
+      (task) => task.current !== true && (task.title ?? "").includes(probe)
+    );
+    if (hit !== void 0) {
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: `已有相似会话：「${hit.title}」` }] }));
+    }
+  }, []);
+  const drainQueue = reactExports.useCallback(() => {
+    const next = queueRef.current.shift();
+    setQueueLen(queueRef.current.length);
+    if (next === void 0) return;
+    void onSubmit(next, void 0, false).catch(() => {
+    });
+  }, [onSubmit]);
+  reactExports.useEffect(() => {
+    if (queueLen !== 0 || streaming === true) return;
+    if (queueRef.current.length > 0) {
+      const timer = setTimeout(drainQueue, 600);
+      return () => clearTimeout(timer);
+    }
+  }, [queueLen, streaming, drainQueue]);
   const submit = (whileStreaming) => {
     const text2 = draft.trim();
     if (charCountState(draft.length).over) return;
@@ -15139,6 +15464,24 @@ function Composer({
     img.clearDocumentRefs();
     if (draftKey !== void 0) saveDraft(draftKey, "");
     setHistoryNav(void 0);
+    const parts = skillInvocationText(picked, foldDocumentRefsIntoText(text2, img.documentRefs))
+      .split(/\n\s*---\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p !== "");
+    warnSimilarTask(parts[0]);
+    if (parts.length > 1) {
+      const [first, ...rest] = parts;
+      queueRef.current = rest;
+      setQueueLen(rest.length);
+      void onSubmit(first, images.length > 0 ? images : void 0, whileStreaming).then(() => {
+        img.clear();
+        if (enableHistory === true) recordSent(first);
+      }, () => {
+      });
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: `已排队 ${rest.length} 个后续提问` }] }));
+      return;
+    }
+    warnSimilarTask(text2);
     void onSubmit(
       skillInvocationText(picked, foldDocumentRefsIntoText(text2, img.documentRefs)),
       images.length > 0 ? images : void 0,
@@ -15205,7 +15548,7 @@ function Composer({
         /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentRefStrip, { refs: img.documentRefs, onRemove: img.removeDocumentRefAt }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(AttachmentStrip, { attachments: img.attachments, onRemove: img.removeAt }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(VisionHint, { visible: visionSupported === false && img.attachments.length > 0 }),
-        draft.trim() === "" && streaming !== true && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "quick-chips", children: quickChips.map((chip) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        draft.trim() === "" && streaming !== true && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "quick-chips", children: [quickChips.map((chip) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
             type: "button",
@@ -15214,7 +15557,17 @@ function Composer({
             children: chip
           },
           chip
-        )) }),
+        )), templates.map((tpl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "quick-chip quick-chip-template",
+            title: tpl.text,
+            onClick: () => applyChip(tpl.text),
+            children: `▸ ${tpl.title}`
+          },
+          `tpl-${tpl.title}`
+        ))] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-input", children: [
           ac.menu,
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -34132,7 +34485,22 @@ function ChatView({
   /* #312 F3：会话内查找。findQuery 非空时对 .stream 里的文本节点打
      <mark class="find-hit">，清除时 normalize 还原。与 round9 的命中跳转
      （search-hit）互不干扰：两个 class、两套清理。 */
-  const [findQuery, setFindQuery] = reactExports.useState("");
+  const [findQuery, setFindQuery] = reactExports.useState("");  /* #327 round13 F10：会话备注展示。直接读 localStorage（行菜单写入后派发
+     zw:note-changed），随会话路径切换重读。 */
+  const [taskNote, setTaskNote] = reactExports.useState("");
+  reactExports.useEffect(() => {
+    const read2 = () => {
+      try {
+        setTaskNote(currentSessionPath === "" ? "" : window.localStorage.getItem(`zw:note:${currentSessionPath}`) ?? "");
+      } catch {
+        setTaskNote("");
+      }
+    };
+    read2();
+    window.addEventListener("zw:note-changed", read2);
+    return () => window.removeEventListener("zw:note-changed", read2);
+  }, [currentSessionPath]);
+
   const [findCount, setFindCount] = reactExports.useState(0);
   /* #315 round12 F2：选中存为片段。只在 .stream 内选中文本时出现浮条。 */
   const [selState, setSelState] = reactExports.useState(void 0);
@@ -34805,6 +35173,7 @@ function ChatView({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-crumb-sep", "aria-hidden": "true", children: "/" })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-title", title, children: title }),
+          taskNote !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-note", title: taskNote, children: taskNote }),
           /* round9 F7：会话统计。有内容才显，避免空会话一上来就是「0 轮」。 */
           /* round10 F2：TL;DR 摘要卡。≥5 轮出现，折叠态只显示开关按钮。 */
           tldr !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-tldr-wrap", children: [
@@ -67434,6 +67803,9 @@ function DataManagementSection() {
       )
     ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "seg-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "seg-tag seg-skeleton", children: task.title }),
+      /* #327 round13 F9：归档摘要卡。恢复前先看得见内容概要（轮数+末次时间），
+         与 PRD「恢复前显示会话摘要卡」同义；数据取自归档行已有字段。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "seg-meta-count", children: `${(task.entries ?? []).filter((e) => e.role === "user").length} 轮` }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "seg-chars", children: formatMessageTime(task.modifiedAt, now) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -73569,6 +73941,12 @@ function App() {
   viewRef.current = view;
   const taskListRef = reactExports.useRef(taskList);
   taskListRef.current = taskList;
+  /* #327 round13 F4/F6：给 Composer 侧的相似提示/时长提醒提供数据桥
+     （Composer 嵌套太深，prop 穿透会污染全部中间层；window 只读快照）。 */
+  try {
+    window.__zwTaskList = taskList;
+  } catch {
+  }
   const refreshGroups = reactExports.useCallback(() => {
     window.kami.listWorkspaceGroups().then(setGroupMetas).catch(() => {
     });
@@ -75091,6 +75469,7 @@ function App() {
         link: link2,
         groups: sidebarGroups,
         runningCount: (taskList ?? []).filter((task) => task.running).length,
+        taskList,
         currentCwd: conversation.state.cwd,
         tasksError: taskListError,
         onReloadTasks: reloadSessions,

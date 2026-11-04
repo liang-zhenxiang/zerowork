@@ -17119,3 +17119,185 @@ mark.find-hit {
 	font-size: var(--text-meta);
 	color: var(--text-faint);
 }
+
+/* ── §30 第十三轮十连（#327） ───────────────────────────────────── */
+/* F1 并行面板：聚合条上方弹出的小卡。 */
+.parallel-panel {
+	position: absolute;
+	left: var(--space-3);
+	right: var(--space-3);
+	bottom: calc(var(--space-6) + 40px);
+	z-index: 5;
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-lg);
+	overflow: hidden;
+}
+.parallel-panel-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: var(--space-2) var(--space-3);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	border-bottom: 1px solid var(--border);
+}
+.parallel-panel-close {
+	padding: 0 var(--space-1);
+	border: 0;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: var(--text-base);
+	cursor: pointer;
+}
+.parallel-panel-close:hover {
+	color: var(--text);
+}
+.parallel-panel-item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	width: 100%;
+	padding: var(--space-2) var(--space-3);
+	border: 0;
+	background: transparent;
+	color: var(--text);
+	font-size: var(--text-sm);
+	text-align: left;
+	cursor: pointer;
+}
+.parallel-panel-item:hover {
+	background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+.parallel-panel-name {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.parallel-panel-time {
+	font-family: var(--font-mono);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+
+/* ── §30 第十三轮十连（#327） ───────────────────────────────────── */
+/* F1 并行面板：运行中条点击弹出的任务切换列表。 */
+.parallel-panel {
+	position: absolute;
+	left: var(--space-3);
+	right: var(--space-3);
+	bottom: calc(var(--space-8) + var(--space-2));
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	box-shadow: var(--shadow-2);
+	z-index: var(--z-popover, 30);
+	max-height: 40vh;
+	overflow-y: auto;
+}
+.parallel-panel-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2);
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text);
+	font-size: var(--text-meta);
+	text-align: left;
+	cursor: pointer;
+}
+.parallel-panel-row:hover { background: var(--bg-hover); }
+.parallel-panel-name {
+	flex: 1 1 auto;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.parallel-panel-time { color: var(--text-secondary); font-family: var(--font-mono); }
+
+/* F5 标签色点：任务行标题前 8px 圆点。 */
+.task-label-dot {
+	flex: 0 0 auto;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+}
+
+/* F10 会话备注 chip：会话头部标题后的弱底提示。 */
+.chat-note {
+	flex: 0 1 auto;
+	max-width: 30%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	padding: 1px var(--space-2);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+/* F2 模板 chip：快捷短语行尾的「▸ 模板名」，与普通 chip 同形、前缀区分。 */
+.quick-chip-template { color: var(--accent); }
+
+/* ── §30.9 第十三轮 F8/F9 ──────────────────────────────────────── */
+.compare-bar {
+	display: flex; align-items: center; gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	margin: var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+	font-size: var(--text-meta); color: var(--text-secondary);
+}
+.compare-bar-go {
+	padding: 2px var(--space-3); border: none; border-radius: var(--radius-sm);
+	background: var(--accent); color: var(--accent-contrast);
+	font-size: var(--text-meta); cursor: pointer;
+}
+.compare-bar-cancel {
+	margin-left: auto; border: none; background: none;
+	color: var(--text-faint); cursor: pointer; font-size: 14px;
+}
+.compare-backdrop {
+	position: fixed; inset: 0; z-index: var(--z-toast, 90);
+	background: var(--overlay);
+	display: flex; align-items: center; justify-content: center;
+}
+.compare-sheet {
+	width: min(720px, 92vw);
+	background: var(--bg); border: 1px solid var(--border);
+	border-radius: var(--radius-md); padding: var(--space-4);
+	box-shadow: var(--shadow-lg);
+}
+.compare-head { font-size: var(--text-h3); font-weight: 600; margin-bottom: var(--space-3); }
+.compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.compare-cell {
+	border: 1px solid var(--border); border-radius: var(--radius-sm);
+	padding: var(--space-3); background: var(--bg-elevated);
+}
+.compare-title { font-weight: 600; margin-bottom: var(--space-1); }
+.compare-first {
+	font-size: var(--text-meta); color: var(--text-secondary);
+	margin-bottom: var(--space-2); min-height: 2.6em;
+}
+.compare-stats { display: flex; gap: var(--space-4); margin: 0; }
+.compare-stats dt { font-size: var(--text-meta); color: var(--text-faint); }
+.compare-stats dd { margin: 0; font-weight: 600; }
+.compare-close {
+	margin-top: var(--space-3); padding: var(--space-1) var(--space-4);
+	border: 1px solid var(--border); border-radius: var(--radius-sm);
+	background: none; color: var(--text-secondary); cursor: pointer;
+}
+.seg-meta-count {
+	font-size: var(--text-meta); color: var(--text-faint);
+	font-family: var(--font-mono);
+}
