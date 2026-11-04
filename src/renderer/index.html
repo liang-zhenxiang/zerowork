@@ -14,6 +14,12 @@
 		<link rel="stylesheet" href="./src/katex.css" />
 	</head>
 	<body>
+		<!-- 启动品牌帧（issue #331 F5）：React 挂载前的静态层，避免白屏期。
+		     样式内联（此时 app.css 已加载，但选择器挂 .splash-brand 亦可）；
+		     app.js 首帧渲染后移除本层（见 app.js 移除逻辑）。 -->
+		<div id="splash-brand" aria-hidden="true">
+			<div class="splash-mark">Z</div>
+		</div>
 		<div id="root"></div>
 		<script type="module" src="./src/app.js"></script>
 	</body>

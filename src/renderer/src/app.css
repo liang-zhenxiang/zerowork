@@ -17301,3 +17301,75 @@ mark.find-hit {
 	font-size: var(--text-meta); color: var(--text-faint);
 	font-family: var(--font-mono);
 }
+
+/* ── §31 第十四轮十连（#331）────────────────────────────────────── */
+/* F5 启动品牌帧：React 挂载前的静态层。底色跟随主题：亮 #FBFAFE / 暗 #14102A
+   由主进程 backgroundColor 先定调，这里保持一致，避免闪变。 */
+#splash-brand {
+	position: fixed;
+	inset: 0;
+	z-index: 9999;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	/* 底色跟主题 token（亮 --bg / 暗 --bg），与主进程 backgroundColor 同源，首帧不闪变。 */
+	background: var(--bg);
+}
+#splash-brand .splash-mark {
+	width: 64px;
+	height: 64px;
+	border-radius: 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 34px;
+	font-weight: 700;
+	color: var(--accent-contrast);
+	/* 极光双 token：亮暗两块各定义一次，随主题自动切换（issue #331 F5）。 */
+	background: linear-gradient(135deg, var(--aurora-1), var(--aurora-2));
+	animation: splash-breathe 1.6s ease-in-out infinite;
+}
+@keyframes splash-breathe {
+	0%, 100% { opacity: 0.72; transform: scale(0.97); }
+	50% { opacity: 1; transform: scale(1.03); }
+}
+@media (prefers-reduced-motion: reduce) {
+	#splash-brand .splash-mark { animation: none; }
+}
+/* F1 首启欢迎横幅：标题上方一条 soft 横幅，完成后写 zw:onboarded 永不再显。 */
+.welcome-banner {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	margin: 0 auto var(--space-4);
+	max-width: var(--home-max-width, 720px);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+}
+.welcome-banner-text {
+	flex: 1;
+	font-size: var(--font-size-sm);
+	color: var(--text-secondary);
+	line-height: var(--lh-relaxed);
+}
+.welcome-banner-text strong {
+	color: var(--text);
+	font-weight: 600;
+}
+.welcome-banner-close {
+	flex-shrink: 0;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: var(--font-size-xs);
+	padding: var(--space-1) var(--space-3);
+	cursor: pointer;
+	transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.welcome-banner-close:hover {
+	color: var(--text);
+	border-color: var(--text-faint);
+}
