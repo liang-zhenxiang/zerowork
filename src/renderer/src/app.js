@@ -13070,6 +13070,10 @@ const IconSettings = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, 
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "12", r: "3" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" })
 ] });
+const IconHelp = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", fill: "none" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "17", r: "0.5", fill: "currentColor", stroke: "none" })
+] });
 const IconKey = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "7.5", cy: "15.5", r: "4.5" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m10.7 12.3 8.3-8.3M16 4l4 4M14 6l4 4" })
@@ -13537,6 +13541,18 @@ function Sidebar({
   }, [selectedPaths.size]);
   /* #327 round13 F5：标签色点。读 zw:labels（path→标签名），色值查预设表。 */
   const [labelStore, setLabelStore] = reactExports.useState({});
+  /* round14 F9：帮助浮层开合（快捷键表/文档/诊断三入口聚合）。 */
+  const [helpOpen, setHelpOpen] = reactExports.useState(false);
+  /* round14 F3：每日回归摘要（昨日完成任务数）。App 侧 usageStats effect 写入
+     localStorage，侧栏只读——数据在另一个作用域，props 穿透不值得。 */
+  const [yesterdayDone, setYesterdayDone] = reactExports.useState(0);
+  reactExports.useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem("zw:yesterday-done");
+      if (raw !== null) setYesterdayDone(Number(raw) || 0);
+    } catch {
+    }
+  }, []);
   reactExports.useEffect(() => {
     const read2 = () => {
       try {
@@ -14424,6 +14440,19 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-scroll", children: [
+      /* round14 F3：每日回归摘要。昨天完成任务 ≥1 才显示（首次启动/无昨日数据
+         不占空间）；点击查看统计。数据由 App 的 usageStats effect 写 localStorage，
+         这里只读快照。 */
+      yesterdayDone > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        type: "button",
+        className: "yesterday-pill",
+        onClick: () => onOpenSettings?.("about"),
+        title: "查看统计",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 12, className: "yesterday-pill-icon" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["昨日完成 ", yesterdayDone, " 项"] })
+        ]
+      }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
@@ -14540,6 +14569,18 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         link2.kind === "ready" && "已就绪",
         link2.kind === "down" && `已断开：${link2.reason}`
       ] }),
+      /* round14 F9：帮助入口聚合。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "footer-btn",
+          "aria-label": "帮助",
+          title: "帮助（快捷键 / 文档 / 诊断）",
+          onClick: () => setHelpOpen(!helpOpen),
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconHelp, { size: 15 })
+        }
+      ),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -14550,7 +14591,8 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           onClick: onOpenSettings,
           children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconSettings, { size: 15 })
         }
-      )
+      ),
+      helpOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(HelpSheet, { onClose: () => setHelpOpen(false), onOpenSettings })
     ] })
   ] });
 }
@@ -14561,6 +14603,66 @@ const MENU_BAR_ITEMS = [
 ];
 function menuBarLabel(item, withMnemonic) {
   return withMnemonic ? `${item.label}(${item.mnemonic})` : item.label;
+}
+/* round14 F9：帮助入口聚合浮层。三个入口各走既有通道：快捷键表发
+   zw:shortcut-sheet-open（round4 已有监听），诊断走设置页锚点，文档开外部链接。 */
+function HelpSheet({ onClose, onOpenSettings }) {
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-backdrop", onClick: onClose, "aria-hidden": "true" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "help-sheet", role: "dialog", "aria-label": "帮助", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-title", children: "帮助" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "help-item",
+          onClick: () => {
+            onClose();
+            window.dispatchEvent(new CustomEvent("zw:shortcut-sheet-open"));
+          },
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "help-item-name", children: ["键盘快捷键", /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { children: "⌘/" })] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "全部快捷键速查表" })
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "help-item",
+          onClick: () => {
+            onClose();
+            onOpenSettings("about");
+          },
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "help-item-name", children: ["诊断与关于", /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { children: "⌘," })] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "健康检查、日志与版本信息" })
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "a",
+        {
+          className: "help-item",
+          href: "https://github.com/liang-zhenxiang/zerowork#readme",
+          target: "_blank",
+          rel: "noreferrer",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-name", children: "使用文档" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "GitHub README（浏览器打开）" })
+          ]
+        }
+      )
+    ] })
+  ] });
 }
 function TitleBar() {
   if (navigator.userAgent.includes("Macintosh")) return null;
@@ -16074,6 +16176,25 @@ const GUIDE_SKELETON_TEXT_STYLE = {
   alignItems: "center",
   minHeight: "1lh"
 };
+/* round14 F1：首启欢迎横幅。只在「从未完成过三步引导」时出现一次；
+   完成（三步全绿）或手动关闭后写 zw:onboarded，永不再显。
+   与 OnboardingChecklist（常驻三步清单）互补：横幅讲欢迎语，清单讲操作。 */
+function WelcomeBanner() {
+  const [gone, setGone] = reactExports.useState(false);
+  if (gone) return null;
+  const dismiss = () => {
+    localStorage.setItem("zw:onboarded", "1");
+    setGone(true);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "welcome-banner", role: "status", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "welcome-banner-text", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "欢迎使用 ZeroWork" }),
+      " —— 本地优先的办公 Agent：模型配置、提问、统计三步上手，数据全程不出本机。"
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "welcome-banner-close", "aria-label": "知道了", onClick: dismiss, children: "知道了" })
+  ] });
+}
+
 function OnboardingChecklist({
   modelId,
   cwd: cwd2,
@@ -17282,6 +17403,14 @@ function HomeView({
           date: entry?.date ?? "",
           count: Number(entry?.count ?? 0) || 0
         }));
+        /* round14 F3：昨日完成数写入 localStorage（侧栏回归胶囊读它）。
+           口径与首页「今日」一致：heatmap 当日 count。 */
+        const yKey = new Date(Date.now() - 864e5).toLocaleDateString("sv-SE");
+        const yCount = days.find((entry) => entry?.date === yKey)?.count ?? 0;
+        try {
+          window.localStorage.setItem("zw:yesterday-done", String(Number(yCount) || 0));
+        } catch {
+        }
         setToday({
           messages: day?.count ?? 0,
           sessions: stats?.totalSessions ?? 0,
@@ -17404,6 +17533,7 @@ function HomeView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-fill", style: { transform: `scaleX(${Math.min(1, today.tokens / todayMax).toFixed(3)})` } }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-label", children: ["今日 ", today.tokens.toLocaleString(), " tok"] })
       ] }) : null,
+    localStorage.getItem("zw:onboarded") !== "1" && /* @__PURE__ */ jsxRuntimeExports.jsx(WelcomeBanner, {}),
     /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
       !snapshotLanded ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mode-tabs", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取场景…" }) }) : scenes.length === 0 ? (
         /* 空态不进 .mode-tabs：那个容器是固定 36px 高的胶囊，块级空态会被压扁溢出。 */
@@ -76013,6 +76143,13 @@ if (root === null) throw new Error("#root 不存在");
 clientExports.createRoot(root).render(
   /* @__PURE__ */ jsxRuntimeExports.jsx(reactExports.StrictMode, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(App, {}) }) })
 );
+/* 启动品牌帧（issue #331 F5）：React 首帧已接管，移除静态层。
+   rAF 两跳确保首帧 paint 完成后再撤，避免闪烁；找不到就跳过（幂等）。 */
+requestAnimationFrame(() => {
+  requestAnimationFrame(() => {
+    document.getElementById("splash-brand")?.remove();
+  });
+});
 const perfFlag = localStorage.getItem("kbPerf");
 if (perfFlag === "1") {
   void vitePreload(() => import("./perf-overlay.js"), true ? [] : void 0, import.meta.url).then((module) => module.mountPerfOverlay());
