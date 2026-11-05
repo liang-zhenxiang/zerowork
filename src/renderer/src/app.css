@@ -14697,6 +14697,7 @@ html[data-focus="on"] .sidebar {
 	display: none;
 }
 
+html[data-focus="on"] .welcome-banner,
 html[data-focus="on"] .quick-chips,
 html[data-focus="on"] .week-sparkline,
 html[data-focus="on"] .week-checkin,
@@ -14709,7 +14710,10 @@ html[data-focus="on"] .capability-zone {
 	   （第六轮 composerBottom 682 > home 665；第七轮 692 > 665）。整块撤掉最干净。
    2026-10-29 第五轮取证补：home-quick（快捷入口三胶囊）与 capability-zone
    （四枚能力胶囊）同样是招手元素 —— CI 无 PingFang 字体回退下胶囊文字变宽
-   换行，各多占一行 ≈29px，正好把输入卡顶出视口（zoneTop 342 vs 本地 314）。 */
+   换行，各多占一行 ≈29px，正好把输入卡顶出视口（zoneTop 342 vs 本地 314）。
+   2026-11-05 第十四轮补：welcome-banner（首启欢迎横幅）是同一类。它只在
+   「从未完成过三步引导」时出现，本地 profile 早已完成、看不出来，而 CI 每次
+   都是全新环境 —— 679 逻辑高下把输入卡顶出 14px（composerBottom 679 > home 665）。 */
 	display: none;
 }
 
