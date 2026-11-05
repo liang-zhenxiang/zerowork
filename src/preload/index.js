@@ -840,6 +840,8 @@ const bridge = {
   onUpdateEvent: (listener) => subscribe(PUSH.updatesEvent, listener),
   onTaskListChanged: (listener) => subscribe(PUSH.taskListChanged, listener),
   onUiRequest: (listener) => subscribe(PUSH.uiRequest, listener),
+  /** second-instance 启动参数（--new "提问" 等）。 */
+  onAppLaunch: (listener) => subscribe(PUSH.appLaunch, listener),
   onPermissionRequest: (listener) => subscribe(PUSH.permissionRequest, listener),
   onQuestionnaireRequest: (listener) => subscribe(PUSH.questionnaireRequest, listener),
   onDaemonReady: (listener) => subscribe(PUSH.daemonReady, () => listener()),

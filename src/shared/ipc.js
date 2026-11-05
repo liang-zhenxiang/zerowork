@@ -769,6 +769,8 @@ const PUSH = {
   taskListChanged: "session:list-changed",
   /** daemon 请求 UI 交互，需要 renderer 用 INVOKE.uiResponse 应答。 */
   uiRequest: "ui:request",
+  /** 主进程 → 渲染层：second-instance 携带的启动参数（如 --new "提问"）。 */
+  appLaunch: "app:launch",
   /** 权限审批请求，需要用 INVOKE.permissionResponse 应答。 */
   permissionRequest: "permission:request",
   /** 结构化提问请求（questionnaire 工具），需要用 INVOKE.questionnaireResponse 应答。 */

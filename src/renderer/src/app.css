@@ -17386,3 +17386,11 @@ mark.find-hit {
 	color: var(--text);
 	border-color: var(--text-faint);
 }
+
+/* §32.7 F7 键盘导航高亮：↑/↓ 移动的焦点行（与 hover 同底色，但无指针依赖）。 */
+.task-item.nav-highlight > .task-item-body {
+	background: var(--bg-active);
+}
+.task-item.nav-highlight > .task-item-body .task-item-title {
+	color: var(--text);
+}
