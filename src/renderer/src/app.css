@@ -17373,6 +17373,15 @@ mark.find-hit {
 	cursor: pointer;
 	transition: color var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
 }
+/* 矮视口（≤720px）下整条不显示：它把输入卡推到了首屏之外。
+   输入卡的可见性是硬要求（首屏唯一的主交互），而欢迎语只是锦上添花 ——
+   三步引导本身由常驻的 .home-guide 清单承担，信息不会丢。
+   2026-11-05：第十四轮合并后 CI 的 dark-polish 在 679 逻辑高下采不到
+   输入卡外槽（区域为空 y=689.5），根因就是这条横幅。 */
+@media (max-height: 720px) {
+	.welcome-banner { display: none; }
+}
+
 .welcome-banner-close:hover {
 	color: var(--text);
 	border-color: var(--text-faint);
