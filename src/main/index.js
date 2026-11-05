@@ -683,10 +683,15 @@ async function readImageFile(path) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on("second-instance", () => {
+  app.on("second-instance", (_event, argv) => {
     if (window === void 0) return;
     if (window.isMinimized()) window.restore();
     window.focus();
+    /* round15 F5：`--new "提问"` 直开新任务。解析第二个实例的 argv，把提问转发渲染层。 */
+    const marker = argv.indexOf("--new");
+    if (marker !== -1 && typeof argv[marker + 1] === "string" && argv[marker + 1] !== "") {
+      send(INVOKE.appLaunch, { kind: "new-task", text: argv[marker + 1] });
+    }
   });
   void app.whenReady().then(async () => {
     // 与安装器对齐 Windows 的 Application User Model ID（见上方 APP_ID 的注释）。

@@ -13527,8 +13527,73 @@ function Sidebar({
   /* #300 F4'：侧栏任务即时过滤。过滤词非空时窗口全开（过滤本身就说明
    * 用户在找具体某条，「查看更多」再藏一半是反作用）；清空恢复原窗口。 */
   const [taskFilter, setTaskFilter] = reactExports.useState("");
+  /* round15 F7：侧栏键盘完整导航。↑/↓ 在任务行间移动焦点行（视觉高亮），
+     Enter 打开，Del/Backspace 归档。输入焦点时不劫持；列表为空静默。 */
+  const navIndexRef = reactExports.useRef(-1);
+  const [navIndex, setNavIndex] = reactExports.useState(-1);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const active = document.activeElement;
+      if (active !== null && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable)) return;
+      const rows = [...document.querySelectorAll(".task-list .task-item")].filter((el) => el.offsetParent !== null);
+      if (rows.length === 0) return;
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        const next = Math.min(rows.length - 1, Math.max(0, navIndexRef.current + delta));
+        navIndexRef.current = next;
+        setNavIndex(next);
+      } else if (event.key === "Enter" && navIndexRef.current >= 0 && navIndexRef.current < rows.length) {
+        event.preventDefault();
+        const body = rows[navIndexRef.current].querySelector(".task-item-body");
+        if (body instanceof HTMLElement) body.click();
+      } else if ((event.key === "Delete" || event.key === "Backspace") && navIndexRef.current >= 0 && navIndexRef.current < rows.length) {
+        event.preventDefault();
+        const row = rows[navIndexRef.current];
+        const path = row?.getAttribute("data-path");
+        if (typeof path === "string" && path !== "") {
+          window.kami?.archiveSession?.(path, true).catch(() => {});
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   /* #300 F6：批量归档多选。Set 存 path；⌘点任务行切换选中并进入多选态；
    * Esc 或清空退出。批量动作直接循环 archiveTask（IPC 幂等、量小）。 */
+  /* round15 F4：任务行拖拽排序。拖起的 path 放 dragRef，落到另一行时按
+     「插入到目标之前」重排当前列表并把新顺序持久化（zw:task-order）。
+     列表渲染时先按 orderMap 稳定排序，再走过滤/窗口。 */
+  const [taskOrder, setTaskOrder] = reactExports.useState(() => {
+    try {
+      const saved = window.localStorage.getItem("zw:task-order");
+      const parsed = saved === null ? [] : JSON.parse(saved);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
+  const dragPathRef = reactExports.useRef(null);
+  const persistTaskOrder = reactExports.useCallback((order) => {
+    setTaskOrder(order);
+    try {
+      window.localStorage.setItem("zw:task-order", JSON.stringify(order));
+    } catch {
+      /* 存不上只是排序不持久，功能不受损 */
+    }
+  }, []);
+  const reorderTasks = reactExports.useCallback((fromPath, toPath) => {
+    if (fromPath === null || fromPath === toPath) return;
+    const ordered = orderedTasksRef.current;
+    const fromIdx = ordered.indexOf(fromPath);
+    const toIdx = ordered.indexOf(toPath);
+    if (fromIdx === -1 || toIdx === -1) return;
+    const next = ordered.slice();
+    next.splice(fromIdx, 1);
+    next.splice(toIdx, 0, fromPath);
+    persistTaskOrder(next);
+  }, [persistTaskOrder]);
   const [selectedPaths, setSelectedPaths] = reactExports.useState(() => /* @__PURE__ */ new Set());
   reactExports.useEffect(() => {
     if (selectedPaths.size === 0) return void 0;
@@ -13652,7 +13717,8 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
     const origin = resolveSessionOrigin(allSessions, task);
     const rowClass = [
       task.current ? "task-item task-item-current" : "task-item",
-      selectedPaths.has(task.path) ? "task-item-selected" : ""
+      selectedPaths.has(task.path) ? "task-item-selected" : "",
+      navIndex >= 0 && visibleTasks[navIndex] === task ? "nav-highlight" : ""
     ].filter(Boolean).join(" ");
     if (confirmingPath === task.path) {
       return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-item task-item-confirm", children: [
@@ -13683,7 +13749,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       ] }, task.path);
     }
     if (editingPath === task.path) {
-      return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: rowClass, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-item-body", children: [
+      return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: rowClass, "data-path": task.path, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-item-body", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "input",
           {
@@ -13708,7 +13774,21 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         ] })
       ] }) }, task.path);
     }
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: rowClass, children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+      className: rowClass,
+      "data-path": task.path,
+      draggable: true,
+      onDragStart: () => {
+        dragPathRef.current = task.path;
+      },
+      onDragOver: (e) => {
+        if (dragPathRef.current !== null && dragPathRef.current !== task.path) e.preventDefault();
+      },
+      onDrop: () => {
+        reorderTasks(dragPathRef.current, task.path);
+        dragPathRef.current = null;
+      },
+      children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
@@ -13772,7 +13852,16 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
               task.title
             ] }),
             pendingConfirmIds.has(task.id) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-confirm-badge", children: "待确认" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-item-meta", children: meta })
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "task-item-meta", children: [
+              meta,
+              /* round15 F6：行内迷你统计。数据源是 listSessions 载荷里已有的字段，
+                 不新增 IPC；undefined 兜底成破折号。 */
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+                className: "task-stat-mini",
+                title: `轮数 ${task.turnCount ?? "—"} · tokens ${task.totalTokens ?? "—"}`,
+                children: `${task.turnCount ?? "–"}轮`
+              })
+            ] })
           ]
         }
       ),
@@ -14284,11 +14373,52 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
    * 于是不会出现「钉住了却还藏在『查看更多』后面」—— 那是这个功能最容易出的失效形态。
    * tasks 未就绪（undefined）时窗口是空的，与下方骨架分支的顺序一致。
    */
+  /* 拖拽排序的稳定数据源：当前展示列表（分组展平后）按已保存顺序重排。 */
+  const orderedTasksRef = reactExports.useRef([]);
+  orderedTasksRef.current = (tasks ?? [])
+    .map((task) => task.path)
+    .sort((a, b) => {
+      const ia = taskOrder.indexOf(a);
+      const ib = taskOrder.indexOf(b);
+      if (ia === -1 && ib === -1) return 0;
+      if (ia === -1) return 1;
+      if (ib === -1) return -1;
+      return ia - ib;
+    });
+
+  /* round15 F2：超大列表分页渲染。展开态 >VIRTUAL_PAGE_SIZE 时只渲染前 N 页
+     内容，尾部「显示更多」翻页 —— 全量渲染会让 DOM 节点数失控。过滤态不设页。 */
+  const [virtualPages, setVirtualPages] = reactExports.useState(1);
+  const totalTasks = (tasks ?? []).length;
+  const expandedCap = virtualPages * 80;
   const taskWindow = tasksExpanded
-    ? { visible: tasks ?? [], hiddenCount: 0 }
+    ? { visible: (tasks ?? []).slice(0, expandedCap), hiddenCount: 0 }
     : taskListWindow(tasks ?? [], TASKS_COLLAPSED_COUNT);
+  const virtualHidden = tasksExpanded ? Math.max(0, totalTasks - expandedCap) : 0;
+  reactExports.useEffect(() => {
+    if (totalTasks <= 80) setVirtualPages(1);
+  }, [totalTasks]);
   const filterNeedle = taskFilter.trim().toLowerCase();
-  const filteredTasks = filterNeedle === "" ? taskWindow.visible : (tasks ?? []).filter((task) => (task.title ?? "").toLowerCase().includes(filterNeedle));
+  /* round15 F3：快速过滤语法——label:<名字>（标签）、running:true|false（运行态）、
+     >Nd（N 天未动）。语法段从查询里摘除，剩余纯文本仍按标题包含匹配。 */
+  const labelMatch = filterNeedle.match(/label:(\S+)/);
+  const runningMatch = filterNeedle.match(/running:(true|false)/);
+  const ageMatch = filterNeedle.match(/>(\d+)d/);
+  const plainNeedle = filterNeedle
+    .replace(/label:\S+/g, "")
+    .replace(/running:(true|false)/g, "")
+    .replace(/>\d+d/g, "")
+    .trim();
+  const filterPred = (task) => {
+    if (labelMatch !== null && labelStore[task.path] !== labelMatch[1]) return false;
+    if (runningMatch !== null && Boolean(task.running) !== (runningMatch[1] === "true")) return false;
+    if (ageMatch !== null) {
+      const lastActive = Number(task.updatedAt ?? task.modifiedAt ?? 0);
+      if (lastActive > 0 && Date.now() - lastActive < Number(ageMatch[1]) * 864e5) return false;
+    }
+    return plainNeedle === "" || (task.title ?? "").toLowerCase().includes(plainNeedle);
+  };
+  const filteredTasks = filterNeedle === "" ? taskWindow.visible : (tasks ?? []).filter(filterPred);
   const visibleTasks = filteredTasks;
   const hiddenTaskCount = filterNeedle === "" ? taskWindow.hiddenCount : 0;
   /**
@@ -14473,7 +14603,15 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           placeholder: "过滤任务…",
           "aria-label": "过滤任务",
           value: taskFilter,
-          onChange: (event) => setTaskFilter(event.target.value)
+          onChange: (event) => setTaskFilter(event.target.value),
+          onKeyDown: (event) => {
+            /* Esc：清空过滤并把焦点还给页面 —— 让 ↑/↓ 导航守卫放行。 */
+            if (event.key === "Escape") {
+              event.stopPropagation();
+              if (taskFilter !== "") setTaskFilter("");
+              event.currentTarget.blur();
+            }
+          }
         }),
         !tasksCollapsed && (tasksError !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: tasksError, onRetry: onReloadTasks }) : tasks === void 0 && groupsUnavailable ? (
           /* 断开原因（含 daemon 退出码）已在底部状态行如实显示，这里只给短结论：
@@ -14512,6 +14650,15 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                 hiddenTaskCount,
                 ")"
               ]
+            }
+          ),
+          virtualHidden > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "task-list-more",
+              onClick: () => setVirtualPages((pages) => pages + 1),
+              children: ["显示更多 (", virtualHidden, ")"]
             }
           )
         ] }))
@@ -17390,11 +17537,29 @@ function HomeView({
   /* 今日 token 相对近 30 天单日最大值的比例（第三轮迷你条）；无数据为 0 → 不画。
      todayMax 从 heatmap 的真实单日峰值取（含今天），不再是占位常数。 */
   const [todayMax, setTodayMax] = reactExports.useState(0);
+  /* round15 F8：统计加载失败可见 + 可重试。此前 catch 静默吞掉，用户只看到全 0 而不知道是「没数据」还是「读失败」。 */
+  const [statsFailed, setStatsFailed] = reactExports.useState(false);
+  const [statsRetryTick, setStatsRetryTick] = reactExports.useState(0);
+  reactExports.useEffect(() => {
+    const off = window.kami.onAppLaunch?.((payload) => {
+      if (payload?.kind !== "new-task" || typeof payload.text !== "string" || payload.text === "") return;
+      setView("home");
+      setPendingPrefill(payload.text);
+    });
+    return () => off?.();
+  }, []);
+  reactExports.useEffect(() => {
+    const onStatsRetry = () => setStatsRetryTick((tick) => tick + 1);
+    window.addEventListener("zw:stats-retry", onStatsRetry);
+    return () => window.removeEventListener("zw:stats-retry", onStatsRetry);
+  }, []);
   reactExports.useEffect(() => {
     let alive = true;
     void (async () => {
       try {
         const stats = await window.kami.usageStats();
+        if (!alive) return;
+        setStatsFailed(false);
         if (!alive) return;
         const key = new Date().toLocaleDateString("sv-SE");
         const days = Array.isArray(stats?.heatmap) ? stats.heatmap : stats?.heatmap?.days ?? [];
@@ -17424,12 +17589,13 @@ function HomeView({
         // 统计读不到也要把这一条画出来：它是「今天的状态」，不是「有数据才成立的东西」。
         /* week 必须给空数组：渲染层读 today.week（F4 周柱状），缺字段就是白屏。 */
         if (alive) setToday({ messages: 0, sessions: 0, tokens: 0, week: [], streakDays: 0 });
+        if (alive) setStatsFailed(true);
       }
     })();
     return () => {
       alive = false;
     };
-  }, []);
+  }, [statsRetryTick]);
 
   const currentExpert = expertId === void 0 ? void 0 : experts?.find((e) => e.name === expertId);
   const snapshotLanded = cwd2 !== void 0;
@@ -70615,6 +70781,11 @@ function StatsView({ onClose }) {
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取统计", onClick: refresh, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
         "刷新"
+      ] }),
+      /* round15 F8：跨页重试首页统计（App 级 usageStats 失败时首页全 0，这里一键补救）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "若首页「今日」显示为 0，点此重试", onClick: () => window.dispatchEvent(new CustomEvent("zw:stats-retry")), children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
+        "重试首页"
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", children: [
@@ -74615,6 +74786,24 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  reactExports.useEffect(() => {
+    const onIdleGc = () => {
+      try {
+        const currentPath = taskList?.find((item) => item.current)?.path;
+        const prefix = "zw:draft:";
+        const doomed = [];
+        for (let i = 0; i < window.localStorage.length; i += 1) {
+          const key = window.localStorage.key(i);
+          if (key !== null && key.startsWith(prefix) && key !== `${prefix}${currentPath}`) doomed.push(key);
+        }
+        doomed.forEach((key) => window.localStorage.removeItem(key));
+      } catch {
+        /* localStorage 不可用时静默——GC 是优化不是功能 */
+      }
+    };
+    window.addEventListener("zw:idle-gc", onIdleGc);
+    return () => window.removeEventListener("zw:idle-gc", onIdleGc);
+  }, [taskList]);
   const paletteJumpToRecentRef = reactExports.useRef(false);
   reactExports.useEffect(() => {
     const onKey = (event) => {
@@ -75381,7 +75570,15 @@ function App() {
   }, [showToast]);
   const toggleSidebar = reactExports.useCallback(() => {
     if (document.documentElement.getAttribute("data-focus") === "on") return;
-    setSidebarOpen((value) => !value);
+    setSidebarOpen((value) => {
+      const next = !value;
+      try {
+        window.localStorage.setItem("zw:sidebar-open", next ? "open" : "collapsed");
+      } catch {
+        /* 存不上只是不记忆 */
+      }
+      return next;
+    });
   }, []);
   const checkForUpdates = reactExports.useCallback(() => {
     void Promise.resolve(window.kami.checkForUpdates()).catch((error) => {
