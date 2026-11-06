@@ -13369,6 +13369,9 @@ const TASK_SKELETON_TITLE_STYLE = {
    名字 + 已运行时长，点击行切到该会话。数据就是 taskList 的 running 子集 ——
    不造第二份数据源。 */
 /* #327 round13 F5：会话标签预设（名字+颜色）。行菜单循环切换，侧栏显示色点。 */
+/* round16 F5：空间组八色板。与任务标签共用色值家族但独立命名——
+   空间颜色是「地点」语义，任务标签是「事项」语义。 */
+const SPACE_COLORS = ["#3b82f6", "#8b5cf6", "#10b981", "#ef4444", "#f59e0b", "#6b7280", "#ec4899", "#14b8a6"];
 const TASK_LABEL_PRESETS = [
   { name: "工作", color: "#3b82f6" },
   { name: "学习", color: "#8b5cf6" },
@@ -13516,6 +13519,57 @@ function Sidebar({
       /* 配额满/隐私模式：记忆失效但不打扰 */
     }
   }, [collapsedCwds]);
+  /* round16 F5：空间颜色标记。八色循环（点击色点切换），zw:space-colors 持久化
+     （cwd→色号 0–7）。色板与任务标签（TASK_LABEL_PRESETS）同源不同名——两个
+     语义空间不该复用同一组名字，但色值可以共用一套品牌延伸色。 */
+  const [spaceColors, setSpaceColors] = reactExports.useState(() => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem("zw:space-colors") ?? "{}");
+      return typeof parsed === "object" && parsed !== null ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+  reactExports.useEffect(() => {
+    try {
+      window.localStorage.setItem("zw:space-colors", JSON.stringify(spaceColors));
+    } catch {
+      /* 配额满：颜色记忆失效但不打扰 */
+    }
+  }, [spaceColors]);
+  /* round16 F6：组内搜索。cwd→查询词；只在组内按标题过滤（复用 round15 纯文本匹配）。
+     不持久化——搜索是临时动作，重开侧栏应回到全量。 */
+  const [spaceSearch, setSpaceSearch] = reactExports.useState({});
+  const [spaceSearchOpen, setSpaceSearchOpen] = reactExports.useState(void 0);
+  /* round16 F4/F8：跨组移动目标选择。moveTargetPath 非 0 时渲染组列表浮层。 */
+  const [moveTargetPath, setMoveTargetPath] = reactExports.useState(void 0);
+  const applySpaceMove = reactExports.useCallback((sessionPath, targetCwd) => {
+    try {
+      const store = JSON.parse(window.localStorage.getItem("zw:space-move") ?? "{}");
+      store[sessionPath] = targetCwd;
+      window.localStorage.setItem("zw:space-move", JSON.stringify(store));
+    } catch {
+      /* 配额满：移动失败提示 */
+    }
+  }, []);
+  /* round16 F3/F10：空间组排序记忆。zw:space-order 存 cwd[]；新组追加在尾部。
+     组头不可拖（是折叠按钮），拖拽手柄放组头最左（space-drag-handle）。 */
+  const [spaceOrder, setSpaceOrder] = reactExports.useState(() => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem("zw:space-order") ?? "[]");
+      return Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : [];
+    } catch {
+      return [];
+    }
+  });
+  reactExports.useEffect(() => {
+    try {
+      window.localStorage.setItem("zw:space-order", JSON.stringify(spaceOrder));
+    } catch {
+      /* 配额满：排序记忆失效但不打扰 */
+    }
+  }, [spaceOrder]);
+  const spaceDragRef = reactExports.useRef(null);
   const [menuCwd, setMenuCwd] = reactExports.useState(void 0);
   const [menuPath, setMenuPath] = reactExports.useState(void 0);
   const [renamingCwd, setRenamingCwd] = reactExports.useState(void 0);
@@ -13991,6 +14045,19 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
               children: "添加备注"
             }
           ),
+          /* round16 F4：移动到空间。写入渲染层映射 zw:space-move，daemon 头不动。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                setMoveTargetPath(task.path);
+              },
+              children: "移动到空间…"
+            }
+          ),
           /* #327 round13 F2：存为模板。取会话标题+首条用户提问存 localStorage
              zw:templates（≤5 个，新的挤掉最旧的），新任务时在首页快捷短语行尾部出现。 */
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -14248,7 +14315,30 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       {
         className: collapsed ? "space-group space-group-collapsed" : "space-group",
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `space-group-header${group.cwd === currentCwd ? " space-group-current" : ""}`, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+            className: `space-group-header${group.cwd === currentCwd ? " space-group-current" : ""}`,
+            draggable: true,
+            onDragStart: () => {
+              spaceDragRef.current = group.cwd;
+            },
+            onDragOver: (event) => {
+              if (spaceDragRef.current !== null && spaceDragRef.current !== group.cwd) event.preventDefault();
+            },
+            onDrop: () => {
+              const from = spaceDragRef.current;
+              spaceDragRef.current = null;
+              if (from === null || from === group.cwd) return;
+              setSpaceOrder((prev) => {
+                const rest = prev.filter((c) => c !== from);
+                const idx = rest.indexOf(group.cwd);
+                const next = idx === -1
+                  ? [...rest, from]
+                  : [...rest.slice(0, idx), from, ...rest.slice(idx)];
+                /* 没登记过的组也要能拖：把新序里出现的 cwd 补进登记表。 */
+                return next;
+              });
+            },
+            children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
               "button",
               {
@@ -14270,11 +14360,49 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                   /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-name", children: group.name }),
                   /* 「当前」徽标（issue #73）：置顶（排序）+ 文字徽标双信号承担
                      「这是你现在所在的空间」；颜色只做主色强调，不新造语义。 */
-                  group.cwd === currentCwd && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-badge", children: "当前" })
+                  group.cwd === currentCwd && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-badge", children: "当前" }),
+                  /* round16 F7：组统计（会话数 · 运行中）。 */
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-meta", children: `${group.sessions.length} 会话${group.sessions.filter((s) => s.running).length > 0 ? ` · ${group.sessions.filter((s) => s.running).length} 运行中` : ""}` })
                 ]
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "space-group-actions", children: [
+              /* round16 F5：颜色标记。放 actions 区（组头 main 是折叠按钮，嵌套非法）。
+                 点击循环八色；长按不变，再点回无色。 */
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  className: "task-op-btn space-color-btn",
+                  "aria-label": "切换空间颜色",
+                  title: "切换空间颜色",
+                  onClick: () => {
+                    setSpaceColors((prev) => {
+                      const cur = prev[group.cwd];
+                      const next = { ...prev };
+                      if (cur === void 0) next[group.cwd] = 0;
+                      else if (cur + 1 >= SPACE_COLORS.length) delete next[group.cwd];
+                      else next[group.cwd] = cur + 1;
+                      return next;
+                    });
+                  },
+                  children: spaceColors[group.cwd] !== void 0
+                    ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-color-dot", style: { background: SPACE_COLORS[spaceColors[group.cwd]] } })
+                    : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-color-dot space-color-empty" })
+                }
+              ),
+              /* round16 F6：组内搜索入口。 */
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "button",
+                {
+                  type: "button",
+                  className: "task-op-btn",
+                  "aria-label": "组内搜索",
+                  title: "组内搜索",
+                  onClick: () => setSpaceSearchOpen((prev) => prev === group.cwd ? void 0 : group.cwd),
+                  children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 12 })
+                }
+              ),
               /* @__PURE__ */ jsxRuntimeExports.jsx(
                 "button",
                 {
@@ -14350,7 +14478,29 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
               ] })
             ] })
           ] }),
-          !collapsed && group.sessions.map(renderTaskRow)
+          !collapsed && (() => {
+            const q = (spaceSearch[group.cwd] ?? "").trim().toLowerCase();
+            const shown = q === "" ? group.sessions : group.sessions.filter((s) => (s.title ?? "").toLowerCase().includes(q));
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+              spaceSearchOpen === group.cwd && /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+                type: "text",
+                className: "task-filter space-search-input",
+                placeholder: "组内搜索…",
+                "aria-label": "组内搜索词",
+                value: spaceSearch[group.cwd] ?? "",
+                onChange: (event) => setSpaceSearch((prev) => ({ ...prev, [group.cwd]: event.target.value })),
+                onKeyDown: (event) => {
+                  if (event.key === "Escape") {
+                    setSpaceSearch((prev) => ({ ...prev, [group.cwd]: "" }));
+                    setSpaceSearchOpen(void 0);
+                  }
+                },
+                autoFocus: true
+              }),
+              shown.map(renderTaskRow),
+              q !== "" && shown.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-search-empty", children: "本组没有匹配的会话" })
+            ] });
+          })()
         ]
       },
       group.cwd
@@ -14363,10 +14513,53 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
    * 多项目并行时「找当前组」不该靠扫读——置顶 + 组头「当前」徽标
    * （形态承担状态，见 renderSpaceGroup）双信号。
    */
-  const spaces = currentCwd === void 0 ? rawSpaces : [
-    ...rawSpaces.filter((g) => g.cwd === currentCwd),
-    ...rawSpaces.filter((g) => g.cwd !== currentCwd)
-  ];
+  const spaces = (() => {
+    /* round16 F3/F10：组顺序按 zw:space-order 稳定重排（未登记组保持相对序）。
+       「当前空间置顶」（issue #73）仍优先——拖拽排序在其余组之间生效。 */
+    const current = rawSpaces.find((g) => g.cwd === currentCwd);
+    const rest = rawSpaces.filter((g) => g.cwd !== currentCwd);
+    /* 默认序：其余组按最近活跃降序（latestAt 是组内会话的最大修改时间）。 */
+    const base = current === void 0
+      ? [...rest].sort((a, b) => b.latestAt - a.latestAt)
+      : [current, ...[...rest].sort((a, b) => b.latestAt - a.latestAt)];
+    if (spaceOrder.length === 0) return base;
+    /* round16 F4/F8：跨组移动（渲染层映射）。zw:space-move 记 sessionPath→目标 cwd，
+       daemon 会话头不动（零风险：文件与宿主不受影响，重装映射仍在 localStorage）。
+       命中映射的会话从原组剥到目标组；目标组不存在（工作区被移除）时忽略映射。 */
+    const moveMap = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem("zw:space-move") ?? "{}");
+        return typeof parsed === "object" && parsed !== null ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+    const movedEntries = Object.entries(moveMap);
+    if (movedEntries.length > 0) {
+      const byCwd = new Map(base.map((g) => [g.cwd, g]));
+      const takenPaths = new Set(movedEntries.map(([p]) => p));
+      for (const g of base) {
+        const kept = g.sessions.filter((s) => !takenPaths.has(s.path));
+        if (kept.length !== g.sessions.length) {
+          g.sessions = kept;
+          g.latestAt = kept.reduce((acc, s) => Math.max(acc, s.modifiedAt), 0);
+        }
+      }
+      for (const [p, targetCwd] of movedEntries) {
+        const session = (groups?.tasks ?? []).find((t) => t.path === p) ?? (groups?.spaces ?? []).flatMap((g2) => g2.sessions).find((s) => s.path === p);
+        if (session === void 0) continue;
+        const target = byCwd.get(targetCwd);
+        if (target === void 0) continue;
+        target.sessions = [session, ...target.sessions];
+        target.latestAt = Math.max(target.latestAt, session.modifiedAt);
+      }
+    }
+    const rank = (cwd2) => {
+      const i = spaceOrder.indexOf(cwd2);
+      return i === -1 ? spaceOrder.length : i;
+    };
+    return [...base].sort((a, b) => rank(a.cwd) - rank(b.cwd));
+  })();
   const groupsUnavailable = tasksError !== void 0 || link2.kind === "down";
   /*
    * 折叠窗口走 session-pin.js 的纯函数（单测覆盖）：置顶项**不参与**那 5 个名额的竞争，
@@ -14693,6 +14886,27 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         ]
       }),
       parallelOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(ParallelPanel, { tasks: taskList ?? [], onClose: () => setParallelOpen(false), onOpen: onResumeTask })
+    ] }),
+    /* round16 F4：移动到空间的组选择浮层。列出全部空间组（除该会话当前组）。 */
+    moveTargetPath !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { key: "move-sheet", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ws-backdrop", "aria-label": "关闭", onClick: () => setMoveTargetPath(void 0) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pop-menu space-menu move-sheet", role: "menu", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "move-sheet-title", children: "移动到空间…" }),
+        spaces.map((g) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "space-menu-item",
+            onClick: () => {
+              applySpaceMove(moveTargetPath, g.cwd);
+              setMoveTargetPath(void 0);
+              window.dispatchEvent(new CustomEvent("zw:space-move-changed"));
+            },
+            children: g.name
+          },
+          g.cwd
+        ))
+      ] })
     ] }),
     /* #327 round13 F8：会话比较。Shift+⌘点选两个会话后，底部浮条确认并排对比。 */
     compareSel.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { key: "compare-bar", className: "compare-bar", role: "status", children: [
