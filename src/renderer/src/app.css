@@ -17394,3 +17394,55 @@ mark.find-hit {
 .task-item.nav-highlight > .task-item-body .task-item-title {
 	color: var(--text);
 }
+
+/* ── §33 第十六轮十连（#338） ─────────────────────────────────── */
+/* F5 空间颜色标记：actions 区的小色点按钮。空态是描边圆点，已设色是实心。 */
+.space-color-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+}
+.space-color-dot {
+	width: 9px;
+	height: 9px;
+	border-radius: 50%;
+	display: inline-block;
+}
+.space-color-empty {
+	background: transparent;
+	box-shadow: inset 0 0 0 1.5px var(--border-strong);
+}
+/* F7 组统计小字：紧跟组名，弱文字色，宽度自适应。 */
+.space-group-meta {
+	margin-left: var(--space-2);
+	font-size: 11px;
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+/* F6 组内搜索：复用 task-filter 样式，宽度收窄为组内条。 */
+.space-search-input {
+	margin: var(--space-1) 0 var(--space-1) var(--space-5);
+}
+.space-search-empty {
+	padding: var(--space-2) var(--space-3);
+	font-size: 12px;
+	color: var(--text-faint);
+}
+/* F3 拖拽反馈：组头可拖（grab），拖动中半透明。 */
+.space-group-header {
+	cursor: grab;
+}
+.space-group-header:active {
+	cursor: grabbing;
+}
+.space-group-header.drag-over {
+	outline: 1.5px dashed var(--accent);
+	outline-offset: -2px;
+}
+/* F4 移动浮层：标题行 + 组列表（复用 space-menu 菜单样式）。 */
+.move-sheet-title {
+	padding: var(--space-2) var(--space-3);
+	font-size: 12px;
+	color: var(--text-faint);
+	border-bottom: 1px solid var(--border);
+}
