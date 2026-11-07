@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, appendFileSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, delimiter, basename, extname } from "node:path";
@@ -140,6 +140,8 @@ class GlobalToggleShortcutController {
 const MAIN_HANDLED = [
   INVOKE.daemonStatus,
   INVOKE.globalShortcutStatus,
+  /* #342 F6：lastExit 由 main 本地应答（读 last-exit.json），不转发 daemon。 */
+  INVOKE.lastExit,
   INVOKE.openArtifact,
   INVOKE.menuPopup,
   INVOKE.saveArtifactAs,
@@ -476,6 +478,29 @@ function createWindow() {
   else void window.loadFile(join(__dirname, "../renderer/index.html"));
 }
 import { initUpdates, switchUpdateChannel, disposeUpdates } from "./updates.js";
+/* #342 第十七轮 F6：崩溃恢复标记。正常退出（before-quit）写 clean:true；
+   异常退出（崩溃/强杀/断电）文件保持上一次的内容或缺失。查询即读并翻转
+   unclean → 已消费，同一次开机内不重复弹横幅。 */
+function lastExitPath() {
+  const override = process.env["ZEROWORK_CONFIG_DIR"];
+  const configDir = override !== void 0 && override !== "" ? override : join(homedir(), ".zerowork");
+  return join(configDir, "last-exit.json");
+}
+function readUncleanExit() {
+  try {
+    const parsed = JSON.parse(readFileSync(lastExitPath(), "utf8"));
+    return parsed?.clean === false;
+  } catch {
+    return false;
+  }
+}
+function writeCleanExitMarker() {
+  try {
+    writeFileSync(lastExitPath(), JSON.stringify({ clean: true, at: Date.now() }), "utf8");
+  } catch {
+    /* 写不进也不阻塞退出 */
+  }
+}
 function appendMainEventLog(record) {
   const override = process.env["ZEROWORK_CONFIG_DIR"];
   const configDir = override !== void 0 && override !== "" ? override : join(homedir(), ".zerowork");
@@ -552,6 +577,13 @@ function registerIpc() {
   }
   ipcMain.handle(INVOKE.daemonStatus, () => daemonStatus);
   ipcMain.handle(INVOKE.globalShortcutStatus, () => globalShortcutStatus);
+  /* #342 第十七轮 F6：上次退出是否干净。查询即消费（翻转 clean 标记），
+     横幅在本次会话内只弹一次。 */
+  ipcMain.handle(INVOKE.lastExit, () => {
+    const unclean = readUncleanExit();
+    if (unclean) writeCleanExitMarker();
+    return { unclean };
+  });
   // 主题档位：先落盘（daemon 校验非法值并抛错，themeSource 不会被污染），
   // 成功后才生效。themeSource 是整个应用 prefers-color-scheme 的权威：
   // light/dark 为覆写、system 为跟随 OS；渲染层 system 档靠它求值（design.md §2.3）。
@@ -749,6 +781,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on("before-quit", () => {
     disposeUpdates();
     daemon?.kill();
+    /* #342 第十七轮 F6：正常退出路径写 clean 标记。崩溃/强杀不会走到这里，
+       下次启动读到 clean!==true 即判定「上次未正常关闭」。 */
+    writeCleanExitMarker();
   });
   app.on("will-quit", () => {
     toggleShortcut?.dispose();
