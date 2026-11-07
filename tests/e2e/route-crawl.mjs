@@ -130,36 +130,47 @@ async function canvasStripX(shot) {
 			winW: window.innerWidth,
 			innerLeft: r?.left,
 			innerRight: r?.right,
-			shellLeft: s?.left
+			shellLeft: s?.left,
+			shellRight: s?.right
 		};
 	});
 	const scale = shot.img.width / g.winW;
-	const rightGap = g.winW - (g.innerRight ?? g.winW);
-	const leftGap = (g.innerLeft ?? g.shellLeft ?? 0) - (g.shellLeft ?? 0);
+	// 右侧：主列右缘之外、外壳右缘再往里收 12px。外壳最后十几像素是圆角与
+	// 窗口底部/边缘的过渡带（CI 1024×679 实测 x≥1012 亮度不再单调），不能采。
+	const right0 = (g.innerRight ?? g.winW) + 8;
+	const right1 = (g.shellRight ?? g.winW) - 12;
+	// 左侧：外壳左缘之内、主列左缘再往里收 6px（主列内容从这里开始）。
+	const left0 = (g.shellLeft ?? 0) + 4;
+	const left1 = (g.innerLeft ?? g.winW) - 6;
 	let x0;
 	let x1;
 	let where;
-	if (rightGap >= 20) {
-		x0 = g.innerRight + 8;
-		x1 = g.winW - 2;
+	if (right1 - right0 >= 8) {
+		x0 = right0;
+		x1 = right1;
 		where = "主列右侧留白";
-	} else if (leftGap >= 20) {
-		x0 = g.shellLeft + 2;
-		x1 = g.innerLeft - 6;
+	} else if (left1 - left0 >= 8) {
+		x0 = left0;
+		x1 = left1;
 		where = "主列左侧留白";
 	} else {
 		x0 = g.winW * 0.95;
 		x1 = g.winW * 0.985;
 		where = "回退 95%–98.5%";
 	}
-	return { x0: Math.round(x0 * scale), x1: Math.round(x1 * scale), where };
+	return {
+		x0: Math.round(x0 * scale),
+		x1: Math.round(x1 * scale),
+		where,
+		debug: `inner=${Math.round(g.innerLeft ?? -1)}..${Math.round(g.innerRight ?? -1)} shell=${Math.round(g.shellLeft ?? -1)}..${Math.round(g.shellRight ?? -1)} winW=${g.winW}`
+	};
 }
 
 // ══ ① 首页：光照方向必须单调 ══════════════════════════════════════
 await h.check("首页画布下半部分单调变暗（底光生效，越往下越沉）", async () => {
 	const shot = await h.shoot("00-home");
 	const strip = await canvasStripX(shot);
-	console.log(`    采样带：${strip.where} x=${strip.x0}..${strip.x1}（图片像素）`);
+	console.log(`    采样带：${strip.where} x=${strip.x0}..${strip.x1}（图片像素） ${strip.debug}`);
 	// 只验**下半部分**：顶部那两块是极光的青/靛，颜色本身就比白画布暗，
 	// 拿整页去验「越往上越亮」会被极光染色证伪 —— 那不是缺陷。
 	// 底光要证的是一件事：从页面中段往下，明度单向衰减。
