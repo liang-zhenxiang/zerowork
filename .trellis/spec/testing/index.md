@@ -566,6 +566,9 @@ expected 243 to be greater than or equal to 250
 - 等到**具体内容元素**出现再继续：`[aria-label="代理模式"]`、
   `.starter-empty / .starter-add / .starter-row / .starter-editor` 任一；
 - 空态与列表态都要覆盖的场景，用「任一内容元素」而不是只等空态；
+- **按钮要等「可点」，不只是「存在」**：daemon 重启窗口里保存按钮会保持
+  `disabled`（`busy || saving`），只等文字出现会点空、随后等副作用超时
+  （2026-11-08 `gui-proxy` 的 SOCKS 用例真实失败过一次）；
 - 不要把固定 `sleep` 当兜底（第 1 条）。
 
 ---
