@@ -17446,3 +17446,318 @@ mark.find-hit {
 	color: var(--text-faint);
 	border-bottom: 1px solid var(--border);
 }
+
+/* ── §34 诊断健康评分环（#268）──────────────────────────────────────
+   四项各 25 分（模型 / 内置运行时 / 最近任务 / 全局快捷键），合成 0–100 的
+   可扫读总分，并在环下方给一句可执行的建议。评分与建议的选择规则全在
+   src/renderer/src/health-score.js（纯函数、单测直测）；这里只管摆位置与取色。
+
+   取色纪律（docs/DESIGN.md §2.4 / §7.6）：状态色只表状态，且状态**不看颜色也
+   读得出** —— 每一行都写着「正常 / 扣分 / 无法判断」，颜色只是增强。
+   环的档位色与总分档位同源（≥90 --ok / ≥70 --accent / ≥50 --warning / 其余 --danger）。 */
+.health-card {
+	display: flex;
+	align-items: center;
+	gap: var(--space-6);
+	flex-wrap: wrap;
+}
+
+/* 环：SVG 圆环 + 中心总分。旋转 -90deg 让进度从 12 点开始。 */
+.health-ring {
+	position: relative;
+	width: 140px;
+	height: 140px;
+	flex: 0 0 auto;
+}
+
+.health-ring svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+	transform: rotate(-90deg);
+}
+
+.health-ring-track,
+.health-ring-fill {
+	fill: none;
+	stroke-width: 10;
+}
+
+.health-ring-track {
+	stroke: var(--border);
+}
+
+.health-ring-fill {
+	stroke-linecap: round;
+	transition: stroke-dashoffset var(--dur-slow) var(--ease-out);
+}
+
+.health-band-ok .health-ring-fill {
+	stroke: var(--ok);
+}
+
+.health-band-accent .health-ring-fill {
+	stroke: var(--accent);
+}
+
+.health-band-warning .health-ring-fill {
+	stroke: var(--warning);
+}
+
+.health-band-danger .health-ring-fill {
+	stroke: var(--danger);
+}
+
+.health-ring-center {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-1);
+	color: var(--text);
+}
+
+.health-ring-score {
+	font-size: var(--text-display);
+	font-weight: 600;
+	line-height: 1;
+	font-variant-numeric: tabular-nums;
+}
+
+.health-ring-unit {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.health-detail {
+	flex: 1 1 300px;
+	min-width: 0;
+}
+
+.health-band-label {
+	margin: 0 0 var(--space-3);
+	font-size: var(--text-body);
+	font-weight: 600;
+}
+
+.health-band-label.ok,
+.health-row-state.ok {
+	color: var(--ok);
+}
+
+.health-band-label.accent {
+	color: var(--accent);
+}
+
+.health-band-label.warning,
+.health-row-state.deduct,
+.health-row-state.unknown {
+	color: var(--warning);
+}
+
+.health-band-label.danger {
+	color: var(--danger);
+}
+
+.health-rows {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.health-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto;
+	gap: var(--space-3);
+	align-items: baseline;
+	padding: var(--space-1) 0;
+	border-bottom: 1px dashed var(--border);
+}
+
+.health-row:last-child {
+	border-bottom: none;
+}
+
+.health-row-name {
+	font-size: var(--text-list);
+	color: var(--text);
+}
+
+.health-row-state {
+	font-size: var(--text-meta);
+}
+
+.health-row-score {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+.health-advice {
+	margin: var(--space-3) 0 0;
+	font-size: var(--text-list);
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+/* ── §35 首页场景 Bento（#268）────────────────────────────────────
+   能力胶囊行从「一排小胶囊」改为不等宽 Bento 网格：全量 8 个场景（work 4 +
+   code 4）都能在首页看到，跨场景卡片点开直接列出它自己的模板 / 提示词。
+   外层仍叫 .capability-row：gui-smoke 的垂直节奏断言依赖它的 24px 底边距
+   （docs/DESIGN.md §3.8）。这里只追加覆盖，不改既有规则。
+
+   布局（5 列，首尾两张各跨 2 列）：
+     第 1 行 [宽2][1][1][1] / 第 2 行 [1][1][1][宽2] —— 8 张正好两行。
+   **两行是硬要求，不是审美**：三行会把输入卡顶出 860 视口，而输入卡是首页
+   唯一的视觉重点（docs/DESIGN.md §3.9）；卡片高度同样为「一屏装得下」服务
+   （描述单行截断、垂直内边距收一档）。
+   .bento-wide 的判定在 JSX 里按位置给出（首张与末张；资源里加卡时布局不自毁）。 */
+.capability-row.bento-row {
+	display: block;
+	overflow: visible;
+	min-height: 0;
+}
+
+.bento-grid {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: var(--space-3);
+	width: 100%;
+}
+
+.bento-card {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	gap: var(--space-1);
+	min-width: 0;
+	padding: var(--space-2) var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--glass-bg-strong);
+	box-shadow: var(--shadow-sm);
+	color: var(--text-secondary);
+	text-align: left;
+	transition:
+		transform var(--dur-fast) var(--ease-out),
+		box-shadow var(--dur-fast) var(--ease-out),
+		border-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		background-color var(--dur-fast) var(--ease-standard);
+}
+
+.bento-card.bento-wide {
+	grid-column: span 2;
+}
+
+.bento-card:hover {
+	transform: translateY(-1px);
+	border-color: var(--edge);
+	box-shadow: var(--shadow-accent-md);
+}
+
+.bento-card:active {
+	transform: scale(0.98);
+}
+
+.bento-card.active,
+.bento-card.active:hover {
+	background: var(--grad-primary);
+	border-color: transparent;
+	box-shadow: var(--shadow-accent-sm);
+	transform: none;
+}
+
+.bento-head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	width: 100%;
+	min-width: 0;
+}
+
+.bento-head svg {
+	flex: 0 0 auto;
+}
+
+.bento-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: var(--text-body);
+	font-weight: 500;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 描述与数量同排：描述吃掉剩余宽度并单行截断，数量靠右。数量不再单占一行 ——
+   每多一行文字，两行网格就要多 ~46px，那会把输入卡顶出 860 首屏。 */
+.bento-meta {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	width: 100%;
+	min-width: 0;
+}
+
+.bento-desc {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+.bento-count {
+	flex: 0 0 auto;
+	font-size: var(--text-meta);
+	color: var(--text-faint);
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+
+/* 选中态：整张卡铺渐变，卡内三档文字统一反白（渐变底上没有第二套灰阶）。 */
+.bento-card.active .bento-name,
+.bento-card.active .bento-desc,
+.bento-card.active .bento-count {
+	color: var(--primary-text);
+}
+
+/* 窄窗：4 列会压到读不出描述，退成 2 列且所有卡都不跨列；再窄退成单列。 */
+@media (max-width: 900px) {
+	.bento-grid {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+
+	.bento-card.bento-wide {
+		grid-column: span 1;
+	}
+}
+
+@media (max-width: 640px) {
+	.bento-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+
+/* 减弱动态效果（docs/DESIGN.md §10.3.1）：本段是全文件最后追加的一段，
+   因此关停规则必须**跟在这一段末尾**才盖得住上面的声明（@media 不提高优先级，
+   同级选择器靠源码顺序裁决）。只关「位移」与「环的进度过渡」——
+   颜色过渡不产生位移，与既有 .capability-chip 等控件同待遇。 */
+@media (prefers-reduced-motion: reduce) {
+	.bento-card:hover,
+	.bento-card:active {
+		transform: none;
+	}
+
+	.health-ring-fill {
+		transition: none;
+	}
+}
