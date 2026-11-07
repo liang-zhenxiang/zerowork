@@ -37,6 +37,14 @@ async function openSettingsGeneral() {
 		() => win.evaluate(() => [...document.querySelectorAll("h2")].some((el) => el.textContent === "网络代理")),
 		{ timeout: 30_000, interval: 300, desc: "「网络代理」区块渲染" },
 	);
+	// h2 是同步渲染的，但选择器要等 getProxy() 返回后才出现（ProxySection
+	// 的 config === undefined 走加载态）。只等 h2 会在启动较慢时读到中间态，
+	// 表现为「代理模式选择器不在」——main 上真实失败过一次（#339 合并后）。
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="代理模式"]') !== null), {
+		timeout: 30_000,
+		interval: 300,
+		desc: "代理模式选择器渲染",
+	});
 }
 
 /** 选代理模式（自定义 SelectField：点触发器 → 点选项）。 */
