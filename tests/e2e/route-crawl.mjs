@@ -80,26 +80,23 @@ const viewTitle = () =>
 		return el === null ? null : (el.textContent ?? "").trim();
 	});
 
-/** 一条纵向带（占视图页高度的 [from, to)）的平均亮度。 */
-const bandMean = (shot, from, to) => {
+/**
+ * 一条纵向带（占视图页高度的 [from, to)）的平均亮度。
+ * `xRange` 是图片像素坐标；不传时退回历史的 95%–98.5% 右条。
+ */
+const bandMean = (shot, from, to, xRange) => {
 	const { img } = shot;
 	const y0 = Math.round(img.height * from);
 	const y1 = Math.round(img.height * to);
-	// 只取左右两侧留白的竖条：中间那列是输入卡与案例卡（白色面），会把「画布
-	// 本身的明度」整个盖掉 —— 量到的就成了「卡片有多白」，不是光照方向。
-	// 左右各取一条（2026-10-26）：CI 窗口 1024 宽时 composer-card 右缘可到
-	// x≈980（rect 实测），单取右侧 1300-1520×scale 会被 clamp 成空带或蹭到
-	// 卡片边缘。左右对称各取一条，且都在卡片 rect 之外，宽度自适应：
-	//   左条 8%–16% 视口宽，右条 84%–92% 视口宽。
-	// 2026-10-26 第三次修正（这次把两侧都量透了）：
-	// - 右侧：CI 窗口 1024 宽时 composer-card rect=x≈296..980（实测），
-	//   84% 处（x≈860）仍在 TEXTAREA 里。右条取 95%–98.5%，在任何卡片
-	//   与阴影之外，实测单调（中 243.6 ≥ 偏下 235.5 ≥ 底 230.9）。
-	// - 左侧不可用：矮窗下左栏「最近/空态」（.state-empty，rect l=12
-	//   w=239，实测）横跨 1%–24% 视口宽，任何左条都会量到它。
-	// 所以只取右侧一条。
-	const x0 = Math.round(img.width * 0.95);
-	const x1 = Math.round(img.width * 0.985);
+	// 只取**主列之外的画布留白**：中间那列是输入卡、Bento 卡与案例卡（白色面），
+	// 会把「画布本身的明度」整个盖掉 —— 量到的就成了「卡片有多白」，不是光照方向。
+	//
+	// 2026-11-08（#268）：历史实现写死右侧 95%–98.5%，前提是「那个 x 区间在任何
+	// 卡片之外」。首页改为 8 张 Bento 卡后主列变高、上手清单下移，固定比例的
+	// 竖向采样带在 1024×679 的 CI 窗口里落到了卡片右缘 —— 中 235.2 / 偏下 238.4
+	// 出现翻转。换成按 DOM 实测主列边界、取其外侧留白，采样位置与内容高度解耦。
+	const x0 = xRange?.x0 ?? Math.round(img.width * 0.95);
+	const x1 = xRange?.x1 ?? Math.round(img.width * 0.985);
 	let sum = 0;
 	let n = 0;
 	for (let y = y0; y < y1; y += 1) {
@@ -116,15 +113,59 @@ const bandMean = (shot, from, to) => {
 	return sum / n;
 };
 
+/**
+ * 主列之外的画布留白（换算成图片像素）。
+ *
+ * 优先取主列右侧的窗口留白；右侧太窄（窄窗）时取主列与外壳左缘之间的留白。
+ * 两者都不足 20px 才退回历史比例 —— 回退是为了让极端窗口给出可读的失败信息，
+ * 而不是在「没有画布可量」时静默量到卡片。
+ */
+async function canvasStripX(shot) {
+	const g = await win.evaluate(() => {
+		const inner = document.querySelector(".home-inner");
+		const shell = document.querySelector(".app > main.home");
+		const r = inner?.getBoundingClientRect();
+		const s = shell?.getBoundingClientRect();
+		return {
+			winW: window.innerWidth,
+			innerLeft: r?.left,
+			innerRight: r?.right,
+			shellLeft: s?.left
+		};
+	});
+	const scale = shot.img.width / g.winW;
+	const rightGap = g.winW - (g.innerRight ?? g.winW);
+	const leftGap = (g.innerLeft ?? g.shellLeft ?? 0) - (g.shellLeft ?? 0);
+	let x0;
+	let x1;
+	let where;
+	if (rightGap >= 20) {
+		x0 = g.innerRight + 8;
+		x1 = g.winW - 2;
+		where = "主列右侧留白";
+	} else if (leftGap >= 20) {
+		x0 = g.shellLeft + 2;
+		x1 = g.innerLeft - 6;
+		where = "主列左侧留白";
+	} else {
+		x0 = g.winW * 0.95;
+		x1 = g.winW * 0.985;
+		where = "回退 95%–98.5%";
+	}
+	return { x0: Math.round(x0 * scale), x1: Math.round(x1 * scale), where };
+}
+
 // ══ ① 首页：光照方向必须单调 ══════════════════════════════════════
 await h.check("首页画布下半部分单调变暗（底光生效，越往下越沉）", async () => {
 	const shot = await h.shoot("00-home");
+	const strip = await canvasStripX(shot);
+	console.log(`    采样带：${strip.where} x=${strip.x0}..${strip.x1}（图片像素）`);
 	// 只验**下半部分**：顶部那两块是极光的青/靛，颜色本身就比白画布暗，
 	// 拿整页去验「越往上越亮」会被极光染色证伪 —— 那不是缺陷。
 	// 底光要证的是一件事：从页面中段往下，明度单向衰减。
-	const a = bandMean(shot, 0.50, 0.62);
-	const b = bandMean(shot, 0.70, 0.82);
-	const c = bandMean(shot, 0.88, 0.98);
+	const a = bandMean(shot, 0.50, 0.62, strip);
+	const b = bandMean(shot, 0.70, 0.82, strip);
+	const c = bandMean(shot, 0.88, 0.98, strip);
 	// a≥b 允许 3 个亮度单位的容差（2026-10-29 PR #298 首定 1；PR #301 CI 复测
 	// 出 b-a=+2.0 的翻转，仍是采样带蹭到内容的噪声而非渐变缺失——a-c≥2 的
 	// 趋势判据仍在，容差提到 3 覆盖 CI 字体渲染的 1-2 单位漂移）。
