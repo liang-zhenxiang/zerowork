@@ -550,6 +550,27 @@ expected 243 to be greater than or equal to 250
 
 [#226]: https://github.com/liang-zhenxiang/zerowork/issues/226
 
+### 8. 异步区块：等「内容元素」，不要等「分组标题」（2026-11-08）
+
+设置页的分组大多是**两段式渲染**：`<h2>` 同步出现，内容要等一个 IPC 回包
+（`ProxySection` 的 `config`、`StarterTemplatesSection` 的 `starters`、
+`UpdatesSection` 的 `state` …… `undefined` 时走加载态）。用例只等分组标题
+就断言内容，启动稍慢就会读到加载态。
+
+真实事故：main 上连续两次红 —— #339 合并后 `gui-proxy` 报「代理模式选择器不在」，
+#340 合并后 `prompt-templates` 报「空列表要有空态」，后续点击因节点为 `null`
+连锁失败；同一提交的 PR 运行却都是绿的，典型 flake。
+
+**做法**：
+
+- 等到**具体内容元素**出现再继续：`[aria-label="代理模式"]`、
+  `.starter-empty / .starter-add / .starter-row / .starter-editor` 任一；
+- 空态与列表态都要覆盖的场景，用「任一内容元素」而不是只等空态；
+- **按钮要等「可点」，不只是「存在」**：daemon 重启窗口里保存按钮会保持
+  `disabled`（`busy || saving`），只等文字出现会点空、随后等副作用超时
+  （2026-11-08 `gui-proxy` 的 SOCKS 用例真实失败过一次）；
+- 不要把固定 `sleep` 当兜底（第 1 条）。
+
 ---
 
 ## 六、新增一个用例的完整步骤

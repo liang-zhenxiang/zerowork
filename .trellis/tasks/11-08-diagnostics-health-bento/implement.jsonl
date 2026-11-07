@@ -1,0 +1,3 @@
+{"file":".trellis/spec/renderer/index.md","reason":"渲染层规范：禁原生 select、token 纪律、大文件修改约束"}
+{"file":".trellis/spec/testing/index.md","reason":"测试分层与 GUI harness 用法、假等待门禁"}
+{"file":"docs/DESIGN.md","reason":"设计 token 档位与禁止清单（评分环颜色、Bento 间距）"}

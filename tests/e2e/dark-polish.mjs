@@ -85,6 +85,20 @@ const readGeometry = () =>
 	});
 
 /**
+ * 把输入卡外槽滚进视野再采样。
+ *
+ * 首页自 #268 起有 8 张场景 Bento 卡（两行）。**本机 860 高时外槽在首屏内，但 CI
+ * 的窗口是 1280×679（docs/DESIGN.md §21）—— 实测外槽落在 603..819，整个越过了
+ * 视口下缘**，`regionMean` 会拿到空区域（「区域为空」直接抛错）。这条用例必须在
+ * CI 上也能采到样，所以采样前统一滚一次。滚到视野中央只改「看哪一屏」，不改
+ * 断言本身：采样的仍是外槽底缘与主背景两块同竖直位置的面。
+ */
+async function scrollComposerIntoView() {
+	await win.evaluate(() => document.querySelector(".composer-slot")?.scrollIntoView({ block: "center" }));
+	await h.waitForSettled();
+}
+
+/**
  * 外槽底缘采样带：落在槽的 padding-bottom 内（卡片已结束），左右各内缩 30px
  * 避开 24px 圆角；竖直只取底缘 2px，避免蹭到卡片底边的抗锯齿。
  */
@@ -155,6 +169,7 @@ const probeTurnNavMark = () =>
 // 从「渐变底色」改成了「实心底色 + ::after 的 1.5px 渐变发丝描边」——
 // 槽不再自己承担渐变，渐变只留在边缘。所以这里断言的是新契约：
 // 底色 background-image 必须是 none（渐变不许回到底色上）。
+await scrollComposerIntoView();
 const light = await h.shoot("home-light");
 const lightGeo = await readGeometry();
 const lightRing = regionMean(light.img, slotRingRect(lightGeo, light.img.height), lightGeo.vw);
@@ -184,6 +199,7 @@ await h.check("浅色下输入卡外槽是实心极浅面（渐变只在描边�
 // 阈值从 +12 放宽到 +45：外槽现在是抬升面（--surface），本来就该比页面底亮一点点；
 // 这条守的是「不再出现 #105 那种刺眼亮带」，不是「外槽必须与背景同亮度」。
 await setTheme("dark");
+await scrollComposerIntoView();
 const dark = await h.shoot("home-dark");
 const darkGeo = await readGeometry();
 const darkRing = regionMean(dark.img, slotRingRect(darkGeo, dark.img.height), darkGeo.vw);
