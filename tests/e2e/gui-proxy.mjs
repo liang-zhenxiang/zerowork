@@ -71,27 +71,28 @@ function readPrefs() {
 }
 
 /**
- * 等设置区的「保存代理设置」按钮出现。
+ * 等设置区的「保存代理设置」按钮出现**且可点**。
  *
  * 保存代理会重启 daemon：重启窗口里 ProxySection 的 getProxy 会短暂失败、
- * 整块退回加载/错误态，按钮随之下线。直接查一次就点会偶发「找不到按钮」——
- * 这不是功能问题，是测试没等状态恢复。
+ * 整块退回加载/错误态，按钮随之下线；恢复后按钮仍在 `busy` 期间保持
+ * `disabled`（`busy || saving`）。只等文字出现会在 disabled 窗口里点空 ——
+ * main 上真实失败过一次（SOCKS 用例等待 15s 超时，什么也没提交）。
  */
 async function waitSaveButton() {
 	await waitUntil(
 		() =>
 			win.evaluate(() =>
-				[...document.querySelectorAll("button")].some((b) => b.textContent === "保存代理设置"),
+				[...document.querySelectorAll("button")].some((b) => b.textContent === "保存代理设置" && !b.disabled),
 			),
-		{ timeout: 30_000, interval: 300, desc: "「保存代理设置」按钮出现" },
+		{ timeout: 30_000, interval: 300, desc: "「保存代理设置」按钮出现且可点" },
 	);
 }
 
 async function clickSave() {
 	await waitSaveButton();
 	await win.evaluate(() => {
-		const btn = [...document.querySelectorAll("button")].find((b) => b.textContent === "保存代理设置");
-		if (btn === undefined) throw new Error("找不到「保存代理设置」");
+		const btn = [...document.querySelectorAll("button")].find((b) => b.textContent === "保存代理设置" && !b.disabled);
+		if (btn === undefined) throw new Error("「保存代理设置」不可点（disabled）");
 		btn.click();
 	});
 }
