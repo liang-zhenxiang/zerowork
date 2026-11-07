@@ -42,6 +42,21 @@ async function openSettings() {
 		});
 	}
 	await waitUntil(() => sectionText("开局模板"), { timeout: 20_000, desc: "通用页里的「开局模板」分组" });
+	// h2 是同步渲染的，内容要等 getStarterPrompts() 回包（starters === undefined
+	// 时走加载态）。只等分组出现会在启动较慢时读到加载态，首项断言就会看到
+	// 没有 .starter-empty —— main 上真实失败过一次（#339 合并后）。
+	// 与 pickTheme 等「外观」选择器是同一条教训：等具体内容，不等标题。
+	await waitUntil(
+		() =>
+			win.evaluate(() =>
+				[...document.querySelectorAll(".settings-section")].some(
+					(node) =>
+						node.querySelector("h2")?.textContent.trim() === "开局模板" &&
+						node.querySelector(".starter-empty, .starter-add, .starter-row, .starter-editor") !== null,
+				),
+			),
+		{ timeout: 20_000, interval: 300, desc: "「开局模板」内容渲染（IPC 回包后）" },
+	);
 }
 
 async function closeSettings() {
