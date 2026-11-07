@@ -749,7 +749,13 @@ const INVOKE = {
    * path / title（「去这条会话 →」要拿 path 去 resumeSession）；往列事件通道里
    * 加 keep 结果还会触发 kind 清单契约测试的两端同步要求，无谓扩大面。
    */
-  compareKeep: "compare:keep"
+  compareKeep: "compare:keep",
+  /**
+   * #342 第十七轮 F6：上次退出是否干净。main 侧 handler 读 last-exit.json
+   * （上次 before-quit 写下的 clean 标记），返回 { unclean } 并消费标记。
+   * 挂 INVOKE：这是一次查询动作（渲染层首启拉一次），不是推送。
+   */
+  lastExit: "app:last-exit"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */

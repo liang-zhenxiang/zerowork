@@ -607,7 +607,9 @@ const INVOKE = {
    * 的列受理）。返回 `{ ok:true, path, title } | { ok:false, error }`。
    * 也在上面的手工副本表里 —— 改通道名两处都要改。
    */
-  compareKeep: "compare:keep"
+  compareKeep: "compare:keep",
+  /** #342 F6：上次退出是否干净（查询一次后标记已读）。 */
+  lastExit: "app:last-exit"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */

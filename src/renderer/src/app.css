@@ -17446,3 +17446,116 @@ mark.find-hit {
 	color: var(--text-faint);
 	border-bottom: 1px solid var(--border);
 }
+
+/* ── §34 第十七轮十连（#342 可靠性与恢复） ─────────────────────── */
+/* Toast 动作按钮：撤销/重放共用通道。跟正文同排，accent 色但不抢主行动。 */
+.toast-action {
+	flex: none;
+	border: none;
+	background: transparent;
+	color: var(--accent);
+	font: inherit;
+	font-size: 12px;
+	font-weight: 600;
+	padding: 2px 6px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+}
+.toast-action:hover {
+	background: var(--accent-soft);
+}
+/* F2 清空草稿：composer 工具行的弱按钮，只在有内容时出现。 */
+.composer-clear-btn {
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	font: inherit;
+	font-size: 11px;
+	padding: 2px 6px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+}
+.composer-clear-btn:hover {
+	color: var(--danger);
+	background: var(--accent-soft);
+}
+/* F6 崩溃恢复横幅：与 welcome-banner 同构，警示色基调（warning 不用 error ——
+   数据没坏，只是告知）。 */
+.crash-banner {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+	background: color-mix(in srgb, var(--warning) 8%, var(--bg-elevated));
+	border-radius: var(--radius-md);
+	margin-bottom: var(--space-4);
+}
+.crash-banner-text {
+	font-size: var(--font-size-sm);
+	color: var(--text-secondary);
+}
+.crash-banner-text strong {
+	color: var(--text);
+}
+.crash-banner-close {
+	flex: none;
+	border: 1px solid var(--border-strong);
+	background: var(--bg-elevated);
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: 12px;
+	padding: 3px 10px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+}
+.crash-banner-close:hover {
+	color: var(--text);
+	border-color: var(--accent);
+}
+/* F8 存储余量：进度条 + 标签行。与 data-overview 同宽。 */
+.storage-meter {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) 0;
+}
+.storage-meter-track {
+	flex: 1;
+	height: 6px;
+	border-radius: 999px;
+	background: var(--accent-soft);
+	overflow: hidden;
+	display: inline-block;
+}
+.storage-meter-fill {
+	display: block;
+	height: 100%;
+	border-radius: inherit;
+	background: var(--accent);
+}
+/* F10 错误卡「搜索此错误」：与复制按钮同款 ghost。 */
+.error-card-search {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	border: 1px solid var(--border);
+	background: transparent;
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: 11px;
+	padding: 2px 8px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.error-card-search:hover {
+	color: var(--accent);
+	border-color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+	.toast-action, .composer-clear-btn, .crash-banner-close, .error-card-search {
+		transition: none;
+	}
+}

@@ -15868,6 +15868,8 @@ function Composer({
      （onSubmit 的 promise resolve 即视为完成）。队列在组件卸载/新会话时清空。 */
   const queueRef = reactExports.useRef([]);
   const [queueLen, setQueueLen] = reactExports.useState(0);
+  /* #342 第十七轮 F2：被清空草稿的暂存（撤销窗口内可还原）。 */
+  const draftUndoRef = reactExports.useRef(null);
   /* #327 round13 F4：历史相似提示。首条提问发出前，用提问前 12 个字（去空白）
      在现有会话标题里找包含关系 —— 命中且不是当前会话时 toast 提醒一次。
      纯字符串包含，零依赖；提示不阻断发送。 */
@@ -15906,7 +15908,23 @@ function Composer({
     const next = queueRef.current.shift();
     setQueueLen(queueRef.current.length);
     if (next === void 0) return;
+    /* #342 第十七轮 F4：队列项失败不再静默吞 —— 推回队首并 toast「重放」，
+       用户点击才继续；否则整队静默蒸发，剩下的提问看起来像被丢了。
+       Composer 作用域没有 showToast，走 zw:toast 通道（action 字段随 detail 透传）。 */
     void onSubmit(next, void 0, false).catch(() => {
+      queueRef.current.unshift(next);
+      setQueueLen(queueRef.current.length);
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "队列提问发送失败", action: {
+        label: "重放",
+        run: () => {
+          if (queueRef.current.length > 0) {
+            const retry = queueRef.current.shift();
+            setQueueLen(queueRef.current.length);
+            void onSubmit(retry, void 0, false).catch(() => {
+            });
+          }
+        }
+      } }] }));
     });
   }, [onSubmit]);
   reactExports.useEffect(() => {
@@ -16065,6 +16083,36 @@ function Composer({
           children,
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
           trailing,
+          /* #342 第十七轮 F2：清空草稿（带撤销）。误触/写砸了想推倒重来的
+             逃生门 —— 旧文本先存 ref，toast 里一键还原。 */
+          draft.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "composer-clear-btn",
+              "aria-label": "清空草稿",
+              title: "清空草稿",
+              onClick: () => {
+                const saved = draft;
+                draftUndoRef.current = { key: draftKey, text: saved };
+                setDraft("");
+                setSkills([]);
+                img.clearDocumentRefs();
+                if (draftKey !== void 0) saveDraft(draftKey, "");
+                window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: "草稿已清空", action: {
+                  label: "撤销",
+                  run: () => {
+                    const undo = draftUndoRef.current;
+                    if (undo === null) return;
+                    draftUndoRef.current = null;
+                    setDraft(undo.text);
+                    if (undo.key !== void 0) saveDraft(undo.key, undo.text);
+                  }
+                } }] }));
+              },
+              children: "清空"
+            }
+          ),
           /* §21.4 估算的显示门独立于字符计数：字符计数是「快写满了」的警告
            * （remaining<1000 才出现），而 token 估算要的是日常量级感 —— 只要
            * 有实质输入（≥40 字符）就显示，搭便车永远等不到那一天。 */
@@ -16540,6 +16588,16 @@ const GUIDE_SKELETON_TEXT_STYLE = {
 /* round14 F1：首启欢迎横幅。只在「从未完成过三步引导」时出现一次；
    完成（三步全绿）或手动关闭后写 zw:onboarded，永不再显。
    与 OnboardingChecklist（常驻三步清单）互补：横幅讲欢迎语，清单讲操作。 */
+/* #342 第十七轮 F5：慢操作提示。>ms 毫秒未完成就发一条「仍在处理…」toast；
+   完成后不再撤回（toast 2.2s 自灭），提示是一次性的、不刷屏。调用方传
+   label 描述动作（如「正在导出会话」）。 */
+function withSlowHint(promise, label, ms = 3000) {
+  const timer = setTimeout(() => {
+    window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: `${label}仍在处理，请稍候…` }] }));
+  }, ms);
+  return promise.finally(() => clearTimeout(timer));
+}
+
 function WelcomeBanner() {
   const [gone, setGone] = reactExports.useState(false);
   if (gone) return null;
@@ -16553,6 +16611,53 @@ function WelcomeBanner() {
       " —— 本地优先的办公 Agent：模型配置、提问、统计三步上手，数据全程不出本机。"
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "welcome-banner-close", "aria-label": "知道了", onClick: dismiss, children: "知道了" })
+  ] });
+}
+
+/* #342 第十七轮 F6：崩溃恢复横幅。首启 invoke 一次 lastExit；unclean=true
+   时显示「上次未正常关闭」，用户点「知道了」即收起。查询即消费（main 侧翻转
+   标记），同一次开机不会重复弹。 */
+function CrashBanner() {
+  const [show, setShow] = reactExports.useState(false);
+  reactExports.useEffect(() => {
+    let alive = true;
+    window.kami.getLastExit?.().then((info) => {
+      if (alive && info?.unclean === true) setShow(true);
+    }).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  if (!show) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "crash-banner", role: "status", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "crash-banner-text", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "上次未正常关闭" }),
+      " —— 会话列表与数据完好，可以直接继续。"
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "crash-banner-close", "aria-label": "知道了", onClick: () => setShow(false), children: "知道了" })
+  ] });
+}
+
+/* #342 第十七轮 F8：存储余量条。navigator.storage.estimate() 的 quota/usage
+   折算成百分比条；拿不到（个别 WebView）就整块不渲染，不留「暂无数据」空壳。 */
+function StorageMeter() {
+  const [info, setInfo] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    if (navigator.storage?.estimate === void 0) return;
+    navigator.storage.estimate().then((est) => {
+      if (typeof est?.quota === "number" && typeof est?.usage === "number" && est.quota > 0) {
+        setInfo({ usage: est.usage, quota: est.quota });
+      }
+    }).catch(() => {
+    });
+  }, []);
+  if (info === void 0) return null;
+  const pct = Math.min(100, Math.max(0, Math.round(info.usage / info.quota * 100)));
+  const gb = (n) => `${(n / 1024 ** 3).toFixed(1)}`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "storage-meter", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: `存储余量 · 已用 ${gb(info.usage)}GB / 可用 ${gb(info.quota - info.usage)}GB` }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "storage-meter-track", role: "progressbar", "aria-valuenow": pct, "aria-valuemin": 0, "aria-valuemax": 100, children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "storage-meter-fill", style: { width: `${pct}%` } }) })
   ] });
 }
 
@@ -17914,6 +18019,8 @@ function HomeView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-label", children: ["今日 ", today.tokens.toLocaleString(), " tok"] })
       ] }) : null,
     localStorage.getItem("zw:onboarded") !== "1" && /* @__PURE__ */ jsxRuntimeExports.jsx(WelcomeBanner, {}),
+    /* #342 F6：崩溃恢复横幅（只在上次异常退出后出现一次）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(CrashBanner, {}),
     /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
       !snapshotLanded ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mode-tabs", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取场景…" }) }) : scenes.length === 0 ? (
         /* 空态不进 .mode-tabs：那个容器是固定 36px 高的胶囊，块级空态会被压扁溢出。 */
@@ -34130,6 +34237,19 @@ function ErrorCard({
           title: copied ? "已复制" : "复制错误报告",
           onClick: () => void copy(buildErrorReport(message, runId, at ?? Date.now(), modelId)),
           children: copied ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 13 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconCopy, { size: 13 })
+        }
+      ),
+      /* #342 第十七轮 F10：一键搜同类错误。预填 message 首行到 GitHub Issues
+         检索框 —— 出错时用户的第一反应是「别人也遇到过吗」，别让他自己剪贴。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "button",
+        {
+          type: "button",
+          className: "error-card-search",
+          "aria-label": "搜索此错误",
+          title: "在 GitHub Issues 搜索此错误",
+          onClick: () => window.open(`https://github.com/liang-zhenxiang/zerowork/issues?q=${encodeURIComponent(message.slice(0, 120))}`),
+          children: [/* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 12 }), "搜索此错误"]
         }
       )
     ] }),
@@ -68280,6 +68400,10 @@ function DataManagementSection() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-bar-text", children: sessions.length === 0 ? "暂无数据" : `归档占比 ${Math.round(archived.length / sessions.length * 100)}%` })
       ] })
     ] }),
+    /* #342 第十七轮 F8：存储余量。navigator.storage.estimate() 给的是整个
+       origin 的配额与用量，对 Electron 本地应用就是「用户数据所在的可用空间」，
+       精度足够做「还剩多少」的指示；statfs 级别的精确值要新增 IPC，不值当。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(StorageMeter, {}),
     /* #315 round12 F8：导出产物（exports/ 目录最近 20 个）。 */
     exportItems.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "导出产物" }),
@@ -73394,11 +73518,24 @@ function AutomationForm({
     ] }) })
   );
 }
-function Toast({ messages }) {
+function Toast({ messages, onDismiss }) {
   if (messages.length === 0) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "toast-stack", role: "status", children: messages.map((message) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `toast toast-${message.type}`, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-icon", "aria-hidden": "true", children: message.type === "success" ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 14 }) : message.type === "error" || message.type === "warning" ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 14 }) : message.type === "loading" ? /* @__PURE__ */ jsxRuntimeExports.jsx(Spinner, { size: 12 }) : null }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-text", children: message.text }),
+    /* #342 第十七轮：可撤销/可重放的动作按钮（F1 撤销归档等共用通道）。 */
+    message.action !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: "toast-action",
+        onClick: () => {
+          message.action.run();
+          onDismiss?.(message.id);
+        },
+        children: message.action.label
+      }
+    ),
     /* 自动消失进度条：非 loading 型才画；宽度用 transform scaleX，避免过渡布局属性（§5.1）。 */
     message.type !== "loading" ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "toast-progress", "aria-hidden": "true" }) : null
   ] }, message.id)) });
@@ -74665,18 +74802,22 @@ function App() {
     setToasts((list2) => list2.filter((item) => item.id !== id));
   }, []);
   const showToast = reactExports.useCallback(
-    (text2, type = "info") => {
+    (text2, type = "info", action = void 0) => {
       const id = Date.now() + Math.floor(Math.random() * 1e3);
       setToasts((list2) => {
-        const next = [...list2, { id, text: text2, type }];
+        const next = [...list2, { id, text: text2, type, action }];
         return next.length > 10 ? next.slice(next.length - 10) : next;
       });
       /*
        * loading 态不自动消失（§20 导出进度反馈）：要等调用方用同一 id
        * 换成 success/error。dismissToast 已在 Toast 渲染层去掉 loading 的
        * 关闭钮歧义（有进度条的 toast 不显示进度条，见 Toast 组件）。
+       *
+       * #342 第十七轮：带动作的 toast（撤销/重放）存活 8s —— 2.2s 不够人
+       * 反应过来去点「撤销」；8s 后自动消失，撤销窗口由业务侧另行兜底
+       * （归档可随时在数据管理恢复，不依赖这条 toast）。
        */
-      if (type !== "loading") window.setTimeout(() => dismissToast(id), 2200);
+      if (type !== "loading") window.setTimeout(() => dismissToast(id), action !== void 0 ? 8000 : 2200);
     },
     [dismissToast]
   );
@@ -75093,7 +75234,8 @@ function App() {
       const raw = event.detail;
       const detail = Array.isArray(raw) ? raw[0] : raw;
       if (detail === void 0 || detail === null || typeof detail.text !== "string") return;
-      showToast(detail.text, detail.type === "error" || detail.type === "success" ? detail.type : "info");
+      /* #342 第十七轮：action（撤销/重放按钮）随 detail 透传给 showToast。 */
+      showToast(detail.text, detail.type === "error" || detail.type === "success" ? detail.type : "info", detail.action);
     };
     window.addEventListener("zw:palette-open", openPalette);
     window.addEventListener("zw:focus-toggle", toggleFocusNow);
@@ -75482,7 +75624,16 @@ function App() {
     []
   );
   const archiveTask = reactExports.useCallback((path2) => {
-    window.kami.archiveSession(path2, true).then(() => showToast("已归档，可在设置 → 数据管理中找到", "success")).catch((error) => {
+    /* #342 第十七轮 F1：归档 toast 带「撤销」按钮。undo 直接重放
+       archiveSession(path,false)；数据管理里的恢复入口仍然在（双保险），
+       撤销只是把最常见的那一步从「进设置找」变成「顺手一点」。 */
+    window.kami.archiveSession(path2, true).then(() => showToast("已归档，可在设置 → 数据管理中找到", "success", {
+      label: "撤销",
+      run: () => {
+        window.kami.archiveSession(path2, false).catch(() => {
+        });
+      }
+    })).catch((error) => {
       showToast(error instanceof Error ? error.message : String(error));
     });
   }, [clearSessionHealth, ]);
@@ -76375,7 +76526,7 @@ function App() {
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "sr-only", role: "status", "aria-live": "polite", children: focusMode === true ? "已进入专注模式，按 Esc 退出" : "" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Toast, { messages: toasts, onDismiss: dismissToast }),
     /* 拖文件入窗的全屏提示层：不拦截 drop 本身（composer 自己处理文件），
        只做视觉引导；pointer-events:none 保证不改变拖放目标。 */
     dragFilesActive ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "drop-hint", "aria-hidden": "true", children: [

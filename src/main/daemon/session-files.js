@@ -1,4 +1,5 @@
 import { accessSync } from "node:fs";
+import { statfsSync } from "node:fs";
 import { appendFileSync } from "node:fs";
 import { basename } from "node:path";
 import { closeSync } from "node:fs";
@@ -3853,6 +3854,30 @@ function moveToTrash(filePath) {
   renameSync(filePath, candidate);
 }
 
+/* #342 第十七轮 F7：导出目标预检。目录可建、可写、剩余空间 >1MB 才动手；
+   检查失败抛带原因的错（「错误要可诊断」—— 磁盘满/只读盘是用户能自助的）。 */
+function ensureExportsDirWritable(exportsDir) {
+  try {
+    mkdirSync(exportsDir, { recursive: true });
+  } catch (error) {
+    throw new Error(`导出目录不可创建：${exportsDir}（${error instanceof Error ? error.message : String(error)}）`);
+  }
+  try {
+    accessSync(exportsDir, constants.W_OK);
+  } catch {
+    throw new Error(`导出目录不可写：${exportsDir}（检查磁盘权限或只读挂载）`);
+  }
+  try {
+    const stats = statfsSync(exportsDir);
+    if (stats.bavail * stats.bsize < 1024 * 1024) {
+      throw new Error("磁盘剩余空间不足 1MB，导出可能失败 —— 请先清理磁盘");
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("剩余空间")) throw error;
+    /* statfs 不可用（个别挂载点）不阻塞导出 */
+  }
+}
+
 async function listWorkspaceGroups() {
   const names = readDisplayNames();
   const cwds = /* @__PURE__ */ new Set();
@@ -4524,7 +4549,7 @@ const handlers = {
       throw new Error("分享卡内容为空，请重试");
     }
     const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
-    mkdirSync(exportsDir, { recursive: true });
+    ensureExportsDirWritable(exportsDir);
     /* #315 round12 F4：kind === "file" 是代码块「存为文件」——base64 是
        text/plain（渲染层已 UTF-8 编码），扩展名由第三参指定（白名单校验）。 */
     if (kind === "file") {
@@ -4967,7 +4992,7 @@ const handlers = {
     }
     const host = await bucket.hostPromise;
     const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
-    mkdirSync(exportsDir, { recursive: true });
+    ensureExportsDirWritable(exportsDir);
     const resolvedTarget = resolve(target);
     const summary = (await listSessions()).find((s) => resolve(s.path) === resolvedTarget);
     const title = summary?.title ?? bucket.sessionId;
@@ -5032,7 +5057,7 @@ const handlers = {
     }
     if (!hasExportableContent(entries)) throw new Error("该会话还没有内容可导出");
     const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
-    mkdirSync(exportsDir, { recursive: true });
+    ensureExportsDirWritable(exportsDir);
     const title = summary?.title ?? "";
     const now = /* @__PURE__ */ new Date();
     const outputPath = buildExportPath(exportsDir, title, now, ".md");
@@ -5073,7 +5098,7 @@ const handlers = {
     }
     if (!hasExportableContent(entries)) throw new Error("该会话还没有内容可导出");
     const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
-    mkdirSync(exportsDir, { recursive: true });
+    ensureExportsDirWritable(exportsDir);
     const title = summary?.title ?? "";
     const now = new Date();
     const blocks = renderSessionBlocks(entries);
