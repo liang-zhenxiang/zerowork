@@ -17838,9 +17838,14 @@ function HomeView({
   const [chipPanelOpen, setChipPanelOpen] = reactExports.useState(false);
   // 工作空间下拉的开合由 HomeView 持有：上手清单的「选择工作空间」要能把它顶开。
   const [wsPickerOpen, setWsPickerOpen] = reactExports.useState(false);
-  const chips = welcome === void 0 ? [] : chipsForScene(welcome.chips, sceneId);
+  // Bento 展示**全量**胶囊（work 4 + code 4，共 8 张卡），不再按当前场景过滤：
+  // 首页的作用是「让人看到能做什么」，跨场景的卡片点开也能直接拿到它自己的模板
+  // （#268）。场景过滤仍然只管下面的案例区。
+  const chips = welcome === void 0 ? [] : welcome.chips;
+  const allCases = welcome?.cases ?? [];
   const chipById = new Map(chips.map((chip) => [chip.id, chip]));
-  const sceneCases = casesForScene(welcome?.cases ?? [], chips);
+  const sceneChips = chipsForScene(chips, sceneId);
+  const sceneCases = casesForScene(allCases, sceneChips);
   // 自定义模板排在**前面**：它是「你自己的开局」，内置那四条只是示范。
   // 封面沿用 CaseCover（chipId 留空 → 走默认示意图，按 id 散列出不同线稿）。
   const starterCases = starters.map((starter) => ({
@@ -17850,10 +17855,13 @@ function HomeView({
     prompt: starter.prompt,
     starter: true
   }));
-  const shownCases = [...starterCases, ...casesForChip(sceneCases, activeChipId)];
+  // 选中某张 Bento 卡时案例区按**全量**案例过滤（跨场景卡才有内容可列）；
+  // 没有选中时仍按当前场景过滤。
+  const shownCases = [...starterCases, ...casesForChip(activeChipId === void 0 ? sceneCases : allCases, activeChipId)];
   const visibleCases = page(shownCases, caseOffset, PAGE_SIZE);
   const activeChip = chips.find((chip) => chip.id === activeChipId);
-  const chipItems = activeChip === void 0 ? [] : itemsForChip(activeChip, sceneCases);
+  // 面板内容按胶囊自身的数据算（野卡也拿得到自己的模板），不依赖当前场景的案例集合。
+  const chipItems = activeChip === void 0 ? [] : itemsForChip(activeChip, allCases);
   const iconForCase = (chipId) => CHIP_ICONS[chipById.get(chipId)?.icon ?? ""] ?? IconDoc;
   reactExports.useEffect(() => {
     setActiveChipId(void 0);
@@ -17930,26 +17938,44 @@ function HomeView({
         scene.id
       )) }),
       chips.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "capability-zone", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "capability-row", children: chips.map((chip) => {
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "capability-row bento-row", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bento-grid", children: chips.map((chip, index) => {
           const Icon = CHIP_ICONS[chip.icon] ?? IconDoc;
           const active = chip.id === activeChipId;
+          const itemCount = itemsForChip(chip, allCases).length;
+          // 场景卡打开的是提示词清单，模板卡打开的是案例；两种都算「能用的开局」，
+          // 但单位用各自的真实说法，不把提示词叫成模板。
+          const unit = chip.chipKind === "scene" ? "个提示词" : "个模板";
+          // 5 列网格里只有**首尾**两张跨 2 列，自动排布即成两行：
+          //   [宽2][1][1][1] / [1][1][1][宽2] —— 正好 8 张、正好两行。
+          // 三行会把输入卡顶出 860 视口（docs/DESIGN.md §3.9：输入卡是首页唯一的
+          // 视觉重点），所以卡片高度与行数都为「一屏装得下」服务。
+          const wide = index === 0 || index === chips.length - 1;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
               type: "button",
-              className: `capability-chip${active ? " active" : ""}`,
+              className: `bento-card${wide ? " bento-wide" : ""}${active ? " active" : ""}`,
               title: chip.description,
               "aria-haspopup": "menu",
               "aria-expanded": active && chipPanelOpen,
               onClick: () => toggleChip(chip),
               children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 16 }),
-                chip.label
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "bento-head", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 18 }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bento-name", children: chip.label })
+                ] }),
+                /* 描述与数量同一行：数量单占一行会让每张卡多一行文字（两行网格就是
+                   ~46px），正好把输入卡顶出首屏。名称因此保住了整行宽度，描述在窄卡上
+                   截断（完整原文仍在 title / 无障碍名里）。 */
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "bento-meta", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bento-desc", children: chip.description }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "bento-count", children: [itemCount, " ", unit] })
+                ] })
               ]
             },
             chip.id
           );
-        }) }),
+        }) }) }),
         chipPanelOpen && activeChip !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(
             "button",
@@ -31616,6 +31642,10 @@ import {
 	versionCountLabel,
 	versionSourceText
 } from "./file-history-core.js";
+// 诊断页健康评分的纯逻辑：四项各 25 分的折算、总分档位、以及「建议指向扣分最多
+// 那一项」的选择规则都在 health-score.js，单测直测 —— 这一屏最容易错的不是画环，
+// 而是扣多少分与建议指向谁（界面上都只表现为「一句话」，e2e 说不清）。
+import { HEALTH_MAX_PER_ITEM, computeHealth, healthBand } from "./health-score.js";
 // 变更审阅台的纯逻辑：筛选 / 计数 / 并排 diff 配对 / 边界措辞都在 review-core.js，
 // 单测直测 —— 视图只负责摆位置，e2e 只验「IPC 通了、DOM 挂上了、标记与还原真的落盘了」。
 import {
@@ -70278,6 +70308,59 @@ function GlobalShortcutRow() {
     status !== void 0 && status !== "error" && status.kind === "failed" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-err", children: "注册失败（可能被占用）" })
   ] });
 }
+/*
+ * 健康评分环（#268）—— 四项各 25 分，合成一个可扫读的总分，并给一句可执行的建议。
+ *
+ * 评分与建议的选择全在 health-score.js（纯函数、单测直测）；这里只摆位置：
+ * 左环右表，环中心是总分，下面一行建议。**环本身是 role="img" 且带 aria-label**，
+ * 屏幕阅读器不依赖图形；四行分项与建议都是真实文本，颜色只做增强
+ * （docs/DESIGN.md §7.6：状态不看颜色也读得出 —— 每行都写着「正常 / 扣分 /
+ * 无法判断」）。
+ */
+const HEALTH_RING_RADIUS = 52;
+function HealthScoreView({ health }) {
+	if (health === void 0) {
+		return /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取健康状态…" });
+	}
+	const band = healthBand(health.total);
+	const circumference = 2 * Math.PI * HEALTH_RING_RADIUS;
+	const offset = circumference * (1 - health.total / 100);
+	return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `health-card health-band-${band.key}`, children: [
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "health-ring", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("svg", {
+				viewBox: "0 0 120 120",
+				role: "img",
+				"aria-label": `健康评分 ${health.total} 分（满分 100），${band.label}`,
+				children: [
+					/* @__PURE__ */ jsxRuntimeExports.jsx("circle", { className: "health-ring-track", cx: 60, cy: 60, r: HEALTH_RING_RADIUS }),
+					/* @__PURE__ */ jsxRuntimeExports.jsx("circle", {
+						className: "health-ring-fill",
+						cx: 60,
+						cy: 60,
+						r: HEALTH_RING_RADIUS,
+						style: {
+							strokeDasharray: `${circumference.toFixed(2)}`,
+							strokeDashoffset: `${offset.toFixed(2)}`
+						}
+					})
+				]
+			}),
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "health-ring-center", children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "health-ring-score", children: health.total }),
+				/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "health-ring-unit", children: ["满分 ", 100] })
+			] })
+		] }),
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "health-detail", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: `health-band-label ${band.key}`, children: band.label }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "health-rows", children: health.items.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "health-row", children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "health-row-name", children: item.label }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `health-row-state ${item.status}`, children: item.stateText }),
+				/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "health-row-score", children: [item.score, " / ", HEALTH_MAX_PER_ITEM] })
+			] }, item.key)) }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "health-advice", children: health.advice })
+		] })
+	] });
+}
 function DiagnosticsView({
   onClose
 }) {
@@ -70306,16 +70389,50 @@ function DiagnosticsView({
       setError(e instanceof Error ? e.message : String(e));
     });
   }, []);
+  /*
+   * 健康评分的四项数据来自四个独立 IPC。它们**各自失败、各自未知**：
+   * 某一项读不到只把那一项标成「无法判断」，其余三项照常计分（项目原则：
+   * 宁可拒绝，也不静默降级 —— 悄悄按 0 计而不说明来源，是把读失败伪装成结论）。
+   *
+   * `healthSeq` 防乱序：刷新按钮与事件驱动的刷新可能重叠，晚发出的请求先回来时
+   * 不能让旧结果覆盖新结果。
+   */
+  const [healthInput, setHealthInput] = reactExports.useState(void 0);
+  const healthSeq = reactExports.useRef(0);
+  const loadHealth = reactExports.useCallback(() => {
+    const seq = ++healthSeq.current;
+    const settle = (promise) => promise.then((value) => ({ ok: true, value }), () => ({ ok: false }));
+    Promise.all([
+      settle(window.kami.settingsSnapshot()),
+      settle(window.kami.runtimesSnapshot()),
+      settle(window.kami.statsSnapshot()),
+      settle(window.kami.globalShortcutStatus())
+    ]).then(([model, runtimes, stats, shortcut]) => {
+      if (seq !== healthSeq.current) return;
+      setHealthInput({
+        model: model.ok && Array.isArray(model.value?.models) ? { kind: judgeModelReadiness(model.value.activeModelId, model.value.models).kind } : null,
+        // master 必须是布尔值才算读成功：拿不到形状正确的快照时如实标「无法判断」，
+        // 而不是让缺失字段落成默认值（`!== false`）被当成「总开关开着」。
+        runtimes: runtimes.ok && runtimes.value !== void 0 && typeof runtimes.value.master === "boolean"
+          ? { master: runtimes.value.master, items: Array.isArray(runtimes.value.items) ? runtimes.value.items : [] }
+          : null,
+        runs: stats.ok && Array.isArray(stats.value?.runs) ? stats.value.runs : null,
+        shortcut: shortcut.ok && shortcut.value !== void 0 ? { kind: shortcut.value?.kind } : null
+      });
+    });
+  }, []);
   reactExports.useEffect(() => {
     refresh();
+    loadHealth();
     refreshLedger(selectedSessionId);
     const off = window.kami.onSessionEvent(({ event }) => {
       if (isStreamingEvent(event)) return;
       refresh();
+      loadHealth();
       refreshLedger(selectedSessionId);
     });
     return off;
-  }, [refresh, refreshLedger, selectedSessionId]);
+  }, [refresh, loadHealth, refreshLedger, selectedSessionId]);
   const ledgerRuns = reactExports.useMemo(
     () => foldRunLedger(ledger?.entries ?? []),
     [ledger]
@@ -70332,6 +70449,10 @@ function DiagnosticsView({
   const hitRate = snapshot === void 0 ? void 0 : cacheHitRate(snapshot.totalUsage, processCacheReported);
   const ledgerCacheReported = snapshot?.sessions.find((s) => s.sessionId === ledger?.sessionId)?.cacheReported ?? false;
   const selectedRun = snapshot?.runs.find((r2) => r2.runId === selectedRunId) ?? snapshot?.runs[0];
+  const health = reactExports.useMemo(
+    () => healthInput === void 0 ? void 0 : computeHealth(healthInput),
+    [healthInput]
+  );
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -70371,6 +70492,7 @@ function DiagnosticsView({
           title: "重新拉取统计",
           onClick: () => {
             refresh();
+            loadHealth();
             refreshLedger(selectedSessionId);
           },
           children: [
@@ -70382,6 +70504,13 @@ function DiagnosticsView({
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", children: [
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section health-section", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "健康评分" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "四项各 25 分 · 读不到的项按「无法判断」计" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(HealthScoreView, { health })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "应用状态" }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(GlobalShortcutRow, {}),
