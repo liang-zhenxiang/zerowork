@@ -39,14 +39,22 @@ export function computeNextBeta(currentVersion, releaseTags) {
 	return `${line}-beta.${count + 1}`;
 }
 
-/** [Unreleased] 段是否有实际内容（除注释与空白外）。 */
+/**
+ * 空壳占位文案的前缀。发布流程会把 [Unreleased] 恢复成只有这一句；
+ * 它不是变更，判空时必须忽略 —— 否则每次稳定版发布后都会多发一个空 beta
+ * （2026-11-09 的 v0.20.0-beta.1 就是这样发出来的）。
+ */
+const UNRELEASED_PLACEHOLDER_PREFIX = '（下一个版本的变更写在这里';
+
+/** [Unreleased] 段是否有实际内容（除注释、标题、占位文案与空白外）。 */
 export function unreleasedHasContent(changelogText) {
 	const start = changelogText.indexOf('## [Unreleased]');
 	if (start === -1) return false;
 	const end = changelogText.indexOf('\n## ', start + 1);
 	const section = end === -1 ? changelogText.slice(start) : changelogText.slice(start, end);
 	// 逐行看：跳过 HTML 注释（含**跨行**注释的中间行——用状态开关而不是
-	// 只看行首前缀，单行与多行注释都不算内容）、标题行与空白。
+	// 只看行首前缀，单行与多行注释都不算内容）、所有标题行（`## [Unreleased]`
+	// 与 `### 新增` 等分类标题都不是变更）、占位文案与空白。
 	let inComment = false;
 	const meaningful = section
 		.split('\n')
@@ -60,7 +68,11 @@ export function unreleasedHasContent(changelogText) {
 				if (!trimmed.includes('-->')) inComment = true;
 				return false;
 			}
-			return trimmed !== '' && !trimmed.startsWith('## [Unreleased]');
+			return (
+				trimmed !== '' &&
+				!trimmed.startsWith('#') &&
+				!trimmed.startsWith(UNRELEASED_PLACEHOLDER_PREFIX)
+			);
 		});
 	return meaningful.length > 0;
 }
