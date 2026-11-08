@@ -768,6 +768,16 @@
 	--preset-forest-3: #ca8a04;
 	--preset-graphite-1: #475569;
 	--preset-graphite-2: #64748b;
+	/* 强调色选择（#350 第十八轮 F1）：八个候选的色相源，同 preset-* 口径——
+	   字面量只在 token 块，html[data-accent] 段只引用 var。aurora 不列
+	   （它就是默认，不覆盖）。 */
+	--accent-choice-ocean: #1470b4;
+	--accent-choice-iris: #6d4aff;
+	--accent-choice-charm: #db2777;
+	--accent-choice-amber: #d97706;
+	--accent-choice-flame: #dc2626;
+	--accent-choice-forest: #16a34a;
+	--accent-choice-graphite: #57534e;
 	--preset-graphite-3: #94a3b8;
 	/* 选中行：列表里「当前这一条」的底色。曾经直接用 --bg-raised（纯灰），
 	   在冷画布上读作「脏掉的一块」；这里掺品牌色，与 chip/tab 的选中语言一致。 */
@@ -934,6 +944,14 @@
 	--preset-dusk-1: #a78bfa;
 	--preset-dusk-2: #c084fc;
 	--preset-dusk-3: #f9a8d4;
+	/* 强调色暗色版：同名字段亮暗同构（暗色下提高明度保证对比度）。 */
+	--accent-choice-ocean: #4c9fe0;
+	--accent-choice-iris: #9b7fff;
+	--accent-choice-charm: #f472b6;
+	--accent-choice-amber: #fbbf24;
+	--accent-choice-flame: #f87171;
+	--accent-choice-forest: #4ade80;
+	--accent-choice-graphite: #a8a29e;
 	--preset-sunset-1: #fb923c;
 	--preset-sunset-2: #fbbf24;
 	--preset-sunset-3: #f87171;
@@ -17869,6 +17887,137 @@ mark.find-hit {
 	}
 
 	.health-ring-fill {
+		transition: none;
+	}
+}
+
+/* ── §37 第十八轮十连（#350 个性化与表达） ─────────────────────── */
+/* F1 强调色八选：色卡排。选中态 accent 描边 + 对勾含义靠 aria-pressed。 */
+.accent-grid {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	margin-top: var(--space-2);
+	padding: 0 var(--space-4);
+}
+.accent-swatch {
+	width: 28px;
+	height: 28px;
+	border-radius: var(--radius-sm);
+	border: 2px solid transparent;
+	cursor: pointer;
+	transition: transform var(--dur-fast) var(--ease-out);
+}
+.accent-swatch:hover {
+	transform: scale(1.08);
+}
+.accent-swatch-active {
+	border-color: var(--text);
+	box-shadow: 0 0 0 2px var(--bg-elevated), 0 0 0 3.5px var(--text);
+}
+/* F1 强调色覆盖：data-accent 只覆盖 --accent/--ring 两点（比配色预设轻一档）。
+   派生色 hover/soft 用 color-mix，避免每个色值手写三份。 */
+html[data-accent='ocean'] { --accent: var(--accent-choice-ocean); }
+html[data-accent='iris'] { --accent: var(--accent-choice-iris); }
+html[data-accent='charm'] { --accent: var(--accent-choice-charm); }
+html[data-accent='amber'] { --accent: var(--accent-choice-amber); }
+html[data-accent='flame'] { --accent: var(--accent-choice-flame); }
+html[data-accent='forest'] { --accent: var(--accent-choice-forest); }
+html[data-accent='graphite'] { --accent: var(--accent-choice-graphite); }
+@media (prefers-reduced-motion: reduce) {
+	.accent-swatch {
+		transition: none;
+	}
+}
+
+/* ── §38 第十八轮后半（#350：F2/F4/F6/F7/F8/F9/F10 样式） ─────────
+   补记：F1 accent 重构时本段曾被误删（old_block_end 锚点截断），
+   shots 只断言 DOM 存在所以没拦住 —— 「选择器无样式≠功能坏」是盲区，
+   交付前的逐张 read_image 自查才是样式层的安全网。 */
+/* F2 问候昵称：弱化跟在问候词后 */
+.home-greeting-nick {
+	color: var(--text-faint);
+}
+/* F4 回复长度三档：mini-btn 家族复用，行内 gap */
+.reply-length-row {
+	display: flex;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-4) 0;
+}
+.reply-length-btn {
+	flex: none;
+}
+/* F6 chips 组角标：短语前的弱色小标签 */
+.quick-chip-group {
+	font-size: 10px;
+	color: var(--text-faint);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: 0 5px;
+	margin-right: 2px;
+}
+/* F7 全局 UI 字号档：html 级 font-size 微调（px 关键布局不受影响，
+   正文与 rem 计量的文本随之缩放）。 */
+html[data-ui-font='small'] {
+	font-size: 14px;
+}
+html[data-ui-font='large'] {
+	font-size: 17px;
+}
+/* F8 侧栏密度：紧凑档收行距 */
+html[data-sidebar-density='compact'] .task-item-body {
+	padding-top: 3px;
+	padding-bottom: 3px;
+	min-height: 0;
+}
+html[data-sidebar-density='compact'] .nav-item {
+	padding-top: 5px;
+	padding-bottom: 5px;
+}
+html[data-sidebar-density='compact'] .space-group-header {
+	padding-top: 3px;
+	padding-bottom: 3px;
+}
+/* F9 seg-toggle：表达偏好的档位选项组 */
+.seg-toggle {
+	display: inline-flex;
+	gap: 2px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 2px;
+	background: var(--bg-elevated);
+}
+.seg-toggle-btn {
+	border: none;
+	background: transparent;
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: 12px;
+	padding: 3px 10px;
+	border-radius: calc(var(--radius-sm) - 1px);
+	cursor: pointer;
+}
+.seg-toggle-btn:hover {
+	color: var(--text);
+}
+.seg-toggle-active {
+	background: var(--accent);
+	color: var(--bg-elevated);
+}
+.seg-toggle-active:hover {
+	color: var(--bg-elevated);
+}
+/* F10 任务行封面色条：标题前的 3px 竖条（inline-block，随行高对齐；
+   不用 absolute——task-item-body 不是定位上下文）。 */
+.task-strip {
+	display: inline-block;
+	align-self: stretch;
+	width: 3px;
+	border-radius: 999px;
+	flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+	.accent-swatch {
 		transition: none;
 	}
 }
