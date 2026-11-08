@@ -62,4 +62,21 @@ describe('unreleasedHasContent —— 判空不看注释与空白', () => {
 	it('没有 [Unreleased] 段 → false（异常形态，不发）', () => {
 		expect(unreleasedHasContent('# 变更日志\n')).toBe(false);
 	});
+
+	it('只有发布流程写回的占位文案 → false（否则每次发版都多一个空 beta）', () => {
+		const text =
+			'## [Unreleased]\n\n（下一个版本的变更写在这里；发布时整段移入新版本标题下。）\n\n## [0.3.0] - 2026-10-01\n';
+		expect(unreleasedHasContent(text)).toBe(false);
+	});
+
+	it('占位文案 + 一条真实变更 → true（修复本身也要能发出去）', () => {
+		const text =
+			'## [Unreleased]\n\n（下一个版本的变更写在这里；发布时整段移入新版本标题下。）\n\n### 修复\n\n- 空 beta\n\n## [0.3.0] - 2026-10-01\n';
+		expect(unreleasedHasContent(text)).toBe(true);
+	});
+
+	it('只有分类标题、没有条目 → false（标题不是变更）', () => {
+		const text = '## [Unreleased]\n\n### 新增\n\n### 修复\n\n## [0.3.0] - 2026-10-01\n';
+		expect(unreleasedHasContent(text)).toBe(false);
+	});
 });
