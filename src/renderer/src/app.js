@@ -13878,6 +13878,12 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "task-item-title", children: [
             /* #327 round13 F5：标签色点（有标签才渲染）。 */
             labelStore[task.path] !== void 0 && TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]) !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-label-dot", style: { background: TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]).color }, title: labelStore[task.path] }),
+            /* #350 第十八轮 F10：行首封面色条。空间色优先（zw:space-colors，
+               round16 F5 已有存储），其次任务标签色；都无则不渲染——不给
+               「人人都有彩条」的噪音。 */
+            (spaceColors[task.cwd] !== void 0 || (labelStore[task.path] !== void 0 && TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]) !== void 0)) && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-strip", "aria-hidden": "true", style: { background: spaceColors[task.cwd] !== void 0 ? SPACE_COLORS[spaceColors[task.cwd] % SPACE_COLORS.length] : TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]).color } }),
+            /* 色条取值备注：spaceColors 是 useState——设置页改色后本组件随
+               zw:labels-changed 类事件重渲染；测试里直写 localStorage 需 reload。 */
               /*
                * 置顶标记（形态承担状态，docs/DESIGN.md §2.1）：与未读点 / 转圈 / 分支标记
                * 同一组「标题前缀」，压在标题文本之前 —— 放行尾会被 text-overflow 的省略号裁掉。
@@ -16029,16 +16035,26 @@ function Composer({
         /* @__PURE__ */ jsxRuntimeExports.jsx(DocumentRefStrip, { refs: img.documentRefs, onRemove: img.removeDocumentRefAt }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(AttachmentStrip, { attachments: img.attachments, onRemove: img.removeAt }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(VisionHint, { visible: visionSupported === false && img.attachments.length > 0 }),
-        draft.trim() === "" && streaming !== true && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "quick-chips", children: [quickChips.map((chip) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            type: "button",
-            className: "quick-chip",
-            onClick: () => applyChip(chip),
-            children: chip
-          },
-          chip
-        )), templates.map((tpl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        draft.trim() === "" && streaming !== true && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "quick-chips", children: [quickChips.map((chip) => {
+          /* #350 第十八轮 F6：「组名::短语」形态——按钮显示短语本体 + 组角标；
+             applyChip 仍填完整原文（:: 是存储语法，不是用户想发出去的内容）。 */
+          const sep = chip.indexOf("::");
+          const group = sep === -1 ? null : chip.slice(0, sep);
+          const phrase = sep === -1 ? chip : chip.slice(sep + 2);
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              type: "button",
+              className: "quick-chip",
+              onClick: () => applyChip(phrase),
+              children: [
+                group !== null && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "quick-chip-group", children: group }),
+                phrase
+              ]
+            },
+            chip
+          );
+        }), templates.map((tpl) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
             type: "button",
@@ -17352,17 +17368,31 @@ function WeekSparkline({ week, streakDays }) {
     checkedToday ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "week-checkin", "data-testid": "week-checkin", title: streakDays != null && streakDays > 1 ? `已连续 ${streakDays} 天` : "今日已打卡", children: streakDays != null && streakDays > 1 ? `已连续 ${streakDays} 天` : "今日已打卡" }) : null
   ] });
 }
-function HomeGreeting({ streakDays } = {}) {
+function HomeGreeting({ streakDays, userName } = {}) {
   const now = new Date();
   const hour = now.getHours();
   const word = hour < 5 ? "夜深了" : hour < 11 ? "早上好" : hour < 13 ? "中午好" : hour < 18 ? "下午好" : "晚上好";
   const date = `${now.getMonth() + 1} 月 ${now.getDate()} 日`;
   const weekday = ["日", "一", "二", "三", "四", "五", "六"][now.getDay()];
+  /* #350 第十八轮 F2：用户设了昵称时，问候带上称呼 —— 「早上好 · 阿梁」。
+     昵称来自 IdentitySection 已有的 userNickname（preferences），挂载时拉一次。 */
   /* #292 F1：连续使用整周/整月/整百天时，问候换成纪念版式（同一天只纪念整数天）。 */
   const streak = typeof streakDays === "number" ? streakDays : void 0;
   const anniversary = streak != null && streak > 0 && (streak === 7 || streak === 30 || streak === 100 || streak % 365 === 0) ? streak : void 0;
+  const [nick, setNick] = reactExports.useState("");
+  reactExports.useEffect(() => {
+    let alive = true;
+    window.kami.getPersonalization?.().then((info) => {
+      if (alive && typeof info?.userNickname === "string" && info.userNickname.trim() !== "") setNick(info.userNickname.trim());
+    }).catch(() => {
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-greeting", "data-anniversary": anniversary != null ? "true" : void 0, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-greeting-word", children: anniversary != null ? `连续 ${anniversary} 天，了不起` : word }),
+    nick !== "" && anniversary == null && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-greeting-nick", children: ["，", nick] }),
     anniversary != null ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "home-greeting-anniv", "aria-label": `${anniversary} 天纪念`, children: "◆" }) : null,
     /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "home-greeting-date", children: [" · ", date, " 星期", weekday] })
   ] });
@@ -18022,9 +18052,9 @@ function HomeView({
       Array.isArray(today?.week) && today.week.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(WeekSparkline, { week: today.week, streakDays: today?.streakDays }),
       /* Token 用量迷你条（第三轮）：只画 today.tokens 相对近 30 天单日最大值的比例，
          数据拿不到就不画 —— 不拿 0 糊弄。 */
-      today !== void 0 && todayMax > 0 && today.tokens > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "token-meter", title: `今日 ${today.tokens.toLocaleString()} tok`, children: [
+      today !== void 0 && todayMax > 0 && today.tokens > 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "token-meter", title: `今日 ${formatNum(today.tokens)} tok`, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-fill", style: { transform: `scaleX(${Math.min(1, today.tokens / todayMax).toFixed(3)})` } }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-label", children: ["今日 ", today.tokens.toLocaleString(), " tok"] })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-label", children: ["今日 ", formatNum(today.tokens), " tok"] })
       ] }) : null,
     localStorage.getItem("zw:onboarded") !== "1" && /* @__PURE__ */ jsxRuntimeExports.jsx(WelcomeBanner, {}),
     /* #342 F6：崩溃恢复横幅（只在上次异常退出后出现一次）。 */
@@ -65902,6 +65932,8 @@ function AppearanceSection({ busy }) {
   const setPalette = (id) => {
     setPaletteState(setPalettePreference(id));
   };
+  /* #350 第十八轮 F1：强调色。初次 useState 直接读当前选择（applyAccent 在启动已应用）。 */
+  const [accent, setAccentState] = reactExports.useState(currentAccent);
   const [error, setError] = reactExports.useState(void 0);
   const refresh = reactExports.useCallback(async () => {
     try {
@@ -65961,6 +65993,28 @@ function AppearanceSection({ busy }) {
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "palette-hint", children: preset.hint })
         ]
       }, preset.id)) }),
+      /* #350 第十八轮 F1：强调色八选。与配色预设正交——预设换的是整套色板
+         （accent+brand+ring+极光），强调色只覆盖 --accent 一个点，是最轻的
+         「让它更像我的」。aurora = 不覆盖（跟随当前预设）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: "强调色" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: ACCENT_CHOICES.find((c) => c.id === accent) ?.name ?? "极光青" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "accent-grid", role: "group", "aria-label": "强调色", children: ACCENT_CHOICES.map((choice) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: `accent-swatch${accent === choice.id ? " accent-swatch-active" : ""}`,
+          "aria-pressed": accent === choice.id,
+          style: { background: choice.hex },
+          title: choice.name,
+          onClick: () => setAccentState(setAccentPreference(choice.id))
+        },
+        choice.id
+      )) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "深色适合夜间与深色桌面；跟随系统会在系统切换时自动换装。选择会立即生效并保持到重启之后。" })
     ] })
   ] });
@@ -66349,6 +66403,21 @@ function StyleSection({ busy }) {
     ] })
   ] });
 }
+/* #350 第十八轮 F4：回复长度偏好。本质是往 customInstructions 里维护一行
+   标记注释（<!-- zw:reply-length -->），prompt-compose 原样带下去——
+   不新增 daemon 字段、不碰注入管线，最轻的一条路。三档文案写用户能懂的话。 */
+const REPLY_LENGTH_PRESETS = [
+  { id: "concise", label: "简洁", rule: "回答尽量简短：先给结论，再给最必要的解释，不展开铺垫。" },
+  { id: "balanced", label: "平衡", rule: "回答详略均衡：结论先行，关键步骤展开，可选细节从简。" },
+  { id: "detailed", label: "详细", rule: "回答尽量详尽：给出完整推理与背景，主动补充相关注意事项。" }
+];
+const REPLY_LENGTH_MARKER = /\n?<!-- zw:reply-length: (concise|balanced|detailed) -->/;
+function applyReplyLength(text2, presetId) {
+  const preset = REPLY_LENGTH_PRESETS.find((p) => p.id === presetId);
+  if (preset === void 0) return text2.replace(REPLY_LENGTH_MARKER, "").trim();
+  const ruleLine = `<!-- zw:reply-length: ${preset.id} ${preset.rule} -->`;
+  return REPLY_LENGTH_MARKER.test(text2) ? text2.replace(REPLY_LENGTH_MARKER, ruleLine) : `${text2.trim()}${text2.trim() === "" ? "" : "\n\n"}${ruleLine}`;
+}
 function CustomInstructionsSection({
   busy,
   saved,
@@ -66359,6 +66428,17 @@ function CustomInstructionsSection({
   const { saved: justSaved, flash } = useSavedFlash();
   const save = () => {
     void onSubmit({ customInstructions: draft }).then(flash).catch(() => {
+    });
+  };
+  /* F4：当前选中档从 saved 里的标记行解析。 */
+  const lengthPreset = (() => {
+    const m2 = (saved ?? "").match(REPLY_LENGTH_MARKER);
+    return m2 === null ? void 0 : m2[1];
+  })();
+  const pickLength = (presetId) => {
+    const next = applyReplyLength(draft, lengthPreset === presetId ? void 0 : presetId);
+    setDraft(next);
+    void onSubmit({ customInstructions: next }).then(flash).catch(() => {
     });
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
@@ -66376,6 +66456,18 @@ function CustomInstructionsSection({
         }
       )
     ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "reply-length-row", role: "group", "aria-label": "回复长度偏好", children: REPLY_LENGTH_PRESETS.map((p) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        className: `mini-btn reply-length-btn${lengthPreset === p.id ? " saved" : ""}`,
+        "aria-pressed": lengthPreset === p.id,
+        title: p.rule,
+        onClick: () => pickLength(p.id),
+        children: p.label
+      },
+      p.id
+    )) }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "textarea",
       {
@@ -66724,8 +66816,72 @@ function PersonalizationSection({ busy }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx(IdentitySection, { busy, saved: info2, onSubmit: submit }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(BehaviorSection, { busy, info: info2, onToggle: toggle }),
       /* #315 round12 F9：首页快捷短语管理 */
-      /* @__PURE__ */ jsxRuntimeExports.jsx(QuickChipsEditor, {})
+      /* @__PURE__ */ jsxRuntimeExports.jsx(QuickChipsEditor, {}),
+      /* #350 第十八轮 F3/F7/F8/F9：表达偏好（标题风格 / UI 字号 / 侧栏密度 / 数字格式）。
+         全部 localStorage 档位 + html data 属性即时生效，与强调色同口径。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(ExpressionPrefsSection, {})
     ] })
+  ] });
+}
+/* #350 第十八轮：表达偏好区（标题风格 / UI 字号 / 侧栏密度 / 数字格式）。
+   每排一个三档选项组，aria-pressed 标当前。全部纯本地，重载由
+   initPersonalExpression 恢复。 */
+function ExpressionPrefsSection() {
+  const [titleStyle, setTitleStyleState] = reactExports.useState((() => {
+    try {
+      return localStorage.getItem("zw:title-style") ?? "desc";
+    } catch {
+      return "desc";
+    }
+  })());
+  const [fontStep, setFontStepState] = reactExports.useState(currentUiFontStep);
+  const [density, setDensityState] = reactExports.useState(currentSidebarDensity);
+  const [numFmt, setNumFmtState] = reactExports.useState(currentNumFormat);
+  const pickTitleStyle = (id) => {
+    try {
+      localStorage.setItem("zw:title-style", id);
+    } catch {
+    }
+    setTitleStyleState(id);
+  };
+  const row = (label, options, current, onPick) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-row", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: label }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "seg-toggle", role: "group", "aria-label": label, children: options.map((opt) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: `seg-toggle-btn${current === opt.id ? " seg-toggle-active" : ""}`,
+          "aria-pressed": current === opt.id,
+          title: opt.hint,
+          onClick: () => onPick(opt.id),
+          children: opt.label
+        },
+        opt.id
+      )) })
+    ] })
+  ] });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "表达偏好" }) }),
+    row("会话标题风格", [
+      { id: "desc", label: "描述性", hint: "取提问里的关键片段，信息最全" },
+      { id: "concise", label: "简洁", hint: "只留前 8 个字，侧栏更清爽" },
+      { id: "date", label: "带日期", hint: "首条建议带「M/D」前缀，按时间翻找方便" }
+    ], titleStyle, pickTitleStyle),
+    row("界面字号", [
+      { id: "small", label: "小", hint: "一屏多显内容" },
+      { id: "standard", label: "标准", hint: "默认档" },
+      { id: "large", label: "大", hint: "更易读，适合长时间阅读" }
+    ], fontStep, (id) => setFontStepState(setUiFontStepPreference(id))),
+    row("侧栏密度", [
+      { id: "cozy", label: "舒适", hint: "行高宽松，好点按" },
+      { id: "compact", label: "紧凑", hint: "同屏多显会话" }
+    ], density, (id) => setDensityState(setSidebarDensityPreference(id))),
+    row("数字格式", [
+      { id: "thousand", label: "千分位", hint: "12,345" },
+      { id: "cjk", label: "中文单位", hint: "1.2 万" }
+    ], numFmt, (id) => setNumFmtState(setNumFormatPreference(id)))
   ] });
 }
 const BUILTIN_MEMORY_TASK_ID = "builtin-memory-distill";
@@ -69962,6 +70118,9 @@ function SkillCard({
 }
 const DEFAULT_GLOBAL_SHORTCUT = "Shift+Alt+W";
 function formatTokens$1(n) {
+  /* #350 第十八轮 F9：数字格式跟随「数字格式」偏好（千分位 / 中文单位）。
+     M 缩写仅在千分位模式下保留——中文单位模式由 formatNum 输出「万/亿」。 */
+  if (currentNumFormat() === "cjk") return formatNum(n);
   if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
   return n.toLocaleString("en-US");
 }
@@ -71268,7 +71427,7 @@ function StatsView({ onClose }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "全部会话历史累计" })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stat-grid", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(StatCard, { label: "会话数", value: String(stats.totalSessions) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(StatCard, { label: "会话数", value: formatNum(stats.totalSessions) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(StatCard, { label: "消息数", value: formatTokens(stats.totalMessages) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               StatCard,
@@ -75722,7 +75881,24 @@ function App() {
     const q = text2.indexOf("？") ;
     if (q > 0) cut(Math.min(q + 1, text2.length - 4));
     if (out.length < 3 && text2.length > 18) cut(6);
-    return out.slice(0, 3);
+    /* #350 第十八轮 F3：标题风格。desc=保持原句（描述性）、concise=截前 8 字、
+       date=首条建议带「M/D 」前缀。存 zw:title-style，缺省 desc。 */
+    const style = (() => {
+      try {
+        return localStorage.getItem("zw:title-style") ?? "desc";
+      } catch {
+        return "desc";
+      }
+    })();
+    const decorated = out.map((t, i2) => {
+      if (style === "concise") return t.slice(0, 8);
+      if (style === "date" && i2 === 0) {
+        const now = new Date();
+        return `${now.getMonth() + 1}/${now.getDate()} ${t}`;
+      }
+      return t;
+    });
+    return decorated.slice(0, 3);
   }, []);
   const renameTask = reactExports.useCallback(
     (path2, name2) => {
@@ -76751,6 +76927,122 @@ function setPalettePreference(id) {
 function initPalette() {
 	applyPalette(currentPalette());
 }
+/* ══ #350 第十八轮：个性化表达（强调色 / UI 字号档 / 侧栏密度 / 数字格式）══
+   四项都是「本机显示偏好」——与 PALETTE 同口径走 localStorage + html data 属性，
+   不进 preferences.json（那是跨端语义的配置）。apply 系列在启动时调用一次。 */
+const ACCENT_CHOICES = [
+	{ id: "aurora", name: "极光青", hex: "#0f766e" },
+	{ id: "ocean", name: "海洋蓝", hex: "#1470b4" },
+	{ id: "iris", name: "紫罗兰", hex: "#6d4aff" },
+	{ id: "charm", name: "蔷薇粉", hex: "#db2777" },
+	{ id: "amber", name: "琥珀", hex: "#d97706" },
+	{ id: "flame", name: "绯红", hex: "#dc2626" },
+	{ id: "forest", name: "森林绿", hex: "#16a34a" },
+	{ id: "graphite", name: "石墨灰", hex: "#57534e" }
+];
+function currentAccent() {
+	try {
+		const stored = localStorage.getItem("zw:accent");
+		return ACCENT_CHOICES.some((c) => c.id === stored) ? stored : "aurora";
+	} catch {
+		return "aurora";
+	}
+}
+function applyAccent(id) {
+	const next = ACCENT_CHOICES.some((c) => c.id === id) ? id : "aurora";
+	if (next === "aurora") document.documentElement.removeAttribute("data-accent");
+	else document.documentElement.setAttribute("data-accent", next);
+	window.dispatchEvent(new CustomEvent("zw:accent-changed", { detail: { accent: next } }));
+}
+function setAccentPreference(id) {
+	const next = ACCENT_CHOICES.some((c) => c.id === id) ? id : "aurora";
+	try {
+		localStorage.setItem("zw:accent", next);
+	} catch {
+	}
+	applyAccent(next);
+	return next;
+}
+const UI_FONT_STEPS = ["small", "standard", "large"];
+function currentUiFontStep() {
+	try {
+		const stored = localStorage.getItem("zw:ui-font-step");
+		return UI_FONT_STEPS.includes(stored) ? stored : "standard";
+	} catch {
+		return "standard";
+	}
+}
+function applyUiFontStep(step) {
+	const next = UI_FONT_STEPS.includes(step) ? step : "standard";
+	if (next === "standard") document.documentElement.removeAttribute("data-ui-font");
+	else document.documentElement.setAttribute("data-ui-font", next);
+}
+function setUiFontStepPreference(step) {
+	const next = UI_FONT_STEPS.includes(step) ? step : "standard";
+	try {
+		localStorage.setItem("zw:ui-font-step", next);
+	} catch {
+	}
+	applyUiFontStep(next);
+	return next;
+}
+const SIDEBAR_DENSITIES = ["cozy", "compact"];
+function currentSidebarDensity() {
+	try {
+		const stored = localStorage.getItem("zw:sidebar-density");
+		return SIDEBAR_DENSITIES.includes(stored) ? stored : "cozy";
+	} catch {
+		return "cozy";
+	}
+}
+function applySidebarDensity(density) {
+	const next = SIDEBAR_DENSITIES.includes(density) ? density : "cozy";
+	if (next === "cozy") document.documentElement.removeAttribute("data-sidebar-density");
+	else document.documentElement.setAttribute("data-sidebar-density", "compact");
+}
+function setSidebarDensityPreference(density) {
+	const next = SIDEBAR_DENSITIES.includes(density) ? density : "cozy";
+	try {
+		localStorage.setItem("zw:sidebar-density", next);
+	} catch {
+	}
+	applySidebarDensity(next);
+	return next;
+}
+const NUM_FORMATS = ["thousand", "cjk"];
+function currentNumFormat() {
+	try {
+		const stored = localStorage.getItem("zw:num-format");
+		return NUM_FORMATS.includes(stored) ? stored : "thousand";
+	} catch {
+		return "thousand";
+	}
+}
+function setNumFormatPreference(fmt) {
+	const next = NUM_FORMATS.includes(fmt) ? fmt : "thousand";
+	try {
+		localStorage.setItem("zw:num-format", next);
+	} catch {
+	}
+	window.dispatchEvent(new CustomEvent("zw:num-format-changed"));
+	return next;
+}
+/* 数字格式化共用口：统计页、会话统计行、token 条都走这里。
+   cjk：1.2 万 / 3.4 亿；thousand：12,345。<10000 原样。 */
+function formatNum(n) {
+	const value = typeof n === "number" && Number.isFinite(n) ? n : 0;
+	if (currentNumFormat() === "cjk") {
+		if (value >= 1e8) return `${(value / 1e8).toFixed(1)} 亿`;
+		if (value >= 1e4) return `${(value / 1e4).toFixed(1)} 万`;
+		return String(value);
+	}
+	return value.toLocaleString("en-US");
+}
+function initPersonalExpression() {
+	applyAccent(currentAccent());
+	applyUiFontStep(currentUiFontStep());
+	applySidebarDensity(currentSidebarDensity());
+}
 const THEME_STORAGE_KEY = "zw:theme-pref";
 /*
  * 「继续推进」被清除到哪一刻（毫秒时间戳）。存 localStorage 而不是 preferences.json：
@@ -76827,7 +77119,7 @@ try {
     window.localStorage.setItem("zw:first-version", window.kami?.appVersion ?? __APP_VERSION__);
   }
 } catch { /* 隐私模式放弃 */ }
-initNightDim();initTheme();
+initNightDim();initTheme();initPersonalExpression();
 initPalette();
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root 不存在");

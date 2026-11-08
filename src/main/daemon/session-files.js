@@ -5002,12 +5002,16 @@ const handlers = {
        水印钩子，文本替换是最小侵入；找不到闭合标签就原样保留）。 */
     const { app: electronApp } = await import("electron");
     const footer = `<footer style="text-align:center;color:#999;font-size:12px;padding:16px 0">由 ZeroWork 生成 · v${electronApp.getVersion()}</footer>\n`;
+    /* #350 第十八轮 F5：导出主题跟随。用户偏好 dark 时给导出页叠一段暗色
+       覆盖（pi 模板只有亮色一份）——文本注入是最小侵入，同水印通道。 */
+    const themeOverride = readPreferences().theme === "dark" ? `<style>html{background:#14102a;color:#e6e4f0}body{background:#14102a;color:#e6e4f0}a{color:#8ab8ff}pre,code,table,th,td,blockquote{border-color:#39345c;background:#1c1836}h1,h2,h3,h4,h5,h6{color:#f0eef8}</style>\n` : "";
     try {
       const html = readFileSync(outputPath, "utf8");
       const idx = html.lastIndexOf("</body>");
-      writeFileSync(outputPath, idx === -1 ? html + footer : html.slice(0, idx) + footer + html.slice(idx), "utf8");
+      const inject = themeOverride + footer;
+      writeFileSync(outputPath, idx === -1 ? html + inject : html.slice(0, idx) + inject + html.slice(idx), "utf8");
     } catch {
-      /* 水印失败不阻塞导出 */
+      /* 水印/主题注入失败不阻塞导出 */
     }
     return { outputPath };
   },
