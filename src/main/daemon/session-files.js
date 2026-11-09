@@ -58,6 +58,7 @@ import { AutomationStore } from "./automation.js";
 import { SessionArchive } from "./archive.js";
 import { readLibraryArtifacts } from "./library.js";
 import { SessionPinStore } from "./pin.js";
+import { PlanStore } from "./plans-store.js";
 import { ProjectsStore } from "./projects.js";
 import { DIGEST_LARGE_FILE_BYTES, summarizeLastActivity } from "./session-digest.js";
 import {
@@ -2050,6 +2051,11 @@ const sessionArchive = new SessionArchive();
  * 为什么不是写进会话文件、为什么不清理失效条目 —— 见 ./pin.js 的文件头。
  */
 const sessionPins = new SessionPinStore();
+/**
+ * 计划书（`<configDir>/plans/<sessionId>.json`）：plan 模式的产出被捕获后
+ * 成为会话的一等产物。独立文件、按会话分片，理由见 ./plans-store.js 文件头。
+ */
+const planStore = new PlanStore(join(getConfigDir(), "plans"));
 /** 项目索引（projects.json）：与 pin/archive 同键口径（resolve 后绝对路径）。 */
 const projectsStore = new ProjectsStore();
 
@@ -4893,6 +4899,16 @@ const handlers = {
     sessionPins.setPinned(resolve(path), pinned === true, Date.now());
     pushTaskListChanged();
   },
+  /* ── 计划书（Plan Book）────────────────────────────────────────── */
+  /*
+   * 四条通道都只做**校验与落盘**，不碰 Electron、不启动会话。这里的 try 不需要：
+   * 写侧的错误由 store 带原因抛出（IPC 层会把它裹成可读文案），读侧一律回 null
+   * —— 读失败不该打断界面（空态是可见的）。
+   */
+  [INVOKE.getPlan]: async ([sessionId]) => planStore.get(sessionId),
+  [INVOKE.savePlan]: async ([sessionId, input]) => planStore.save(sessionId, input),
+  [INVOKE.approvePlan]: async ([sessionId, versionId]) => planStore.approve(sessionId, versionId),
+  [INVOKE.deletePlan]: async ([sessionId]) => planStore.remove(sessionId),
   /*
    * 项目（projects.json）：六个写通道 + 一个读通道。校验在 store 里做最后防线
    * （空名 / 越界色号 / 不存在的 id 都 throw 带原因），这里只做**参数形态**的

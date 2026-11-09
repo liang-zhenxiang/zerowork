@@ -608,6 +608,15 @@ const INVOKE = {
    * 也在上面的手工副本表里 —— 改通道名两处都要改。
    */
   compareKeep: "compare:keep",
+  /* ── 计划书（Plan Book）—— 与 shared/ipc.js 的手工副本表同步 ────── */
+  /** 读当前会话的计划书；不存在 / 损坏回 null，不 reject。 */
+  getPlan: "plans:get",
+  /** 保存计划书（daemon 校验 + 版本化 + 原子落盘）。 */
+  savePlan: "plans:save",
+  /** 批准当前（或指定）版本。 */
+  approvePlan: "plans:approve",
+  /** 删除计划书（幂等）。 */
+  deletePlan: "plans:delete",
   /** #342 F6：上次退出是否干净（查询一次后标记已读）。 */
   lastExit: "app:last-exit"
 };
@@ -837,6 +846,14 @@ const bridge = {
    * 成功返回 `{ ok:true, path, title }` —— path 供「去这条会话 →」resumeSession 用。
    */
   compareKeep: (runId, columnId) => ipcRenderer.invoke(INVOKE.compareKeep, runId, columnId),
+  /** 计划书：读当前会话的计划（不存在 / 损坏回 null，不 reject）。 */
+  getPlan: (sessionId) => ipcRenderer.invoke(INVOKE.getPlan, sessionId),
+  /** 计划书：保存 `{ title?, steps, capturedEntryId?, source }`（daemon 校验并追加版本）。 */
+  savePlan: (sessionId, input) => ipcRenderer.invoke(INVOKE.savePlan, sessionId, input),
+  /** 计划书：批准当前（或指定 versionId）版本。 */
+  approvePlan: (sessionId, versionId) => ipcRenderer.invoke(INVOKE.approvePlan, sessionId, versionId),
+  /** 计划书：删除（幂等）。 */
+  deletePlan: (sessionId) => ipcRenderer.invoke(INVOKE.deletePlan, sessionId),
   onSessionEvent: (listener) => subscribe(PUSH.sessionEvent, listener),
   onCompareEvent: (listener) => subscribe(PUSH.compareEvent, listener),
   onUpdateEvent: (listener) => subscribe(PUSH.updatesEvent, listener),
