@@ -750,6 +750,33 @@ const INVOKE = {
    * 加 keep 结果还会触发 kind 清单契约测试的两端同步要求，无谓扩大面。
    */
   compareKeep: "compare:keep",
+  /* ── 计划书（Plan Book）────────────────────────────────────────── */
+  /**
+   * 读当前会话的计划书。`(sessionId)` → 计划对象或 `null`。
+   *
+   * 计划书是本机产物：`<configDir>/plans/<sessionId>.json`。不存在 / 损坏 /
+   * 形状不符一律回 `null`（界面显示空态），**不 reject** —— 读失败不该打断界面。
+   * 形状：`{ sessionId, title, steps: [{ id, text, done }], capturedEntryId?,
+   * updatedAt, approvedAt?, approvedVersionId?, versions: [...] }`。
+   */
+  getPlan: "plans:get",
+  /**
+   * 保存一份计划书。`(sessionId, input)` → 保存后的完整计划。
+   *
+   * `input = { title?, steps: [{ id?, text, done? }], capturedEntryId?, source }`，
+   * `source` ∈ `agent`（自动捕获） / `manual`（手动编辑）。
+   * daemon 校验后**把快照追加进 versions**（最多 20 版，丢最旧）。
+   * 非法输入（sessionId 带路径分隔符 / 空步骤 / 正文超 500 字 / 步骤超 50 /
+   * 未知 source）**抛错并带原因** —— 写进去的必须能原样读回来。
+   */
+  savePlan: "plans:save",
+  /**
+   * 批准当前（或指定）版本。`(sessionId, versionId?)` → 更新后的计划。
+   * 计划书或指定版本不存在时抛错（批准一个不存在的东西是配置错误）。
+   */
+  approvePlan: "plans:approve",
+  /** 删除一份计划书。`(sessionId)` → `{ ok: true }`。幂等。 */
+  deletePlan: "plans:delete",
   /**
    * #342 第十七轮 F6：上次退出是否干净。main 侧 handler 读 last-exit.json
    * （上次 before-quit 写下的 clean 标记），返回 { unclean } 并消费标记。

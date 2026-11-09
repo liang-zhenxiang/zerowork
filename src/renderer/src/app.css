@@ -18109,3 +18109,764 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition: none;
 	}
 }
+/* ══════════════════════════════════════════════════════════════════
+   §40 计划书（Plan Book）—— 右侧非模态抽屉（2026-11-10）
+   ══════════════════════════════════════════════════════════════════
+   结构：`.plan-book-backdrop`（借 .modal-backdrop 的「非视图卡」身份，改成
+   透明、不拦截点击）> `.plan-book`（固定右侧抽屉）。
+
+   为什么借 `.modal-backdrop`：`.app > :not(...)` 那条视图卡规则会给直接子
+   元素套上 margin / 圆角 / 画布底色，把它加进 `:not()` 列表等于改既有规则；
+   本任务约定 app.css **只追加**，所以用一个已被排除的壳兜住，并把壳改成
+   不可见、不拦截点击 —— 计划书因此是**非模态**的（DESIGN §7.3），打开时
+   页面仍可操作，关掉用 × / Esc。
+
+   阅读面是**实色**（--surface-1），不做玻璃：抽屉里要编辑一组需要逐字读
+   的计划，背后正文透上来会直接毁掉可读性（2026-11-10 设计评审 P0）。
+
+   动效：只动 opacity / transform（§5.1 禁止布局属性过渡）；抽屉滑入
+   `--dur-base` + `--ease-out`（与命令面板入场同族，§10.3），reduced-motion
+   下关停。进度条用 scaleX 而不是 width（同上）。
+   ────────────────────────────────────────────────────────────────── */
+.plan-book-backdrop {
+	background: transparent;
+	justify-content: flex-end;
+	align-items: stretch;
+	padding: 0;
+	z-index: var(--z-overlay);
+	pointer-events: none;
+	animation: none;
+}
+
+.plan-book {
+	pointer-events: auto;
+	position: fixed;
+	/* 44 = 标称的「.chat-header padding 8×2 + .bar-btn 28」；+ --space-2 是
+	   `.chat` 作为内容卡的 6px 外边距；+ 2px 是实测补偿 —— 返回图标是 17px
+	   而非 16px（29 而非 28），再加 header 的 1px 底边，`.chat-header` 的
+	   实际盒高是 46。抽屉必须从工具栏**下缘**开始，不压住返回键与顶栏按钮。 */
+	top: calc(env(titlebar-area-height, 0px) + 44px + var(--space-2) + 2px);
+	right: 0;
+	bottom: 0;
+	width: clamp(420px, 44vw, 560px);
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	padding: var(--space-5);
+	background: var(--surface-1);
+	border-left: 1px solid var(--border);
+	border-top-left-radius: var(--radius-lg);
+	box-shadow: var(--shadow-lg);
+	overflow: hidden;
+	animation: plan-book-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes plan-book-in {
+	from {
+		opacity: 0;
+		transform: translateX(28px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateX(0);
+	}
+}
+
+/* ── 头部：eyebrow（计划书 + 状态）与标题两行；关闭键在右上 ───────── */
+.plan-book-head {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+}
+
+.plan-book-heading {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.plan-book-eyebrow {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.plan-book-kicker {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	letter-spacing: 0.06em;
+}
+
+.plan-book-title {
+	margin: 0;
+	font-size: var(--text-emphasis);
+	font-weight: 500;
+	line-height: 1.4;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* 状态不只靠颜色：文案本身 + 对勾都在。已批准用 12% ok tint 底，
+   文字走 --text；草稿走 --bg-chip 无边框（评审 P1-8）。 */
+.plan-book-status {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 1px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-full);
+	font-size: var(--text-meta);
+	line-height: 1.4;
+	white-space: nowrap;
+}
+
+.plan-book-status.is-approved {
+	color: var(--text);
+	background: color-mix(in srgb, var(--ok) 12%, transparent);
+}
+
+.plan-book-status.is-approved .plan-book-status-icon {
+	color: var(--ok);
+}
+
+.plan-book-status.is-draft {
+	color: var(--text-secondary);
+	background: var(--bg-chip);
+}
+
+/* ── 进度：条形 + 「N / M 完成 · HH:mm 更新」 ────────────────────── */
+.plan-book-progress {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+.plan-book-progress-track {
+	height: 6px;
+	border-radius: var(--radius-full);
+	background: var(--border-strong);
+	overflow: hidden;
+}
+
+/* scaleX（不是 width）：长度变化不触发布局重排（§5.1）。
+   圆角由 track 的 overflow 裁切，fill 自己不做圆角（评审 P1-11）。 */
+.plan-book-progress-fill {
+	width: 100%;
+	height: 100%;
+	background: var(--accent);
+	border-radius: 0;
+	transform-origin: left center;
+	transition: transform var(--dur-base) var(--ease-standard);
+}
+
+.plan-book-progress-text {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* ── 主体：步骤与「新增一步」同一个滚动容器；footer 吸底 ─────────── */
+.plan-book-body {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+}
+
+.plan-book-steps {
+	flex: 0 0 auto;
+	overflow: visible;
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+.plan-book-step {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+	padding: var(--space-3);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+	border: 1px solid transparent;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		border-color var(--dur-fast) var(--ease-standard);
+}
+
+/* hover / 焦点用 hover 档，不换实色面 —— 否则「一碰就挖出一个白洞」（评审 P1-9）。 */
+.plan-book-step:hover,
+.plan-book-step:focus-within {
+	background: var(--bg-hover);
+	border-color: transparent;
+}
+
+.plan-book-step.is-done .plan-book-step-text {
+	color: var(--text-secondary);
+	text-decoration: line-through;
+}
+
+/* 序号与勾选合成一个 24×24 的圆形控件（评审 P0-3）。 */
+.plan-book-check {
+	flex: 0 0 auto;
+	width: 24px;
+	height: 24px;
+	margin-top: 1px;
+	padding: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* 未完成态不画低对比描边（--border-strong 约 1.4:1）：只留 --bg-chip 底
+	   与 --text-secondary 序号（2026-11-10 设计复检 P1-B）。 */
+	border: 1.5px solid transparent;
+	border-radius: var(--radius-full);
+	background: var(--bg-chip);
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: var(--text-meta);
+	font-variant-numeric: tabular-nums;
+	cursor: pointer;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		border-color var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.plan-book-check[aria-checked="true"] {
+	background: var(--ok);
+	border-color: var(--ok);
+	color: var(--primary-text);
+}
+
+.plan-book-check:active:not(:disabled) {
+	transform: scale(0.92);
+}
+
+.plan-book-check:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.plan-book-check-no {
+	line-height: 1;
+}
+
+.plan-book-step-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: var(--text-list);
+	line-height: 1.6;
+	color: var(--text);
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+
+/* 行内编辑：单行 input（评审 P2-18）；不复用 textarea 的换行承诺。 */
+.plan-book-edit-wrap {
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.plan-book-step-input {
+	width: 100%;
+	font: inherit;
+	font-size: var(--text-list);
+	line-height: 1.6;
+	color: var(--text);
+	background: var(--surface-1);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) var(--space-3);
+}
+
+.plan-book-step-input:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 1px;
+}
+
+.plan-book-step-input.is-invalid {
+	border-color: var(--danger);
+}
+
+.plan-book-edit-error {
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--danger);
+}
+
+/* 行内操作：执行 / 编辑 / 更多（评审 P1-5）。总宽 ≤ 80px；hover / 焦点浮现，
+   用 opacity + pointer-events（不用 visibility: hidden，§7.9）。 */
+.plan-book-step-ops {
+	flex: 0 0 auto;
+	width: 80px;
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 2px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+.plan-book-step:hover .plan-book-step-ops,
+.plan-book-step:focus-within .plan-book-step-ops {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.plan-book-op {
+	width: 24px;
+	height: 24px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: var(--text-meta);
+	cursor: pointer;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.plan-book-op:hover:not(:disabled) {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.plan-book-op:active:not(:disabled) {
+	transform: scale(0.96);
+}
+
+.plan-book-op:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+
+.plan-book-op[aria-expanded="true"] {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.plan-book-more {
+	position: relative;
+	flex: 0 0 auto;
+}
+
+/* 位置由 JSX 按触发按钮的视口 rect 内联给出（top 或 bottom + left）。
+   fixed 是关键：`.plan-book-body` 是 overflow-y:auto 的滚动体，absolute
+   菜单在滚到底部时会被裁掉（2026-11-10 设计复检 P1-A）。 */
+.plan-book-menu {
+	position: fixed;
+	z-index: var(--z-overlay);
+	min-width: 120px;
+	display: flex;
+	flex-direction: column;
+	padding: var(--space-1);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	box-shadow: var(--shadow-md);
+}
+
+.plan-book-menu-item {
+	border: none;
+	background: transparent;
+	color: var(--text);
+	font: inherit;
+	font-size: var(--text-meta);
+	text-align: left;
+	padding: var(--space-2) var(--space-3);
+	border-radius: calc(var(--radius-sm) - 1px);
+	cursor: pointer;
+}
+
+.plan-book-menu-item:hover:not(:disabled) {
+	background: var(--bg-hover);
+}
+
+.plan-book-menu-item:disabled {
+	color: var(--text-faint);
+	cursor: default;
+}
+
+.plan-book-menu-item.danger {
+	color: var(--danger);
+}
+
+/* ── 新增一步（与步骤同体滚动，gap 由 .plan-book-body 给 12px） ──── */
+.plan-book-add {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-1);
+	padding: var(--space-3);
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius-md);
+	background: transparent;
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: var(--text-list);
+	cursor: pointer;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		transform var(--dur-fast) var(--ease-standard);
+}
+
+.plan-book-add:hover:not(:disabled) {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.plan-book-add:active:not(:disabled) {
+	transform: scale(0.98);
+}
+
+.plan-book-add:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.plan-book-add-row {
+	flex: 0 0 auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+.plan-book-add-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--space-2);
+}
+
+/* ── 版本历史：页脚上方的浮层（不占步骤区高度，评审 P1-6） ───────── */
+.plan-book-foot {
+	position: relative;
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--border);
+}
+
+.plan-book-version-btn {
+	margin-left: auto;
+}
+
+.plan-book-versions {
+	position: absolute;
+	bottom: calc(100% + var(--space-2));
+	/* 与页脚「版本历史」按钮的右缘对齐（按钮右缘就是 footer 的右缘）。 */
+	right: 0;
+	width: min(380px, calc(100% - 2 * var(--space-5)));
+	max-height: min(60vh, 520px);
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	box-shadow: var(--shadow-lg);
+	z-index: var(--z-overlay);
+}
+
+.plan-book-versions-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.plan-book-link {
+	border: none;
+	background: transparent;
+	color: var(--accent);
+	font: inherit;
+	font-size: var(--text-meta);
+	padding: 0;
+	cursor: pointer;
+}
+
+.plan-book-link:hover {
+	text-decoration: underline;
+}
+
+.plan-book-version-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.plan-book-version-row {
+	width: 100%;
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-3);
+	border: none;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--text-secondary);
+	font: inherit;
+	font-size: var(--text-meta);
+	text-align: left;
+	cursor: pointer;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard);
+}
+
+.plan-book-version-row:hover {
+	background: var(--bg-hover);
+	color: var(--text);
+}
+
+.plan-book-version-row.active {
+	background: var(--row-selected);
+	box-shadow: inset 2px 0 0 var(--accent);
+	color: var(--text);
+}
+
+.plan-book-version-no {
+	flex: 0 0 auto;
+	font-weight: 500;
+	color: var(--text);
+}
+
+.plan-book-version-time {
+	flex: 0 0 auto;
+	font-variant-numeric: tabular-nums;
+}
+
+.plan-book-version-source {
+	flex: 1 1 auto;
+}
+
+/* 12px 的 --ok 文字对比度不足（约 3.77:1）：文字走 --text-secondary，
+   绿色只留给对勾图标（2026-11-10 设计复检 P1-B）。 */
+.plan-book-version-approved {
+	flex: 0 0 auto;
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	color: var(--text-secondary);
+}
+
+.plan-book-version-approved svg {
+	color: var(--ok);
+}
+
+.plan-book-diff {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+
+.plan-book-diff-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.plan-book-diff-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: var(--text-meta);
+}
+
+/* 正文一律 --text；+ / − 的颜色只在标记上（评审 P1-8）。
+   删除再加删除线，状态不只靠颜色。 */
+.plan-book-diff-line {
+	display: flex;
+	gap: var(--space-2);
+	padding: 2px var(--space-2);
+	border-radius: var(--radius-sm);
+	color: var(--text);
+}
+
+.plan-book-diff-line.del .plan-book-diff-text {
+	text-decoration: line-through;
+}
+
+.plan-book-diff-mark {
+	flex: 0 0 auto;
+	width: 10px;
+	text-align: center;
+	color: var(--text-secondary);
+}
+
+.plan-book-diff-mark.add {
+	color: var(--ok);
+}
+
+.plan-book-diff-mark.del {
+	color: var(--danger);
+}
+
+.plan-book-diff-text {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+
+/* ── 空态 / 加载 / 错误 ──────────────────────────────────────────── */
+.plan-book-empty {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-3);
+	padding: var(--space-7) var(--space-5);
+	text-align: center;
+}
+
+.plan-book-empty-icon {
+	color: var(--brand);
+}
+
+.plan-book-empty-icon.is-error {
+	color: var(--danger);
+}
+
+.plan-book-empty-title {
+	margin: 0;
+	font-size: var(--text-emphasis);
+	font-weight: 500;
+	color: var(--text);
+}
+
+.plan-book-empty-desc {
+	margin: 0;
+	max-width: 36ch;
+	font-size: var(--text-list);
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+.plan-book-empty-desc.is-error {
+	color: var(--text);
+}
+
+.plan-book-note {
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.plan-book-error {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: flex-start;
+	gap: var(--space-3);
+	padding: var(--space-3);
+	border-radius: var(--radius-md);
+	background: color-mix(in srgb, var(--danger) 10%, transparent);
+	color: var(--text);
+	font-size: var(--text-meta);
+}
+
+.plan-book-error-text {
+	flex: 1 1 auto;
+	overflow-wrap: anywhere;
+	color: var(--text);
+}
+
+.plan-book-loading {
+	flex: 1 1 auto;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding-top: var(--space-2);
+}
+
+.plan-book-skeleton {
+	display: block;
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	opacity: 0.7;
+}
+
+.plan-book-skeleton-title {
+	width: 60%;
+	height: 20px;
+}
+
+.plan-book-skeleton-row {
+	height: 44px;
+}
+
+/* 顶栏按钮上的步骤数徽标：品牌强调色 + 其上的文字色（评审 P1-8）。 */
+.plan-book-badge {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 4px;
+	border-radius: var(--radius-full);
+	background: var(--accent);
+	color: var(--primary-text);
+	font-size: var(--text-meta);
+	line-height: 1;
+}
+
+/* 窄窗：抽屉全宽。断点与宽屏档位统一在 899px，避免 380→719 的反向跳变
+   （评审 P2-14）。 */
+@media (max-width: 899px) {
+	.plan-book {
+		width: 100%;
+		border-left: 0;
+		border-top-left-radius: 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.plan-book {
+		animation: none;
+	}
+
+	.plan-book-progress-fill {
+		transition: none;
+	}
+}
