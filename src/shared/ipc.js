@@ -755,7 +755,20 @@ const INVOKE = {
    * （上次 before-quit 写下的 clean 标记），返回 { unclean } 并消费标记。
    * 挂 INVOKE：这是一次查询动作（渲染层首启拉一次），不是推送。
    */
-  lastExit: "app:last-exit"
+  lastExit: "app:last-exit",
+  /**
+   * #354 第十九轮 F6：复制会话。daemon 侧复制 jsonl 文件、重写 header 的
+   * id/title（标题加「 (副本)」），返回新会话 path。副本是独立文件，
+   * 原会话不受影响。
+   */
+  sessionCopy: "session:copy",
+  /**
+   * #354 第十九轮 F7：空会话清理。count 查询（确认摘要数据源）与
+   * purge 执行（渲染层确认后才调）两段式；purge 只删传入清单里
+   * 仍然满足「空 + 临时 + 未归档」的，服务端二次校验。
+   */
+  emptySessionsCount: "session:empty-count",
+  purgeEmptySessions: "session:purge-empty"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */

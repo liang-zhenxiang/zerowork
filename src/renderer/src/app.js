@@ -12940,9 +12940,13 @@ function resolveSessionOrigin(summaries, session) {
   return { title: title === void 0 || title === "" ? void 0 : title };
 }
 function sessionRowTitle(session, origin) {
-  if (origin === void 0) return session.title;
-  return `${session.title}
-${originHint(origin)}`;
+  /* #354 第十九轮 F3：悬浮提示补「最后活跃时间」——path 已在别的通道给
+     （开发者向），用户向的时间此前只能看 meta 小字，扫视列表时想要
+     「这条是什么时候动的」就得逐行读。 */
+  const at = Number(session.modifiedAt ?? 0);
+  const timeLine = at > 0 ? `最后活跃：${new Date(at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : void 0;
+  const lines = [session.title, timeLine, origin === void 0 ? void 0 : originHint(origin)].filter((line) => line !== void 0);
+  return lines.join("\n");
 }
 function originHint(origin) {
   return origin.title === void 0 ? "来源会话已不在列表" : `来源会话：${origin.title}`;
@@ -13464,6 +13468,8 @@ function Sidebar({
   onRenameTask,
   onDeleteTask,
   onArchiveTask,
+  /* #354 第十九轮 F6：复制会话。 */
+  onCopyTask,
   onPinTask,
   onExportTask,
   onExportMarkdownTask,
@@ -13759,6 +13765,9 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
   }, [menuCwd, menuPath]);
   const allSessions = groups === void 0 ? [] : [...groups.tasks, ...groups.spaces.flatMap((group) => group.sessions)];
   const renderTaskRow = (task) => {
+    /* #354 第十九轮 F2：>30 天未活跃的会话，归档项文案带「久未活跃」提示，
+       引导整理——一次性判断，不存状态不弹通知。 */
+    const stale30Days = Number(task.modifiedAt ?? 0) > 0 && Date.now() - Number(task.modifiedAt) > 30 * 864e5;
     const meta = formatMessageTime(task.modifiedAt, Date.now());
     /*
      * F3（#288 第五轮）内联统计：侧栏会话行 meta 加消息数气泡。口径与
@@ -13876,6 +13885,9 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           },
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "task-item-title", children: [
+            /* #354 第十九轮 F8：副本标记。daemon 复制时标题加「(副本)」后缀，
+               行内以小标呈现（标题本体保持干净）。 */
+            (task.title ?? "").endsWith("(副本)") && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-copy-badge", title: "这是复制的会话副本", children: "副本" }),
             /* #327 round13 F5：标签色点（有标签才渲染）。 */
             labelStore[task.path] !== void 0 && TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]) !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "task-label-dot", style: { background: TASK_LABEL_PRESETS.find((l) => l.name === labelStore[task.path]).color }, title: labelStore[task.path] }),
             /* #350 第十八轮 F10：行首封面色条。空间色优先（zw:space-colors，
@@ -14049,6 +14061,20 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                 window.dispatchEvent(new CustomEvent("zw:note-changed", { detail: { path: task.path, note: note.trim() } }));
               },
               children: "添加备注"
+            }
+          ),
+          /* #354 第十九轮 F6：创建副本。daemon 复制整份 jsonl（换 id，
+             标题加「(副本)」），原会话不动。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                onCopyTask(task.path);
+              },
+              children: "创建副本"
             }
           ),
           /* round16 F4：移动到空间。写入渲染层映射 zw:space-move，daemon 头不动。 */
@@ -14246,7 +14272,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                 setConfirmingPath(void 0);
                 onArchiveTask(task.path);
               },
-              children: "归档"
+              children: stale30Days ? "归档（久未活跃）" : "归档"
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -14598,6 +14624,24 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
     if (totalTasks <= 80) setVirtualPages(1);
   }, [totalTasks]);
   const filterNeedle = taskFilter.trim().toLowerCase();
+  /* #354 第十九轮 F1：会话年龄分组。活跃时间取 modifiedAt（列表排序同源）。
+     分档：今天 / 本周（7 天内非今天）/ 本月（30 天内非本周）/ 更早。 */
+  const [ageCollapsed, setAgeCollapsed] = reactExports.useState(() => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem("zw:age-collapsed") ?? "[]");
+      return new Set(Array.isArray(parsed) ? parsed.filter((x) => typeof x === "string") : []);
+    } catch {
+      return /* @__PURE__ */ new Set();
+    }
+  });
+  reactExports.useEffect(() => {
+    try {
+      window.localStorage.setItem("zw:age-collapsed", JSON.stringify([...ageCollapsed]));
+    } catch {
+      /* 配额满：折叠记忆失效但不打扰 */
+    }
+  }, [ageCollapsed]);
+
   /* round15 F3：快速过滤语法——label:<名字>（标签）、running:true|false（运行态）、
      >Nd（N 天未动）。语法段从查询里摘除，剩余纯文本仍按标题包含匹配。 */
   const labelMatch = filterNeedle.match(/label:(\S+)/);
@@ -14619,6 +14663,31 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
   };
   const filteredTasks = filterNeedle === "" ? taskWindow.visible : (tasks ?? []).filter(filterPred);
   const visibleTasks = filteredTasks;
+  const ageGroups = (() => {
+    const source = filterNeedle === "" ? visibleTasks : [];
+    const now = Date.now();
+    const buckets = { today: [], week: [], month: [], older: [] };
+    for (const task of source) {
+      const at = Number(task.modifiedAt ?? 0);
+      if (at === 0) {
+        buckets.older.push(task);
+        continue;
+      }
+      const age = now - at;
+      const d = new Date(at);
+      const isToday = d.toDateString() === new Date().toDateString();
+      if (isToday) buckets.today.push(task);
+      else if (age < 7 * 864e5) buckets.week.push(task);
+      else if (age < 30 * 864e5) buckets.month.push(task);
+      else buckets.older.push(task);
+    }
+    return [
+      { key: "today", label: "今天", tasks: buckets.today },
+      { key: "week", label: "本周", tasks: buckets.week },
+      { key: "month", label: "本月", tasks: buckets.month },
+      { key: "older", label: "更早", tasks: buckets.older }
+    ];
+  })();
   const hiddenTaskCount = filterNeedle === "" ? taskWindow.hiddenCount : 0;
   /**
    * 一条导航行。抽出来的唯一目的是让「已就绪」与「即将开放」两段
@@ -14749,6 +14818,25 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           },
           children: "归档所选"
         }),
+        /* #354 第十九轮 F10：批量导出。逐个走既有 Markdown 导出链路
+           （INVOKE.sessionExportMarkdown），落同一个 exports/ 目录；无 ZIP
+           依赖——逐个 toast 汇总成功数。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          onClick: () => {
+            const paths2 = [...selectedPaths];
+            let ok = 0;
+            void paths2.reduce((chain, p) => chain.then(() => window.kami.exportSessionMarkdown(p).then(() => {
+              ok += 1;
+            }).catch(() => {
+            })), Promise.resolve()).then(() => {
+              window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: ok === paths2.length ? "success" : "warning", text: `已导出 ${ok}/${paths2.length} 个会话（Markdown，exports/ 目录）` }] }));
+            });
+            setSelectedPaths(/* @__PURE__ */ new Set());
+          },
+          children: "导出所选"
+        }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setSelectedPaths(/* @__PURE__ */ new Set()), children: "取消" })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
@@ -14837,7 +14925,37 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [jsxRuntimeExports.jsx("kbd", { children: "⌘1" }), " 侧栏直达"] })
           ] })
         ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "task-list", children: [
-          visibleTasks.map(renderTaskRow),
+          /* #354 第十九轮 F1：按活跃时间分组（今天/本周/本月/更早）。
+             过滤态（filterNeedle 非空）不分组——过滤时用户在找具体某条，
+             分组头是噪音。分组只对「未过滤 + 无分组折叠」的默认视图生效。 */
+          filterNeedle === "" ? ageGroups.map((group) => {
+            const collapsed = ageCollapsed.has(group.key);
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+              group.tasks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "button",
+                {
+                  type: "button",
+                  className: "task-age-header",
+                  "aria-expanded": !collapsed,
+                  onClick: () => setAgeCollapsed((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(group.key)) next.delete(group.key);
+                    else next.add(group.key);
+                    return next;
+                  }),
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 11, className: collapsed ? "section-chevron section-chevron-collapsed" : "section-chevron" }),
+                    group.label,
+                    " (",
+                    group.tasks.length,
+                    ")"
+                  ]
+                },
+                `age-${group.key}`
+              ),
+              !collapsed && group.tasks.map(renderTaskRow)
+            ] }, group.key);
+          }) : visibleTasks.map(renderTaskRow),
           hiddenTaskCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
@@ -68489,6 +68607,48 @@ function RuntimesSection({ busy }) {
 function errorText$3(e) {
   return e instanceof Error ? e.message : String(e);
 }
+/* #354 第十九轮 F7：清理空会话卡片。进入数据管理页时查一次数量；
+   0 个不渲染（没有「清理 0 个」的噪音）。确认摘要带数量与去向（回收目录）。 */
+function EmptyPurgeCard() {
+  const [info, setInfo] = reactExports.useState(void 0);
+  const [confirming, setConfirming] = reactExports.useState(false);
+  const [busy, setBusy] = reactExports.useState(false);
+  const [done, setDone] = reactExports.useState(void 0);
+  const load = reactExports.useCallback(() => {
+    window.kami.emptySessionsCount?.().then((result) => setInfo(result)).catch(() => setInfo({ count: 0, paths: [] }));
+  }, []);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  if (info === void 0 || (info.count ?? 0) === 0 && done === void 0) return null;
+  const purge = () => {
+    setBusy(true);
+    window.kami.purgeEmptySessions?.(info.paths ?? []).then((result) => {
+      setDone(result?.removed ?? 0);
+      setInfo({ count: 0, paths: [] });
+      setConfirming(false);
+    }).finally(() => setBusy(false));
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "empty-purge-card", role: "status", children: [
+    done !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "settings-foot", children: ["已清理 ", done, " 个空会话（移入回收目录）。"] }) : confirming ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "settings-foot", children: [
+        "将清理 ",
+        info.count,
+        " 个从未发送过消息的临时会话（移入回收目录，可找回）。"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", disabled: busy, onClick: purge, children: "确认清理" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => setConfirming(false), children: "取消" })
+    ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "settings-foot", children: [
+        "有 ",
+        info.count,
+        " 个开过但没发过消息的临时会话。"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => setConfirming(true), children: "清理空会话" })
+    ] })
+  ] });
+}
+
 function DataManagementSection() {
   const [sessions, setSessions] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
@@ -68562,6 +68722,8 @@ function DataManagementSection() {
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "归档的任务不占用侧栏列表，但完整保留：可以在这里恢复，也可以删除。" }),
+    /* #354 第十九轮 F7：清理空会话（放分支外——归档 0 条时也要能看到）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyPurgeCard, {}),
     /*
      * F6（#288 第五轮）数据概览条：三格 stat（全部/归档/最近 7 天活跃）。
      * 数据全部来自已加载的 listSessions，不新增 IPC。放 section 头部，
@@ -68599,7 +68761,19 @@ function DataManagementSection() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "exports-meta", children: `${item.size >= 1024 ? `${(item.size / 1024).toFixed(1)} KB` : `${item.size} B`} · ${new Date(item.modifiedAt).toLocaleString("zh-CN")}` })
       ] }, item.name)) })
     ] }),
-    error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : sessions === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取会话…" }) : archived.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "没有已归档的任务。在任务行的 ⋯ 菜单里选择「归档」即可收进这里。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "preview-segments", children: archived.map((task) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "seg-card", children: confirmingPath === task.path ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "seg-head", children: [
+    error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : sessions === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取会话…" }) : archived.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "没有已归档的任务。在任务行的 ⋯ 菜单里选择「归档」即可收进这里。" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* #354 第十��轮 F7：清理空会话。两段式：先查数量做确认摘要，确认后执行。 */
+      /* #354 第十九轮 F5：归档区搜索（>5 条才显示，纯前端过滤）。 */
+      archived.length > 5 && /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        type: "text",
+        className: "task-filter archive-search",
+        placeholder: "搜索归档…",
+        "aria-label": "搜索归档",
+        value: archiveQuery,
+        onChange: (e) => setArchiveQuery(e.currentTarget.value)
+      }),
+      shownArchived.length === 0 && archiveQuery.trim() !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "没有匹配的归档。" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "preview-segments", children: shownArchived.map((task) => /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "seg-card", children: confirmingPath === task.path ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "seg-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "确认删除？文件将移入回收目录。" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -68654,7 +68828,8 @@ function DataManagementSection() {
         }
       )
     ] }) }, task.path)) })
-  ] });
+      ] })
+    ] });
 }
 const AUDIT_CATEGORY_LABELS = {
   command: "命令安全",
@@ -71501,6 +71676,21 @@ function StatsView({ onClose }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: "含缓存读写" })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(TokenTrend, { stats })
+        ] }),
+        /* #354 第十九轮 F9：活跃时段。24 柱小时分布（峰值小时高亮）——
+           与「峰值时段」数字卡互补：数字告诉你峰在哪，柱状图告诉你整体形态。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "活跃时段" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "stat-hint", children: stats.peakHour === void 0 ? "还没有足够的会话数据" : `峰值 ${stats.peakHour}:00` })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "hour-histogram", role: "img", "aria-label": "按小时的消息分布柱状图", children: (stats.hourHistogram ?? []).map((count, hour) => {
+            const max2 = Math.max(...(stats.hourHistogram ?? [0]), 1);
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `hour-histogram-col${hour === stats.peakHour ? " hour-histogram-peak" : ""}`, title: `${hour}:00 · ${count} 条`, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hour-histogram-bar", style: { height: `${Math.max(4, Math.round(count / max2 * 100))}%` } }),
+              hour % 6 === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hour-histogram-label", children: `${hour}` }) : null
+            ] }, hour);
+          }) })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
@@ -75928,6 +76118,15 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+  /* #354 第十九轮 F6：复制会话。副本落盘后 toast 报新标题；列表由
+     taskListChanged 推送刷新。 */
+  const copyTask = reactExports.useCallback((path2) => {
+    window.kami.copySession(path2).then(({ title }) => {
+      showToast(`已创建副本「${title}」`, "success");
+    }).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error));
+    });
+  }, []);
   const archiveTask = reactExports.useCallback((path2) => {
     /* #342 第十七轮 F1：归档 toast 带「撤销」按钮。undo 直接重放
        archiveSession(path,false)；数据管理里的恢复入口仍然在（双保险），
@@ -76482,6 +76681,7 @@ function App() {
         onRenameTask: renameTask,
         onDeleteTask: deleteTask,
         onArchiveTask: archiveTask,
+        onCopyTask: copyTask,
         onPinTask: pinTask,
         onExportTask: exportTask,
         onExportMarkdownTask: exportMarkdownTask,
