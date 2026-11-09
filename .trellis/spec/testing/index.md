@@ -571,6 +571,19 @@ expected 243 to be greater than or equal to 250
   （2026-11-08 `gui-proxy` 的 SOCKS 用例真实失败过一次）；
 - 不要把固定 `sleep` 当兜底（第 1 条）。
 
+### 9. 截图要等入场动画结束（2026-11-10）
+
+计划书抽屉的第一版截图拍在 200ms 滑入动画中途：玻璃面还没到最终不透明度，
+背后的聊天正文透上来。评审据此误判成「抽屉永久透字」，白改了一轮 surface。
+
+**做法**：
+
+- 截图前等节点动画结束：
+  `await Promise.all([...node.getAnimations({ subtree: true })].map((a) => a.finished))`，
+  再复核 `playState !== "running"`；
+- 超时兜底可以用 `Promise.race`，但兜底返回后**必须复核**，不能提前放行；
+- 同理适用于「先截图后断言」：截图时机错了，失败现场也是错的。
+
 ---
 
 ## 六、新增一个用例的完整步骤
