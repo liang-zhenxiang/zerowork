@@ -910,6 +910,10 @@ function aggregateUsageStats(sessions, options = {}) {
     lastSessionAt: lastAt,
     heatmap,
     dailyTokens,
+    /* #350→#354 第十九轮 F9：活跃小时分布（24 项数组，下标=小时，值=消息数）。
+       byHour 在上方循环里已经算好（此前只用来求 peakHour），这里把它一并
+       带出去，统计页的「活跃时段」条形图就不用第二次全量扫描。 */
+    hourHistogram: Array.from({ length: 24 }, (_, h2) => byHour.get(h2) ?? 0),
     modelUsage,
     toolUsage
   };
@@ -4874,6 +4878,80 @@ const handlers = {
   [INVOKE.sessionArchive]: async ([path, archived]) => {
     sessionArchive.setArchived(resolve(path), archived, Date.now());
     pushTaskListChanged();
+  },
+  /**
+   * #354 第十九轮 F6：复制会话为独立副本。
+   *
+   * 复制的是**整个 jsonl 文件**（tmp + rename 原子落盘），但 header 不能原样：
+   * id 必须换新（两份文件同 id 会让 pi 的链路解析混乱），标题加「 (副本)」
+   * 让两份在列表里可辨。归档/置顶索引不复制 —— 副本从「未归档、未置顶」
+   * 的干净状态开始，符合「复制出来再整理」的直觉。
+   */
+  [INVOKE.sessionCopy]: async ([path]) => {
+    const target = typeof path === "string" ? path : "";
+    if (target === "") throw new Error("复制会话需要会话路径");
+    const resolved = resolve(target);
+    const pathError = validateSessionFilePath(resolved, getSessionsDir());
+    if (pathError !== void 0) throw new Error(pathError);
+    const summary = (await listSessions()).find((s) => resolve(s.path) === resolved);
+    if (summary === void 0) throw new Error("找不到要复制的会话");
+    const exportsDir = join(getSessionsDir());
+    const lines = readFileSync(resolved, "utf8").split("\n");
+    if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+    if (lines.length === 0) throw new Error("会话文件是空的，无法复制");
+    let header;
+    try {
+      header = JSON.parse(lines[0]);
+    } catch {
+      throw new Error("会话文件头损坏，无法复制");
+    }
+    if (header?.type !== "session") throw new Error("会话文件头不识别，无法复制");
+    const newId = randomUUID();
+    header.id = newId;
+    const baseTitle = typeof header.title === "string" && header.title.trim() !== "" ? header.title.trim() : summary.title || "（未命名）";
+    header.title = `${baseTitle.replace(/ \(副本\d*\)$/, "")} (副本)`;
+    lines[0] = JSON.stringify(header);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const copyPath = join(exportsDir, `${stamp}_copy-${newId.slice(0, 8)}.jsonl`);
+    writeFileSync(copyPath, lines.join("\n") + "\n", "utf8");
+    /* pi 的 listAll 标题读 session_info 条目（appendSessionInfo 写入），
+       header.title 只是兜底 —— 必须再补一条名字条目，副本的标题才会
+       出现在侧栏。与 setSessionName 同一通道。 */
+    await setSessionName(copyPath, header.title);
+    pushTaskListChanged();
+    return { path: copyPath, title: header.title };
+  },
+  /**
+   * #354 第十九轮 F7：清理空会话。判据 = 会话文件只有 header、没有任何
+   * message 条目（与导出的「空会话」口径同源）。只清**临时任务**目录下的
+   * （isTempTask）—— 正式工作区里的空会话可能是用户刚建的骨架，不由我们动。
+   * 先统计后删除（渲染层确认摘要展示数量），两段式由两个 handler 组成：
+   *   · emptySessionsCount → { count }
+   *   · purgeEmptySessions → { removed }
+   */
+  [INVOKE.emptySessionsCount]: async () => {
+    const sessions = await listSessions();
+    const empties = sessions.filter((s) => s.isTempTask === true && (s.messageCount ?? 0) === 0 && s.archived !== true);
+    return { count: empties.length, paths: empties.map((s) => s.path) };
+  },
+  [INVOKE.purgeEmptySessions]: async ([paths]) => {
+    if (!Array.isArray(paths) || paths.length === 0) return { removed: 0 };
+    const sessions = await listSessions();
+    const empties = new Set(sessions.filter((s) => s.isTempTask === true && (s.messageCount ?? 0) === 0 && s.archived !== true).map((s) => resolve(s.path)));
+    let removed = 0;
+    for (const p of paths) {
+      const resolved = typeof p === "string" ? resolve(p) : "";
+      if (resolved === "" || !empties.has(resolved)) continue;
+      /* 空会话没有活宿主（没发过消息就不会建宿主），直接进回收目录；
+         有活宿主的（理论不可达）跳过——宁少勿删。 */
+      if (findBucketByFile(resolved) !== void 0) continue;
+      const pathError = validateSessionFilePath(resolved, getSessionsDir());
+      if (pathError !== void 0) continue;
+      moveToTrash(resolved);
+      removed += 1;
+    }
+    if (removed > 0) pushTaskListChanged();
+    return { removed };
   },
   /**
    * 置顶 / 取消置顶会话（pins.json 索引，会话文件不动；详见 pin.js 的文件头）。

@@ -609,7 +609,12 @@ const INVOKE = {
    */
   compareKeep: "compare:keep",
   /** #342 F6：上次退出是否干净（查询一次后标记已读）。 */
-  lastExit: "app:last-exit"
+  lastExit: "app:last-exit",
+  /** #354 F6：复制会话（副本为独立文件，标题加「(副本)」）。 */
+  sessionCopy: "session:copy",
+  /** #354 F7：空会话统计 / 清理。 */
+  emptySessionsCount: "session:empty-count",
+  purgeEmptySessions: "session:purge-empty"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */
@@ -691,6 +696,11 @@ const bridge = {
   branchSessionFrom: (path, anchorEntryId, options) => ipcRenderer.invoke(INVOKE.sessionBranch, path, anchorEntryId, options),
   deleteSession: (path) => ipcRenderer.invoke(INVOKE.sessionDelete, path),
   archiveSession: (path, archived) => ipcRenderer.invoke(INVOKE.sessionArchive, path, archived),
+  /** #354 F6：复制会话为独立副本。 */
+  copySession: (path) => ipcRenderer.invoke(INVOKE.sessionCopy, path),
+  /** #354 F7：空会话统计 / 清理。 */
+  emptySessionsCount: () => ipcRenderer.invoke(INVOKE.emptySessionsCount),
+  purgeEmptySessions: (paths) => ipcRenderer.invoke(INVOKE.purgeEmptySessions, paths),
   pinSession: (path, pinned) => ipcRenderer.invoke(INVOKE.sessionPin, path, pinned),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
   shareStatsCard: (base64Png, kind, ext) => ipcRenderer.invoke(INVOKE.statsShare, base64Png, kind, ext),

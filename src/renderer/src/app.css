@@ -18021,3 +18021,91 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition: none;
 	}
 }
+
+/* ── §39 第十九轮十连（#354 会话治理与归档） ─────────────────────── */
+/* F1 年龄分组头：折叠按钮，样式与空间组头同族但更轻（无底色）。 */
+.task-age-header {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	width: 100%;
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	font: inherit;
+	font-size: 11px;
+	text-align: left;
+	padding: var(--space-2) var(--space-2) var(--space-1);
+	cursor: pointer;
+}
+.task-age-header:hover {
+	color: var(--text-secondary);
+}
+.task-age-header .section-chevron {
+	transition: transform var(--dur-fast) var(--ease-out);
+}
+.task-age-header .section-chevron-collapsed {
+	transform: rotate(-90deg);
+}
+/* F7 清理空会话卡片：状态行 + 动作按钮横排 */
+.empty-purge-card {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4);
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius-md);
+	margin: var(--space-2) var(--space-4);
+	flex-wrap: wrap;
+}
+.empty-purge-card .settings-foot {
+	flex: 1;
+	min-width: 200px;
+	margin: 0;
+}
+/* F8 副本小标 */
+.task-copy-badge {
+	font-size: 10px;
+	color: var(--text-faint);
+	border: 1px solid var(--border);
+	border-radius: 999px;
+	padding: 0 5px;
+	flex: none;
+}
+/* F9 活跃时段柱状图 */
+.hour-histogram {
+	display: flex;
+	align-items: flex-end;
+	gap: 3px;
+	height: 120px;
+	padding: var(--space-2) var(--space-4);
+}
+.hour-histogram-col {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: flex-end;
+	height: 100%;
+	position: relative;
+}
+.hour-histogram-bar {
+	width: 100%;
+	min-height: 2px;
+	border-radius: 2px 2px 0 0;
+	background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.hour-histogram-peak .hour-histogram-bar {
+	background: var(--accent);
+}
+.hour-histogram-label {
+	position: absolute;
+	bottom: -16px;
+	font-size: 10px;
+	color: var(--text-faint);
+}
+@media (prefers-reduced-motion: reduce) {
+	.task-age-header .section-chevron {
+		transition: none;
+	}
+}
