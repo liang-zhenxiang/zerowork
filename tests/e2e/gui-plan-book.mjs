@@ -265,15 +265,39 @@ async function openPlanBookFromPalette() {
 	await waitPlanBookSettled();
 }
 
+/**
+ * 请求一个窗口尺寸，返回**实际**尺寸。
+ *
+ * CI 的屏幕只有 1024×679：`resizeTo(1280, 860)` 会被系统钳制，永远等不到目标值。
+ * 因此这里不要求精确命中，只等尺寸稳定（连续两帧不变）后返回实际值，由调用方
+ * 按实际尺寸断言几何。两步之间用 resize 事件把「稳定」计数清零，避免在动画
+ * 中途误判。
+ */
 async function resizeWindow(width, height) {
-	await win.evaluate(({ w, h }) => window.resizeTo(w, h), { w: width, h: height });
-	return waitUntil(
-		async () => {
-			const size = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-			const close = Math.abs(size.width - width) <= 40 && Math.abs(size.height - height) <= 90;
-			return close ? size : null;
-		},
-		{ timeout: 10_000, desc: `窗口变成 ${width}×${height}` }
+	return win.evaluate(
+		({ w, h }) =>
+			new Promise((resolve) => {
+				window.resizeTo(w, h);
+				let last = "";
+				let stable = 0;
+				const onResize = () => {
+					stable = 0;
+				};
+				const tick = () => {
+					const now = `${window.innerWidth}x${window.innerHeight}`;
+					stable = now === last ? stable + 1 : 0;
+					last = now;
+					if (stable >= 2) {
+						window.removeEventListener("resize", onResize);
+						resolve({ width: window.innerWidth, height: window.innerHeight });
+						return;
+					}
+					window.requestAnimationFrame(tick);
+				};
+				window.addEventListener("resize", onResize);
+				window.requestAnimationFrame(tick);
+			}),
+		{ w: width, h: height }
 	);
 }
 
@@ -429,10 +453,14 @@ await h.check("抽屉：实色阅读面、无 backdrop-filter、在工具栏下�
 	await assertDrawerBelowHeader();
 });
 
-await h.check("1280×860 与 900×700 下抽屉都在工具栏下方；899px 窄窗全宽规则在位", async () => {
+await h.check("当前窗口与最小窗口下抽屉都在工具栏下方；899px 窄窗全宽规则在位", async () => {
 	await assertDrawerBelowHeader();
+	const before = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
 	const small = await resizeWindow(900, 700);
-	assert.ok(small.width <= 1000, `窗口没有缩到 900 宽：${small.width}`);
+	assert.ok(
+		small.width < before.width || before.width <= 900,
+		`窗口没有缩到 900 宽：${before.width} → ${small.width}`
+	);
 	await assertDrawerBelowHeader();
 	// 最小窗口（900）下抽屉取 clamp 下限 420：文本列仍需 ≥210px。
 	const narrowText = await win.evaluate(() => {
@@ -465,7 +493,8 @@ await h.check("1280×860 与 900×700 下抽屉都在工具栏下方；899px 窄
 		return false;
 	});
 	assert.ok(breakpoint, "缺少 max-width: 899px 的抽屉全宽规则");
-	await resizeWindow(1280, 860);
+	// 恢复到进入本用例前的尺寸；CI 上同样可能被屏幕钳制，按实际值断言即可。
+	await resizeWindow(before.width, before.height);
 	await assertDrawerBelowHeader();
 });
 
