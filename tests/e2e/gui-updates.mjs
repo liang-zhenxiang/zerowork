@@ -267,20 +267,22 @@ await h.check("切回稳定版回到 latest.yml", async () => {
 // GUI 测试在 macOS 上手工跑。
 if (process.platform === "darwin") {
 	await h.check("macOS：下载更新 → 安装包落到临时目录并出现「打开安装包」", async () => {
-		// 上一步切回稳定只等到「feed 收到请求」，状态可能还在 checking；
-		// 必须等按钮真的渲染出来再点，而不是查一次就断言不存在。
+		// 上一步切回稳定只等到「feed 收到请求」，状态可能还在 checking。
+		// **等待与点击必须在同一次 evaluate 里完成**：分两次查会撞上按钮刚好
+		// 被重渲染替换的窗口（2026-11-10 CI 实测：wait 到了按钮，紧接着 click
+		// 的 evaluate 却找不到它）。这里等到「存在且可点」就当场点掉。
 		await waitUntil(
 			() =>
-				win.evaluate(() =>
-					[...document.querySelectorAll("button")].some((b) => b.textContent === "下载更新"),
-				),
-			{ timeout: 30_000, interval: 300, desc: "「下载更新」按钮出现" },
+				win.evaluate(() => {
+					const btn = [...document.querySelectorAll("button")].find(
+						(b) => b.textContent === "下载更新" && !b.disabled,
+					);
+					if (btn === undefined) return false;
+					btn.click();
+					return true;
+				}),
+			{ timeout: 30_000, interval: 300, desc: "「下载更新」按钮出现并点击" },
 		);
-		await win.evaluate(() => {
-			const btn = [...document.querySelectorAll("button")].find((b) => b.textContent === "下载更新");
-			if (btn === undefined) throw new Error("找不到「下载更新」按钮");
-			btn.click();
-		});
 		await waitUntil(async () => (await phaseKind()) === "downloaded", {
 			timeout: 30_000,
 			interval: 300,
