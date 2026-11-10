@@ -135,17 +135,26 @@ async function canvasStripX(shot) {
 		};
 	});
 	const scale = shot.img.width / g.winW;
-	// 右侧：主列右缘之外、外壳右缘再往里收 12px。外壳最后十几像素是圆角与
-	// 窗口底部/边缘的过渡带（CI 1024×679 实测 x≥1012 亮度不再单调），不能采。
+	// 首选：外壳右缘往里 12–26px 的那条竖带。外壳最后十几像素是圆角与窗口
+	// 边缘的过渡带（CI 1024×679 实测 x≥1012 亮度不再单调）；再往里是主列的
+	// padding，CI 实测 979..993 三段亮度 243.3 / 238.4 / 230.4 单调。
+	// 这比按 innerRight 推算稳：innerRight 是 padding 边缘，不同布局下它与
+	// 内容右缘的距离会变（2026-11-10 的两次 CI 红就出在这里）。
+	const shell0 = (g.shellRight ?? g.winW) - 26;
+	const shell1 = (g.shellRight ?? g.winW) - 12;
+	// 次选：主列与外壳之间的两条留白（兼容外壳右缘信息缺失或极窄窗口）。
 	const right0 = (g.innerRight ?? g.winW) + 8;
 	const right1 = (g.shellRight ?? g.winW) - 12;
-	// 左侧：外壳左缘之内、主列左缘再往里收 6px（主列内容从这里开始）。
 	const left0 = (g.shellLeft ?? 0) + 4;
 	const left1 = (g.innerLeft ?? g.winW) - 6;
 	let x0;
 	let x1;
 	let where;
-	if (right1 - right0 >= 8) {
+	if (g.shellRight !== undefined && shell1 - shell0 >= 8) {
+		x0 = shell0;
+		x1 = shell1;
+		where = "外壳右缘内侧留白";
+	} else if (right1 - right0 >= 8) {
 		x0 = right0;
 		x1 = right1;
 		where = "主列右侧留白";
