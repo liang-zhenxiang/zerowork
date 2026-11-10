@@ -325,6 +325,13 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
   定稿入场同族，不新增时长）；退场只用 `opacity`、走 `--dur-fast`（离场比入场快，
   §5.8），由组件在 `open=false` 后延迟 `--dur-fast` 再卸载触发。两条都只动
   `opacity` / `transform`，不碰布局属性（§5.1），已加入 §10.3.1 的关停清单
+- **计划书抽屉入场**（2026-11-10）—— `.plan-book` 从右侧 `translateX(28px) → 0`
+  淡入，走 `--dur-base` + `--ease-out`（与命令面板入场同族，不新增时长档位）。
+  只动 `opacity` / `transform`（不碰布局属性，§5.1）；关停清单见 §10.3.1
+  （`app.css` 文件末尾的 `prefers-reduced-motion` 块里 `animation: none`）。
+  **内容面是实色 `--surface-1`，不是玻璃**：计划书属于要逐条读的阅读界面，按
+  §12 的纸面处理；玻璃只留给侧栏 / 输入卡 / 命令面板（§11.5 不把玻璃用在
+  内容滚动区）。左缘保留 1px `--border` 与 `--shadow-lg` 作为抽屉边界。
 - **工作轨迹的运行呼吸点**（2026-10-10）—— `.trace-seg-live` 复用 `.tool-dot.running`
   的 `tool-pulse`（1.1s `ease-in-out` infinite）：「还在跑」在工具行与轨迹条上
   是同一套语言。关停后停在静态实心点，仍是「进行中」，已加入关停清单第 ② 组。
@@ -363,6 +370,10 @@ rg 'transition:[^;]*\bease\b' src/renderer/src/app.css | grep -v 'var(--ease'
 >
 > 案例封面淡入（2026-10-03）：`.case-cover img` 的 `opacity` 过渡**不是动画**，
 > 加进第 ④ 组（`transition: none`）—— 关掉后实图直接出现，不再从兜底暗底淡入。
+>
+> 计划书抽屉（2026-11-10）：`.plan-book` 的入场动画在**文件末尾追加的**
+> `prefers-reduced-motion` 块里关停（`animation: none`），进度条的 `transform`
+> 过渡一并置 `none` —— 两者都是「关掉后停在基础态就是终态」的一次性入场族。
 
 **关动画 ≠ 回到「正常样子」。** `animation: none` 只是让元素回到**基础态**，
 而基础态不一定是它本该显示的样子。**每关一个动画都要问一句：关掉之后元素停在

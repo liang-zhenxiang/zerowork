@@ -13095,6 +13095,16 @@ const IconEdit = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, chil
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M4 20h4l10-10a2.8 2.8 0 0 0-4-4L4 16v4z" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m13.5 6.5 4 4" })
 ] });
+/* 计划书：三条带序号的横线 —— 与「产物面板」「任务诊断」同为会话顶栏的抽屉入口。
+   用带圆点的清单剪影而不是铅笔：铅笔读作「编辑」，计划书的主身份是「一组步骤」。 */
+const IconPlan = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M9 6h11M9 12h11M9 18h11" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "4.5", cy: "6", r: "1" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "4.5", cy: "12", r: "1" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "4.5", cy: "18", r: "1" })
+] });
+/* 计划书行内动作：执行（实心三角）。「更多」复用上面的 IconMore。 */
+const IconPlay = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M8 5.5v13l11-6.5z", fill: "currentColor", stroke: "none" }) });
 const IconAlert = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "12", r: "9" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 7.5v6M12 16.8h.01" })
@@ -31911,6 +31921,22 @@ function gfm(options) {
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
 import { rankEntries, matchRank, matchIndices, KIND_WEIGHT } from "./command-palette-core.js";
+// 计划书（Plan Book）的纯逻辑：解析、步骤操作、LCS 差异、Markdown 导出。
+// 单测直接 import 这一份 —— 界面上只表现为「顺序 / 文案对不对」，GUI 断言说不清，
+// 所以那些不变量都在 plan-core.test.mjs 里钉死，组件只负责摆位置。
+import {
+	PLAN_STEP_MAX,
+	addStep as addPlanStep,
+	diffStepLists,
+	moveStep as movePlanStep,
+	newStepId,
+	parsePlanText,
+	planToMarkdown,
+	removeStep as removePlanStep,
+	stepStats,
+	toggleStep as togglePlanStep,
+	updateStep as updatePlanStep
+} from "./plan-core.js";
 import { applyFocus, focusContentWidth, persistFocus, readFocus, toggleFocus } from "./focus-mode-core.js";
 // 命令面板的「记忆」（收藏 + 常用分）同样是纯逻辑，单测直接 import 它 ——
 // 排序位置（frecency 不能压匹配质量）与衰减规则都在那边钉死，组件只管画。
@@ -35136,6 +35162,657 @@ function QuickPromptChips({
   )) });
 }
 const BOTTOM_THRESHOLD_PX = 40;
+/* ── 计划书（Plan Book）──────────────────────────────────────────────
+ *
+ * plan 模式的产出原本只是一条普通 assistant 消息：翻两屏就找不到、不能改步骤、
+ * 不能勾选、不能只执行其中一步。计划书把它升级成**会话的一等产物**：
+ *
+ *   模型在 plan 模式出完最后一轮 → usePlanBook 自动捕获 → daemon 版本化落盘
+ *   → 顶栏「计划书」抽屉里可编辑 / 勾选 / 排序 / 对比版本 / 执行。
+ *
+ * 数据真源在 daemon（`plans/<sessionId>.json`），这一层只做**乐观更新 + 回读**：
+ * 保存失败会重新拉一次，界面最终显示的永远是磁盘上的事实。
+ */
+function usePlanBook(conversation, options) {
+	const { showToast, onOpen } = options;
+	const sessionId = conversation.state.sessionId;
+	const interactionId = conversation.state.interactionId;
+	const isStreaming = conversation.state.isStreaming;
+	const entries = conversation.entries;
+
+	const [plan, setPlan] = reactExports.useState(void 0);
+	const [error, setError] = reactExports.useState(void 0);
+	const [saving, setSaving] = reactExports.useState(false);
+	const planRef = reactExports.useRef(void 0);
+	planRef.current = plan;
+	const sessionRef = reactExports.useRef(sessionId);
+	sessionRef.current = sessionId;
+	/* 只让**最新一次**读 / 写的回包落到 state：会话切换与快速连续编辑都会
+	   产生交错回包，旧回包盖住新结果的表现是「勾了又弹回去」。 */
+	const seqRef = reactExports.useRef(0);
+	/* 捕获时机 = 「在 plan 模式下真的跑过一轮」。只看 `interactionId === "plan" &&
+	   !isStreaming` 会把**切进 plan 模式时已有的旧回复**也捕获进去，所以记一个
+	   「这一轮是在 plan 模式里起的」的标记。
+	   不用「上一帧 streaming 的边沿」：daemon 在首条消息时才分配 sessionId，快照
+	   回包可能恰好与 run_finished 同拍到达 —— 那时边沿会被会话切换重置掉，捕获
+	   静默丢失（2026-11-10 e2e 实测）。标记只看「plan 模式下见过 running」。 */
+	const planRunSeenRef = reactExports.useRef(false);
+	const prevSessionRef = reactExports.useRef(sessionId);
+
+	const load = reactExports.useCallback(() => {
+		if (typeof sessionId !== "string" || sessionId === "") {
+			setPlan(null);
+			setError(void 0);
+			/* 重新读盘 = 以磁盘为准；此前「保存中」的乐观态作废，否则会话切换
+			   打断一次保存后，`saving` 会永远停在 true（按钮一路置灰）。 */
+			setSaving(false);
+			return;
+		}
+		const seq = ++seqRef.current;
+		setError(void 0);
+		setSaving(false);
+		window.kami.getPlan(sessionId).then((value) => {
+			if (seq !== seqRef.current) return;
+			setPlan(value ?? null);
+		}).catch((err) => {
+			if (seq !== seqRef.current) return;
+			setPlan(null);
+			setError(err instanceof Error ? err.message : String(err));
+		});
+	}, [sessionId]);
+
+	reactExports.useEffect(() => {
+		setPlan(void 0);
+		load();
+	}, [load]);
+
+	/**
+	 * 保存步骤。返回 `Promise<保存后的计划 | undefined>` —— 删除撤销、恢复旧版
+	 * 等动作要**等真的落盘**再弹 toast（否则失败时也会说「已恢复」）。
+	 */
+	const saveSteps = reactExports.useCallback((steps, source = "manual") => {
+		const current = planRef.current;
+		const sid = sessionRef.current;
+		if (current === void 0 || current === null || typeof sid !== "string" || sid === "") {
+			return Promise.resolve(void 0);
+		}
+		const seq = ++seqRef.current;
+		setPlan({ ...current, steps });
+		setSaving(true);
+		return window.kami.savePlan(sid, {
+			title: current.title,
+			steps,
+			capturedEntryId: current.capturedEntryId,
+			source
+		}).then((saved) => {
+			if (seq !== seqRef.current) return void 0;
+			setSaving(false);
+			setError(void 0);
+			setPlan(saved);
+			return saved;
+		}).catch((err) => {
+			if (seq !== seqRef.current) return void 0;
+			const message = err instanceof Error ? err.message : String(err);
+			setSaving(false);
+			/* 先重读磁盘、**之后**再落错误：`load()` 开头会清掉 error，顺序反过来
+			   会把刚设置的「保存失败原因」在同一拍里抹掉，用户只剩一条两秒的 toast。 */
+			load();
+			setError(message);
+			showToast(message, "error");
+			return void 0;
+		});
+	}, [showToast, load]);
+
+	/** 自动捕获：把最后一条 assistant 文本解析成计划（同一 entry 不重复保存）。 */
+	const capture = reactExports.useCallback((entryId, text) => {
+		const sid = sessionRef.current;
+		if (typeof sid !== "string" || sid === "") return;
+		const parsed = parsePlanText(text);
+		if (parsed.steps.length === 0) return;
+		const steps = parsed.steps.map((stepText) => ({ id: newStepId(), text: stepText, done: false }));
+		const seq = ++seqRef.current;
+		setSaving(true);
+		window.kami.savePlan(sid, {
+			title: parsed.title,
+			steps,
+			capturedEntryId: entryId,
+			source: "agent"
+		}).then((saved) => {
+			if (seq !== seqRef.current) return;
+			setSaving(false);
+			setError(void 0);
+			setPlan(saved);
+			showToast("计划书已生成", "success", { label: "查看计划书", run: () => onOpen() });
+		}).catch((err) => {
+			if (seq !== seqRef.current) return;
+			setSaving(false);
+			setError(err instanceof Error ? err.message : String(err));
+			showToast(err instanceof Error ? err.message : String(err), "error");
+		});
+	}, [showToast, onOpen]);
+
+	/* 会话切换（到另一个非空会话）时清掉标记；`"" → 真实 id` 是首条消息的正常
+	   分配，**不算切换** —— 那正是上面注释里丢过一次捕获的路径。 */
+	reactExports.useEffect(() => {
+		const prev = prevSessionRef.current;
+		prevSessionRef.current = sessionId;
+		if (prev !== "" && prev !== sessionId) planRunSeenRef.current = false;
+	}, [sessionId]);
+
+	reactExports.useEffect(() => {
+		if (interactionId !== "plan") {
+			planRunSeenRef.current = false;
+			return;
+		}
+		if (isStreaming) {
+			planRunSeenRef.current = true;
+			return;
+		}
+		/* 到这里 = plan 模式且已停下。只有「这一轮在 plan 里跑过」才捕获 ——
+		   刚切进 plan 模式时那几条旧回复不算。 */
+		if (!planRunSeenRef.current) return;
+		if (typeof sessionId !== "string" || sessionId === "") return;
+		const last = [...entries].reverse().find(
+			(entry) => entry.role === "assistant" && typeof entry.text === "string" && entry.text.trim() !== ""
+		);
+		if (last === void 0) return;
+		const captured = planRef.current?.capturedEntryId;
+		if (captured === last.id) return;
+		planRunSeenRef.current = false;
+		capture(last.id, last.text);
+	}, [isStreaming, interactionId, entries, sessionId, capture]);
+
+	const toggle = reactExports.useCallback((id) => {
+		const current = planRef.current;
+		if (current === void 0 || current === null) return;
+		saveSteps(togglePlanStep(current.steps, id));
+	}, [saveSteps]);
+	const update = reactExports.useCallback((id, text) => {
+		const current = planRef.current;
+		if (current === void 0 || current === null) return;
+		saveSteps(updatePlanStep(current.steps, id, text));
+	}, [saveSteps]);
+	const add = reactExports.useCallback((text) => {
+		const current = planRef.current;
+		if (current === void 0 || current === null) return;
+		saveSteps(addPlanStep(current.steps, text));
+	}, [saveSteps]);
+	const remove = reactExports.useCallback((id) => {
+		const current = planRef.current;
+		if (current === void 0 || current === null || current.steps.length <= 1) return;
+		const index = current.steps.findIndex((step) => step.id === id);
+		if (index === -1) return;
+		const removed = current.steps[index];
+		const next = removePlanStep(current.steps, id);
+		void saveSteps(next).then((saved) => {
+			if (saved === void 0) return;
+			/* 删除可撤销：8s 内把这一步插回**删除时的位置**（不是恢复整份旧快照 ——
+			   期间若有别的编辑，整份回滚会把它们一起吞掉）。 */
+			showToast(`已删除第 ${index + 1} 步`, "info", {
+				label: "撤销",
+				run: () => {
+					const latest = planRef.current;
+					if (latest === void 0 || latest === null) return;
+					if (latest.steps.some((step) => step.id === removed.id)) return;
+					const restored = [...latest.steps];
+					restored.splice(Math.min(index, restored.length), 0, removed);
+					void saveSteps(restored);
+				}
+			});
+		});
+	}, [saveSteps, showToast]);
+	const move = reactExports.useCallback((id, delta) => {
+		const current = planRef.current;
+		if (current === void 0 || current === null) return;
+		void saveSteps(movePlanStep(current.steps, id, delta));
+	}, [saveSteps]);
+	const restore = reactExports.useCallback((version, no) => {
+		const current = planRef.current;
+		if (current === void 0 || current === null || version === void 0) return;
+		/* 恢复也走一次保存 —— 历史只增不改，恢复本身成为新版本。 */
+		const versionCount = current.versions.length;
+		const steps = version.steps.map((step) => ({ id: newStepId(), text: step.text, done: step.done === true }));
+		void saveSteps(steps).then((saved) => {
+			if (saved === void 0) return;
+			/* 内容（标题 / 步骤文本）与当前一致时 store 按设计**不追加版本**，
+			   此时不能说「已保存为新版本」—— 否则说的是一件没发生的事。 */
+			const created = saved.versions.length > versionCount;
+			showToast(`已恢复到 v${no ?? "?"}（${created ? "已保存为新版本" : "内容与当前相同"}）`, "success");
+		});
+	}, [saveSteps, showToast]);
+	const approve = reactExports.useCallback(() => {
+		const sid = sessionRef.current;
+		if (typeof sid !== "string" || sid === "") return Promise.resolve();
+		return window.kami.approvePlan(sid).then((saved) => {
+			setPlan(saved);
+			return saved;
+		}).catch((err) => {
+			showToast(err instanceof Error ? err.message : String(err), "error");
+		});
+	}, [showToast]);
+	const removePlan = reactExports.useCallback(() => {
+		const sid = sessionRef.current;
+		if (typeof sid !== "string" || sid === "") return;
+		const seq = ++seqRef.current;
+		window.kami.deletePlan(sid).then(() => {
+			if (seq !== seqRef.current) return;
+			setPlan(null);
+			setError(void 0);
+		}).catch((err) => {
+			showToast(err instanceof Error ? err.message : String(err), "error");
+		});
+	}, [showToast]);
+
+	return {
+		plan,
+		error,
+		saving,
+		toggleStep: toggle,
+		updateStep: update,
+		addStep: add,
+		removeStep: remove,
+		moveStep: move,
+		restoreVersion: restore,
+		approve,
+		removePlan,
+		reload: load
+	};
+}
+
+/** 版本身份用的时钟：HH:mm:ss（同一分钟内的多次编辑也分得清）。 */
+function formatPlanClockTime(at) {
+	const date = new Date(at);
+	const pad = (value) => (value < 10 ? `0${value}` : `${value}`);
+	return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+function PlanBook({ book, interactionId, onClose, onSwitchToPlan, onExecuteAll, onExecuteStep, onCopyMarkdown }) {
+	const asideRef = reactExports.useRef(null);
+	const closeRef = reactExports.useRef(null);
+	const editRef = reactExports.useRef(null);
+	const [editingId, setEditingId] = reactExports.useState(void 0);
+	const [draft, setDraft] = reactExports.useState("");
+	const [editError, setEditError] = reactExports.useState(false);
+	const [adding, setAdding] = reactExports.useState(false);
+	const [newText, setNewText] = reactExports.useState("");
+	const [versionsOpen, setVersionsOpen] = reactExports.useState(false);
+	const [diffId, setDiffId] = reactExports.useState(void 0);
+	/* 「更多」菜单：`{ id, left, top?, bottom? }`。菜单用 `position: fixed`
+	   渲染 —— `.plan-book-body` 是滚动容器，absolute 菜单在滚到底部时会被裁掉
+	   （2026-11-10 设计复检 P1-A）。fixed 不受 overflow 裁剪，位置按触发按钮的
+	   rect 算；下方空间不足时向上翻转。 */
+	const [menu, setMenu] = reactExports.useState(null);
+	const cancelEditRef = reactExports.useRef(false);
+	const prevStepCountRef = reactExports.useRef(0);
+
+	const plan = book.plan;
+	const hasPlan = plan !== void 0 && plan !== null;
+	const steps = hasPlan ? plan.steps : [];
+	const stats = stepStats(steps);
+	const versions = hasPlan ? plan.versions : [];
+	const selectedVersion = diffId === void 0 ? void 0 : versions.find((version) => version.id === diffId);
+	const selectedNo = selectedVersion === void 0 ? 0 : versions.indexOf(selectedVersion) + 1;
+	const diff = selectedVersion === void 0 ? [] : diffStepLists(selectedVersion.steps, steps);
+	const approved = hasPlan && plan.approvedAt !== void 0;
+	const displayVersions = versions.map((version, index) => ({ version, no: index + 1 })).reverse();
+
+	/* 打开时把焦点送进抽屉（关闭按钮），关闭后还给顶栏的入口 —— 键盘用户
+	   不会因为抽屉卸载而掉到页面开头。 */
+	reactExports.useEffect(() => {
+		closeRef.current?.focus();
+	}, []);
+	reactExports.useEffect(() => () => {
+		document.querySelector(".plan-book-toggle")?.focus();
+	}, []);
+
+	/* 新增一步后把它滚进视野（body 是滚动容器；block:"nearest" 不跳动）。 */
+	reactExports.useEffect(() => {
+		if (steps.length > prevStepCountRef.current) {
+			const rows = asideRef.current?.querySelectorAll(".plan-book-step");
+			const last = rows === undefined ? void 0 : rows[rows.length - 1];
+			if (last !== void 0) last.scrollIntoView({ block: "nearest" });
+		}
+		prevStepCountRef.current = steps.length;
+	}, [steps.length]);
+
+	/* 「更多」菜单：外点即关；滚动 / 窗口 resize 也关 —— 菜单是 fixed 的，
+	   不跟着滚动体走，留着会「悬空」在别的位置。 */
+	reactExports.useEffect(() => {
+		if (menu === null) return void 0;
+		const close = () => setMenu(null);
+		const onDown = (event) => {
+			if (!(event.target instanceof Element)) return;
+			if (event.target.closest(".plan-book-more") !== null) return;
+			if (event.target.closest(".plan-book-menu") !== null) return;
+			close();
+		};
+		document.addEventListener("mousedown", onDown);
+		window.addEventListener("resize", close);
+		document.addEventListener("scroll", close, true);
+		return () => {
+			document.removeEventListener("mousedown", onDown);
+			window.removeEventListener("resize", close);
+			document.removeEventListener("scroll", close, true);
+		};
+	}, [menu]);
+
+	/* 版本浮层：点击外部关闭（按钮自身除外，否则开合会打架）。 */
+	reactExports.useEffect(() => {
+		if (!versionsOpen) return void 0;
+		const onDown = (event) => {
+			if (!(event.target instanceof Element)) return;
+			if (event.target.closest(".plan-book-versions") !== null) return;
+			if (event.target.closest(".plan-book-version-btn") !== null) return;
+			setVersionsOpen(false);
+		};
+		document.addEventListener("mousedown", onDown);
+		return () => document.removeEventListener("mousedown", onDown);
+	}, [versionsOpen]);
+
+	const cancelEdit = () => {
+		cancelEditRef.current = true;
+		setEditingId(void 0);
+		setEditError(false);
+	};
+	const startEdit = (step) => {
+		cancelEditRef.current = false;
+		setEditError(false);
+		setEditingId(step.id);
+		setDraft(step.text);
+	};
+	const commitEdit = () => {
+		if (editingId === void 0) return;
+		if (draft.trim() === "") {
+			/* 空文本**不静默回滚**：留在编辑器里说清原因，按 Esc 才能放弃。 */
+			setEditError(true);
+			window.requestAnimationFrame(() => editRef.current?.focus());
+			return;
+		}
+		const id = editingId;
+		setEditingId(void 0);
+		setEditError(false);
+		book.updateStep(id, draft);
+	};
+	const commitAdd = () => {
+		if (newText.trim() === "") {
+			setAdding(false);
+			setNewText("");
+			return;
+		}
+		book.addStep(newText);
+		setAdding(false);
+		setNewText("");
+	};
+
+	/* 打开「更多」：按触发按钮的视口 rect 定位，下方空间不足时向上翻转。
+	   菜单**渲染在抽屉层级**（不是行内）、用 position: fixed —— 这样既不会被
+	   `.plan-book-body` 的 overflow 裁掉，也不会被「新增一步」等后续兄弟盖住
+	   （2026-11-10 设计复检 P1-A）。 */
+	const toggleMenu = (event, step, index) => {
+		if (menu !== null && menu.id === step.id) {
+			setMenu(null);
+			return;
+		}
+		const rect = event.currentTarget.getBoundingClientRect();
+		/* 以**滚动体的可视区**为界，不是视口：菜单必须在 `.plan-book-body` 里
+		   看得见（footer 上方那点空间不算）。 */
+		const bodyRect = asideRef.current?.querySelector(".plan-book-body")?.getBoundingClientRect();
+		const bounds = bodyRect ?? { left: 0, right: window.innerWidth, top: 0, bottom: window.innerHeight };
+		const menuWidth = 128;
+		const menuHeight = 140;
+		const left = Math.max(bounds.left + 8, Math.min(bounds.right - menuWidth - 8, rect.right - menuWidth));
+		if (rect.bottom + menuHeight > bounds.bottom) {
+			setMenu({ id: step.id, index, left, bottom: window.innerHeight - rect.top + 4 });
+		} else {
+			setMenu({ id: step.id, index, left, top: rect.bottom + 4 });
+		}
+	};
+
+	reactExports.useEffect(() => {
+		const onKey = (event) => {
+			if (event.key !== "Escape") return;
+			const active = document.activeElement;
+			/* 非模态抽屉：焦点不在抽屉里时 Esc 不该关它（那会抢走页面的 Esc）。 */
+			if (!(asideRef.current?.contains(active) === true || active === document.body)) return;
+			if (menu !== null) {
+				setMenu(null);
+				return;
+			}
+			if (versionsOpen) {
+				setVersionsOpen(false);
+				return;
+			}
+			if (editingId !== void 0) {
+				cancelEdit();
+				return;
+			}
+			if (adding) {
+				setAdding(false);
+				setNewText("");
+				return;
+			}
+			onClose();
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [menu, versionsOpen, editingId, adding, onClose]);
+
+	const eyebrow = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-eyebrow", children: [
+		/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-kicker", children: "计划书" }),
+		hasPlan && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `plan-book-status${approved ? " is-approved" : " is-draft"}`, children: [
+			approved && /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 12, className: "plan-book-status-icon" }),
+			approved ? "已批准" : "草稿"
+		] })
+	] });
+	const header = /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "plan-book-head", children: [
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-heading", children: [
+			eyebrow,
+			hasPlan && /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "plan-book-title", title: plan.title, children: plan.title })
+		] }),
+		/* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+			ref: closeRef,
+			type: "button",
+			className: "bar-btn",
+			"aria-label": "关闭计划书",
+			title: "关闭（Esc）",
+			onClick: onClose,
+			children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 })
+		})
+	] });
+
+	if (plan === void 0 && book.error === void 0) {
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { ref: asideRef, id: "plan-book-drawer", className: "plan-book", "aria-label": "计划书", children: [
+			header,
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-loading", role: "status", "aria-label": "正在读取计划书", children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-skeleton plan-book-skeleton-title" }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-skeleton plan-book-skeleton-row" }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-skeleton plan-book-skeleton-row" }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-skeleton plan-book-skeleton-row" })
+			] })
+		] });
+	}
+
+	if (!hasPlan) {
+		const failed = book.error !== void 0;
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { ref: asideRef, id: "plan-book-drawer", className: "plan-book", "aria-label": "计划书", children: [
+			header,
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-empty", role: failed ? "alert" : "status", children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `plan-book-empty-icon${failed ? " is-error" : ""}`, "aria-hidden": "true", children: failed ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 28 }) : /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlan, { size: 28 }) }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "plan-book-empty-title", children: failed ? "计划书读取失败" : "还没有计划书" }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: `plan-book-empty-desc${failed ? " is-error" : ""}`, children: failed ? `原因：${book.error}` : "切到『计划』模式，问一次要做的事，模型给出的计划会自动收进这里。" }),
+				failed && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: book.reload, children: "重新读取" }),
+				!failed && interactionId !== "plan" && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onSwitchToPlan, children: "切到计划模式" })
+			] })
+		] });
+	}
+
+	const addRow = adding ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-add-row", children: [
+		/* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+			className: "plan-book-step-input",
+			type: "text",
+			"aria-label": "新增一步",
+			placeholder: "写下新的一步…",
+			value: newText,
+			autoFocus: true,
+			onChange: (event) => setNewText(event.currentTarget.value),
+			onKeyDown: (event) => {
+				if (event.key === "Enter") {
+					event.preventDefault();
+					commitAdd();
+				} else if (event.key === "Escape") {
+					event.preventDefault();
+					setNewText("");
+					setAdding(false);
+				}
+			}
+		}),
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-add-actions", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: book.saving, onClick: commitAdd, children: "添加" }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => { setNewText(""); setAdding(false); }, children: "取消" })
+		] })
+	] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+		type: "button",
+		className: "plan-book-add",
+		disabled: steps.length >= PLAN_STEP_MAX,
+		onClick: () => { setNewText(""); setAdding(true); },
+		children: [/* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 13 }), " 新增一步"]
+	});
+
+	const versionPanel = versionsOpen && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { id: "plan-book-versions", className: "plan-book-versions", "aria-label": "计划书版本", children: [
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-versions-head", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["版本历史 · ", versions.length, " 版"] }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "plan-book-link", onClick: () => setVersionsOpen(false), children: "收起" })
+		] }),
+		/* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "plan-book-version-list", children: displayVersions.map(({ version, no }) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+			type: "button",
+			className: `plan-book-version-row${diffId === version.id ? " active" : ""}`,
+			"aria-pressed": diffId === version.id,
+			onClick: () => setDiffId(diffId === version.id ? void 0 : version.id),
+			children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "plan-book-version-no", children: ["v", no] }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-version-time", children: formatPlanClockTime(version.createdAt) }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-version-source", children: version.source === "agent" ? "自动捕获" : "手动编辑" }),
+				version.id === plan.approvedVersionId && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "plan-book-version-approved", children: [
+					/* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 12 }),
+					"已批准"
+				] })
+			]
+		}) }, version.id)) }),
+		selectedVersion !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-diff", role: "group", "aria-label": "版本差异", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-diff-head", children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["v", selectedNo, " · ", formatPlanClockTime(selectedVersion.createdAt), " · ", selectedVersion.source === "agent" ? "自动捕获" : "手动编辑"] }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: book.saving, onClick: () => { book.restoreVersion(selectedVersion, selectedNo); setDiffId(void 0); setVersionsOpen(false); }, children: "恢复此版本" })
+			] }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("ol", { className: "plan-book-diff-list", children: diff.map((line, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: `plan-book-diff-line ${line.kind}`, children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `plan-book-diff-mark ${line.kind}`, "aria-hidden": "true", children: line.kind === "add" ? "+" : line.kind === "del" ? "−" : " " }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-diff-text", children: line.text })
+			] }, `${line.kind}-${index}`)) }),
+			diff.every((line) => line.kind === "same") && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "plan-book-note", children: "这一版与当前内容相同。" })
+		] })
+	] });
+
+	/* 「更多」菜单渲染在抽屉层级（footer 之后），不在滚动体 / 行内 ——
+	   fixed + 顶层渲染，滚到底部也不会被裁、不会被后续兄弟盖住。 */
+	const menuPanel = (() => {
+		if (menu === null) return null;
+		const index = steps.findIndex((step) => step.id === menu.id);
+		if (index === -1) return null;
+		const step = steps[index];
+		return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+			className: "plan-book-menu",
+			role: "menu",
+			"aria-label": `第 ${index + 1} 步的操作`,
+			style: menu.top !== void 0 ? { top: `${menu.top}px`, left: `${menu.left}px` } : { bottom: `${menu.bottom}px`, left: `${menu.left}px` },
+			children: [
+				/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", role: "menuitem", className: "plan-book-menu-item", disabled: index === 0, onClick: () => { setMenu(null); book.moveStep(step.id, -1); }, children: "上移" }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", role: "menuitem", className: "plan-book-menu-item", disabled: index === steps.length - 1, onClick: () => { setMenu(null); book.moveStep(step.id, 1); }, children: "下移" }),
+				/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", role: "menuitem", className: "plan-book-menu-item danger", disabled: steps.length <= 1, onClick: () => { setMenu(null); book.removeStep(step.id); }, children: "删除" })
+			]
+		});
+	})();
+
+	return /* @__PURE__ */ jsxRuntimeExports.jsxs("aside", { ref: asideRef, id: "plan-book-drawer", className: "plan-book", "aria-label": "计划书", children: [
+		header,
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-progress", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "plan-book-progress-track", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "plan-book-progress-fill", style: { transform: `scaleX(${stats.percent / 100})` } }) }),
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "plan-book-progress-text", children: [
+				stats.done,
+				" / ",
+				stats.total,
+				" 完成 · ",
+				formatMessageTime(plan.updatedAt, Date.now()),
+				" 更新",
+				book.saving && " · 保存中…"
+			] })
+		] }),
+		book.error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-error", role: "alert", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "plan-book-error-text", children: ["原因：", book.error] }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "plan-book-link", onClick: book.reload, children: "重新读取" })
+		] }),
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-body", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("ol", { className: "plan-book-steps", children: steps.map((step, index) => {
+				const editing = editingId === step.id;
+				return /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: `plan-book-step${step.done ? " is-done" : ""}${editing ? " is-editing" : ""}`, children: [
+					/* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+						type: "button",
+						className: "plan-book-check",
+						role: "checkbox",
+						"aria-checked": step.done,
+						"aria-label": `第 ${index + 1} 步${step.done ? "已完成" : "未完成"}`,
+						disabled: book.saving,
+						onClick: () => book.toggleStep(step.id),
+						children: step.done ? /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 14 }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-check-no", children: index + 1 })
+					}),
+					editing ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-edit-wrap", children: [
+						/* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+							ref: editRef,
+							type: "text",
+							className: `plan-book-step-input${editError ? " is-invalid" : ""}`,
+							"aria-label": `编辑第 ${index + 1} 步`,
+							"aria-invalid": editError,
+							value: draft,
+							onChange: (event) => {
+								setEditError(false);
+								setDraft(event.currentTarget.value);
+							},
+							onKeyDown: (event) => {
+								if (event.key === "Enter") {
+									event.preventDefault();
+									commitEdit();
+								} else if (event.key === "Escape") {
+									event.preventDefault();
+									cancelEdit();
+								}
+							},
+							onBlur: () => {
+								/* 空文本失焦：**保持编辑器打开并报原因**，不静默回滚
+								   （评审 P2-18）。用户可以直接点回输入框继续写，或按 Esc 放弃。 */
+								if (draft.trim() === "") setEditError(true);
+								else commitEdit();
+							}
+						}),
+						editError && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "plan-book-edit-error", role: "alert", children: "步骤不能为空，按 Esc 放弃修改" })
+					] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-step-text", children: step.text }),
+					!editing && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "plan-book-step-ops", children: [
+						/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "plan-book-op", "aria-label": `执行第 ${index + 1} 步`, title: "执行这一步", onClick: () => onExecuteStep(index), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlay, { size: 14 }) }),
+						/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "plan-book-op", "aria-label": `编辑第 ${index + 1} 步`, title: "编辑", onClick: () => startEdit(step), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconEdit, { size: 14 }) }),
+						/* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "plan-book-more", children: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "plan-book-op", "aria-label": `第 ${index + 1} 步的更多操作`, "aria-haspopup": "menu", "aria-expanded": menu !== null && menu.id === step.id, title: "更多", onClick: (event) => toggleMenu(event, step, index), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconMore, { size: 14 }) }) })
+					] })
+				] }, step.id);
+			}) }),
+			addRow,
+			steps.length >= PLAN_STEP_MAX && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "plan-book-note", children: ["已到 ", PLAN_STEP_MAX, " 步上限，超出请合并步骤。"] })
+		] }),
+		/* @__PURE__ */ jsxRuntimeExports.jsxs("footer", { className: "plan-book-foot", children: [
+			/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", disabled: steps.length === 0 || book.saving, onClick: onExecuteAll, children: "执行全部" }),
+			/* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onCopyMarkdown, children: "复制 Markdown" }),
+			/* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn plan-book-version-btn", "aria-expanded": versionsOpen, "aria-controls": "plan-book-versions", onClick: () => setVersionsOpen((open) => !open), children: ["版本历史 · ", versions.length] }),
+			versionPanel
+		] }),
+		menuPanel
+	] });
+}
+
 function ChatView({
   focusMode,
   conversation,
@@ -74317,6 +74994,7 @@ function paletteActionEntries(ctx) {
     { id: "action:file-history", title: "打开文件历史", keywords: ["文件", "历史", "版本", "还原", "时光机", "file", "history", "version"], run: ctx.openFileHistory },
     { id: "action:review", title: "打开变更审阅", subtitle: "AI 改过的文件，逐条确认或还原", keywords: ["变更", "审阅", "审阅台", "已阅", "待审阅", "review", "diff"], run: ctx.openReview },
     { id: "action:session-search", title: "会话检索", subtitle: "在最近 200 个会话的正文里找，可跳回原消息", keywords: ["检索", "搜索", "查找", "会话", "历史", "search", "find"], run: ctx.openSearch },
+    { id: "action:plan-book", title: "打开计划书", subtitle: "可编辑、可查看版本、可执行", keywords: ["计划书", "计划", "步骤", "plan", "book"], run: ctx.openPlanBook },
     { id: "action:skills", title: "打开专家 · 技能 · 连接器", keywords: ["专家", "技能", "连接器", "mcp", "skills"], run: ctx.openSkills },
     { id: "action:automations", title: "打开自动化", keywords: ["自动化", "定时", "任务", "automation"], run: ctx.openAutomations },
     { id: "action:compare-models", title: "对比多个模型", subtitle: "同一个问题，并排问 2–4 个模型", keywords: ["对比", "多模型", "并排", "比较", "compare", "multi"], run: ctx.openCompare },
@@ -76005,15 +76683,71 @@ function App() {
     setPanelOpen(true);
     setSourcesOpen(target === "sources");
   }, []);
+  /*
+   * 切换交互模式。返回 Promise<boolean>（成功 true）—— 计划书的「执行全部 /
+   * 执行这一步」要先确认切到创作模式再提交，不能像点按钮那样发完就不管；
+   * 其余调用点历来忽略返回值，行为不变。
+   */
   const changeInteraction = reactExports.useCallback(
     (interactionId) => {
-      if (link2.kind !== "ready") return;
-      window.kami.setInteraction(interactionId).catch((error) => {
-        showToast(error instanceof Error ? error.message : String(error));
-      });
+      if (link2.kind !== "ready") return Promise.resolve(false);
+      return window.kami.setInteraction(interactionId).then(
+        () => true,
+        (error) => {
+          showToast(error instanceof Error ? error.message : String(error));
+          return false;
+        }
+      );
     },
-    [link2.kind]
+    [link2.kind, showToast]
   );
+  /* ── 计划书（Plan Book）─────────────────────────────────────────── */
+  const [planBookOpen, setPlanBookOpen] = reactExports.useState(false);
+  const openPlanBook = reactExports.useCallback(() => {
+    setView("chat");
+    setPlanBookOpen(true);
+  }, []);
+  const planBook = usePlanBook(conversation, { showToast, onOpen: openPlanBook });
+  /*
+   * 执行全部：切回创作模式，再把**编辑后**的计划作为提示词发出去。
+   * 不用聊天记录里那条旧计划 —— 计划书才是「当前事实」（用户可能改过步骤）。
+   * 先批准当前版本：状态徽标从「草稿」变「已批准」，历史里也留了痕。
+   */
+  const executePlanAll = reactExports.useCallback(() => {
+    const current = planBook.plan;
+    if (current === void 0 || current === null || current.steps.length === 0) return;
+    const markdown = planToMarkdown(current.title, current.steps);
+    void planBook.approve();
+    void changeInteraction("craft").then((ok) => {
+      if (!ok) return;
+      setPlanBookOpen(false);
+      void submit(`按下面的计划开始执行：\n\n${markdown}`).catch(() => {
+      });
+    });
+  }, [planBook, changeInteraction, submit]);
+  /*
+   * 执行这一步：**只填进输入框**、切回创作模式，由用户确认后发送 ——
+   * 计划书里点一下不等于授权模型立刻动手（与「执行全部」的显式点击区分开）。
+   */
+  const executePlanStep = reactExports.useCallback((index) => {
+    const current = planBook.plan;
+    if (current === void 0 || current === null) return;
+    const step = current.steps[index];
+    if (step === void 0) return;
+    void changeInteraction("craft").then((ok) => {
+      if (!ok) return;
+      setPendingPrefill(`执行计划第 ${index + 1} 步：${step.text}`);
+      setPlanBookOpen(false);
+    });
+  }, [planBook, changeInteraction]);
+  const copyPlanMarkdown = reactExports.useCallback(() => {
+    const current = planBook.plan;
+    if (current === void 0 || current === null) return;
+    navigator.clipboard.writeText(planToMarkdown(current.title, current.steps)).then(
+      () => showToast("已复制计划书 Markdown", "success"),
+      () => showToast("复制失败：剪贴板不可用", "error")
+    );
+  }, [planBook, showToast]);
   const selectExpert = reactExports.useCallback(
     (expertId) => {
       if (link2.kind !== "ready") return;
@@ -76686,7 +77420,8 @@ function App() {
       openSearch,
       openSkills: () => openSkillsAt("skills"),
       openAutomations,
-      openCompare
+      openCompare,
+      openPlanBook
     });
     const sessions = [...taskList ?? []].filter((session) => !session.archived).sort(byModifiedDesc).map((session) => ({
       id: `session:${session.id}`,
@@ -76872,7 +77607,27 @@ function App() {
     revealPanel("artifact");
     openPreview2({ kind: "file", path: path2 });
   }, [conversation.state.cwd, openArtifact, openPreview2, revealPanel]);
+  const planStepCount = planBook.plan === void 0 || planBook.plan === null ? 0 : planBook.plan.steps.length;
+  /* 有步骤时常驻；没有计划时只在 plan 模式出现（点了进空态，告诉用户「生成后
+     在这里查看」）。创作模式的空白会话不该多出一枚永远空着的按钮。 */
+  const showPlanBookButton = planStepCount > 0 || conversation.state.interactionId === "plan";
   const headerActions = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "panel-toggle-group", children: [
+    showPlanBookButton && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "button",
+      {
+        type: "button",
+        className: `bar-btn panel-toggle-btn plan-book-toggle${planBookOpen ? " active" : ""}`,
+        "aria-label": planBookOpen ? "关闭计划书" : "打开计划书",
+        "aria-expanded": planBookOpen,
+        "aria-controls": "plan-book-drawer",
+        title: "计划书：可编辑、可查看版本、可执行",
+        onClick: () => setPlanBookOpen((open) => !open),
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlan, { size: 16 }),
+          planStepCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plan-book-badge", children: planStepCount })
+        ]
+      }
+    ),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
@@ -77241,6 +77996,26 @@ function App() {
         }
       },
       approvals[0].id
+    ),
+    /*
+     * 计划书抽屉。外层借 .modal-backdrop 的「已排除在视图卡样式之外」身份，
+     * 但 .plan-book-backdrop 把它改成透明、不拦截点击 —— 计划书是**非模态**的
+     * 右侧抽屉（DESIGN §7.3），打开时页面仍可操作；关它用 × / Esc。
+     */
+    planBookOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "div",
+      {
+        className: "modal-backdrop plan-book-backdrop",
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(PlanBook, {
+          book: planBook,
+          interactionId: conversation.state.interactionId,
+          onClose: () => setPlanBookOpen(false),
+          onSwitchToPlan: () => { void changeInteraction("plan"); },
+          onExecuteAll: executePlanAll,
+          onExecuteStep: executePlanStep,
+          onCopyMarkdown: copyPlanMarkdown
+        })
+      }
     ),
     // 命令面板：open=false 时组件内部 return null（不常驻 DOM，不给每次按键留监听）。
     /* @__PURE__ */ jsxRuntimeExports.jsx(

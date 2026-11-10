@@ -1,0 +1,5 @@
+{"file":".trellis/spec/renderer/index.md","reason":"渲染层规范：token 纪律、追加式 CSS、大文件修改约束"}
+{"file":".trellis/spec/daemon/index.md","reason":"daemon 新模块与 IPC handler 的写法、校验与落盘惯例"}
+{"file":".trellis/spec/shared/index.md","reason":"IPC 通道与 preload 契约的既有形态"}
+{"file":".trellis/spec/testing/index.md","reason":"单元/GUI 测试分层、等待真实渲染、反向验证"}
+{"file":"docs/DESIGN.md","reason":"抽屉、层级、动效与颜色 token"}
