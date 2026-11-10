@@ -46,6 +46,9 @@ export const KIND_WEIGHT = {
 	hit: 2.5,
 	workspace: 3,
 	expert: 4,
+	 /* 片段（#363 第二十轮 F1）：内容资产，比实体近、比命令远——
+	   搜「片段」时它是正主，混搜时排在会话与命中之后。 */
+	snippet: 4.5,
 	skill: 5,
 	connector: 6,
 	automation: 7,

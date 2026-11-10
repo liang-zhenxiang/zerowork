@@ -13620,6 +13620,8 @@ function Sidebar({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  /* #363 第二十轮 F9：合并预览浮层开关。 */
+  const [mergePreviewOpen, setMergePreviewOpen] = reactExports.useState(false);
   /* #300 F6：批量归档多选。Set 存 path；⌘点任务行切换选中并进入多选态；
    * Esc 或清空退出。批量动作直接循环 archiveTask（IPC 幂等、量小）。 */
   /* round15 F4：任务行拖拽排序。拖起的 path 放 dragRef，落到另一行时按
@@ -14116,7 +14118,8 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                   list = [];
                 }
                 if (!Array.isArray(list)) list = [];
-                const item = { title: (task.title ?? "模板").slice(0, 24), text: text2.slice(0, 2000) };
+                /* #363 第二十轮 F2：带 lastUsedAt——模板 chips 按「最近使用」排序。 */
+                const item = { title: (task.title ?? "模板").slice(0, 24), text: text2.slice(0, 2000), lastUsedAt: Date.now() };
                 list = [item, ...list.filter((t) => t.text !== item.text)].slice(0, 5);
                 try {
                   window.localStorage.setItem("zw:templates", JSON.stringify(list));
@@ -14818,6 +14821,39 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           },
           children: "归档所选"
         }),
+        /* #363 第二十轮 F9：合并预览。多选会话按时间串联只读浮层
+           （标题级汇总——全文合并需要逐会话读盘，后续批次再说）。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          onClick: () => setMergePreviewOpen(true),
+          children: "合并预览"
+        }),
+        /* #363 第二十轮 F3：导出清单 CSV。多选会话的元数据表
+           （标题/消息数/最后活跃/路径），Blob 下载走浏览器下载语义
+           （与统计页 CSV 同通道）。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          onClick: () => {
+            const picked = (taskList ?? []).filter((t) => selectedPaths.has(t.path));
+            const rows = [["标题", "消息数", "最后活跃", "路径"].join(",")];
+            for (const t of picked) {
+              const title2 = `"${(t.title ?? "").replaceAll('"', '""')}"`;
+              const at = t.modifiedAt ? new Date(t.modifiedAt).toLocaleString("zh-CN") : "";
+              rows.push([title2, String(t.messageCount ?? 0), `"${at}"`, `"${t.path}"`].join(","));
+            }
+            const blob = new Blob(["\ufeff" + rows.join("\n")], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `ZeroWork-会话清单-${new Date().toISOString().slice(0, 10)}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            setSelectedPaths(/* @__PURE__ */ new Set());
+          },
+          children: "导出清单"
+        }),
         /* #354 第十九轮 F10：批量导出。逐个走既有 Markdown 导出链路
            （INVOKE.sessionExportMarkdown），落同一个 exports/ 目录；无 ZIP
            依赖——逐个 toast 汇总成功数。 */
@@ -14838,6 +14874,17 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           children: "导出所选"
         }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setSelectedPaths(/* @__PURE__ */ new Set()), children: "取消" })
+      ] }),
+      /* #363 第二十轮 F9：合并预览浮层。按最后活跃时间升序串联选中会话标题。 */
+      mergePreviewOpen && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ws-backdrop", "aria-label": "关闭", onClick: () => setMergePreviewOpen(false) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "merge-preview-sheet", role: "dialog", "aria-label": "合并预览", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "merge-preview-title", children: `合并预览 · ${selectedPaths.size} 个会话（按时间升序）` }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "merge-preview-list", children: (taskList ?? []).filter((t) => selectedPaths.has(t.path)).sort((a, b) => (a.modifiedAt ?? 0) - (b.modifiedAt ?? 0)).map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "merge-preview-item", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "merge-preview-name", children: t.title ?? "未命名" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "merge-preview-meta", children: `${t.messageCount ?? 0} 条 · ${t.modifiedAt ? new Date(t.modifiedAt).toLocaleDateString("zh-CN") : "—"}` })
+          ] }, t.path)) })
+        ] })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-section", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -15895,7 +15942,10 @@ function Composer({
     const read2 = () => {
       try {
         const parsed = JSON.parse(window.localStorage.getItem("zw:templates") ?? "[]");
-        setTemplates(Array.isArray(parsed) ? parsed.slice(0, 5) : []);
+        /* #363 第二十轮 F2：按 lastUsedAt 降序（缺省 0 保持旧序稳定）。 */
+        const sorted = Array.isArray(parsed) ? parsed.slice(0, 5) : [];
+        sorted.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
+        setTemplates(sorted);
       } catch {
         setTemplates([]);
       }
@@ -15939,6 +15989,19 @@ function Composer({
     }),
     [img.pickFromDialog, draftKey]
   );
+  /* #363 第二十轮 F1：⌘K 片段条目「插入当前会话」——zw:insert-draft 事件，
+     与 imperative fillText 同一逻辑（setDraft + saveDraft + focus）。 */
+  reactExports.useEffect(() => {
+    const onInsertDraft = (event) => {
+      const text2 = event.detail?.text;
+      if (typeof text2 !== "string" || text2 === "") return;
+      setDraft(text2);
+      if (draftKey !== void 0) saveDraft(draftKey, text2);
+      textareaRef.current?.focus();
+    };
+    window.addEventListener("zw:insert-draft", onInsertDraft);
+    return () => window.removeEventListener("zw:insert-draft", onInsertDraft);
+  }, [draftKey]);
   /* round10 F1：代码卡「新建任务」种子 —— 会话页把代码存进 sessionStorage，
      这里取出填入草稿。只在挂载后消费一次，消费即清，避免反复注入。 */
   reactExports.useEffect(() => {
@@ -16178,7 +16241,29 @@ function Composer({
             type: "button",
             className: "quick-chip quick-chip-template",
             title: tpl.text,
-            onClick: () => applyChip(tpl.text),
+            onClick: () => {
+              /* #363 第二十轮 F8：模板变量替换。{{date}}=今天（M 月 D 日）、
+                 {{workspace}}=当前工作区目录名。未知变量原样保留。 */
+              const now = new Date();
+              const expanded = tpl.text
+                .replaceAll("{{date}}", `${now.getMonth() + 1} 月 ${now.getDate()} 日`)
+                .replaceAll("{{workspace}}", (cwd2 === "" ? "" : cwd2.split("/").filter(Boolean).pop()) ?? "");
+              applyChip(expanded);
+              /* #363 第二十轮 F2：用一次记一次，chips 按「最近使用」排。 */
+              try {
+                const list = JSON.parse(window.localStorage.getItem("zw:templates") ?? "[]");
+                if (Array.isArray(list)) {
+                  const hit = list.find((t) => t.text === tpl.text);
+                  if (hit !== void 0) {
+                    hit.lastUsedAt = Date.now();
+                    list.sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0));
+                    window.localStorage.setItem("zw:templates", JSON.stringify(list));
+                    window.dispatchEvent(new CustomEvent("zw:templates-changed", { detail: list }));
+                  }
+                }
+              } catch {
+              }
+            },
             children: `▸ ${tpl.title}`
           },
           `tpl-${tpl.title}`
@@ -36292,9 +36377,14 @@ function ChatView({
                   type: "button",
                   onClick: () => {
                     try {
+                      /* #363 第二十轮 F7：选填标签（取消=无标签）。旧字符串条目
+                         在读取侧兼容（paletteEntries 里 typeof item==="string" 分支）。 */
+                      const tag = window.prompt("给这个片段加个标签（可留空）", "") ?? "";
                       const raw = window.localStorage.getItem("zw:snippets");
                       const list = raw === null ? [] : JSON.parse(raw);
-                      const next = [{ text: selState.text, at: Date.now() }, ...Array.isArray(list) ? list : []].slice(0, 50);
+                      const entry = { text: selState.text, at: Date.now() };
+                      if (tag.trim() !== "") entry.tag = tag.trim();
+                      const next = [entry, ...Array.isArray(list) ? list : []].slice(0, 50);
                       window.localStorage.setItem("zw:snippets", JSON.stringify(next));
                       window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已存为片段（⌘K 搜「片段」可取用）" }] }));
                     } catch {
@@ -66900,6 +66990,51 @@ function QuickChipsEditor() {
       onClick: () => persist([...chips, "新短语"]),
       children: "添加一条"
     }),
+    /* #363 第二十轮 F6：短语导入/导出。导出 = JSON 下载；导入 = 文件选择 +
+       JSON 校验（非字符串数组拒绝）。跨设备迁移短语靠这条路。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      type: "button",
+      className: "chip-edit-add",
+      onClick: () => {
+        const blob = new Blob([JSON.stringify(chips, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "zerowork-quick-chips.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+      children: "导出"
+    }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      type: "button",
+      className: "chip-edit-add",
+      onClick: () => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = ".json,application/json";
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (file === void 0) return;
+          file.text().then((text2) => {
+            try {
+              const parsed = JSON.parse(text2);
+              if (!Array.isArray(parsed) || !parsed.every((s) => typeof s === "string")) {
+                window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "导入失败：文件应是字符串数组" }] }));
+                return;
+              }
+              persist(parsed.slice(0, 4));
+              window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "短语已导入" }] }));
+            } catch {
+              window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "导入失败：不是合法 JSON" }] }));
+            }
+          }).catch(() => {
+          });
+        };
+        input.click();
+      },
+      children: "导入"
+    }),
     saved && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chip-edit-saved", children: "已保存" })
   ] }) });
 }
@@ -71475,6 +71610,19 @@ function drawStatsShareCard(stats) {
   ctx.fillStyle = "rgba(251,250,254,0.45)"; ctx.font = "400 20px system-ui, sans-serif";
   ctx.fillText("最近 30 天活跃度", 72, 546);
   ctx.fillText(`最长连续 ${stats.longestStreakDays} 天 · 活跃 ${stats.activeDays} 天`, 72, 578);
+    /* #363 第二十轮 F4：分享卡 v2——底部徽章行（已解锁徽章名，最多 4 个）。
+     判定复用 STAT_BADGES.test（与统计页徽章墙同一口径，不会出现两张皮）。 */
+  const earnedNames = (typeof STAT_BADGES !== "undefined" ? STAT_BADGES : []).filter((b) => {
+    try {
+      return b.test(stats);
+    } catch {
+      return false;
+    }
+  }).slice(0, 4).map((b) => b.label);
+  if (earnedNames.length > 0) {
+    ctx.fillStyle = "rgba(251,250,254,0.7)"; ctx.font = "600 18px system-ui, sans-serif";
+    ctx.fillText(`🏅 ${earnedNames.join(" · ")}`, 72, 608);
+  }
   return canvas.toDataURL("image/png");
 }
 function roundRectPath(ctx, x, y, w, h, r) {
@@ -71555,6 +71703,29 @@ function StatsView({ onClose }) {
       /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "把统计画成一张可分享的图片，存到 exports 目录", disabled: stats === void 0 || sharing, onClick: share, children: [
         sharing ? "生成中…" : "分享卡"
       ] }),
+      /* #363 第二十轮 F5：本周摘要。7 天汇总文本进剪贴板（贴周报/群聊都用得上）；
+         数据全来自已加载的 stats，零新增 IPC。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+        type: "button",
+        className: "mini-btn",
+        onClick: () => {
+          if (stats === void 0) return;
+          const week = (stats.heatmap ?? []).slice(-7);
+          const msgs = week.reduce((acc, d) => acc + (d.count ?? 0), 0);
+          const lines2 = [
+            `ZeroWork 本周摘要（${new Date().toLocaleDateString("zh-CN")}）`,
+            `- 本周消息：${msgs} 条`,
+            `- 本周活跃：${week.filter((d) => (d.count ?? 0) > 0).length} 天`,
+            `- 累计会话：${stats.totalSessions} 个 · 累计消息：${stats.totalMessages} 条`,
+            `- 累计 token：${formatTokens(stats.totalTokens.total)} · 连续活跃：${stats.streakDays} 天`
+          ];
+          navigator.clipboard.writeText(lines2.join("\n")).then(() => {
+            window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "本周摘要已复制，直接粘贴到周报里" }] }));
+          }).catch(() => {
+          });
+        },
+        children: "本周摘要"
+      }),
       /*
        * F8（#288 第五轮）导出 CSV：模型用量表（byModel）导出为 CSV。
        * 渲染层 Blob 下载（Electron 的 download 事件落「下载」目录），
@@ -72018,7 +72189,25 @@ function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArt
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => void load(), children: "刷新" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : data === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : data.artifacts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+    /* #363 第二十轮 F10：知识库聚合——片段/模板/导出物三区统计卡。
+       片段与模板是 localStorage 本地数据（同步读），导出物来自 listLibrary 同源。
+       数据区不管空不空都显示（这就是「知识库有什么」的第一眼）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : data === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(snippetCountForLibrary()) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "片段" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(templateCountForLibrary()) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "模板" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(data.artifacts.length) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "导出产物" })
+        ] })
+      ] }),
+      data.artifacts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
       icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconLibrary, { size: 22 }),
       title: "还没有交付过产物",
       description: "让 Agent 做一件事——查资料、写文档、做表格——当它把成果文件交付出来时，就会出现在这里，之后跨会话都能找到。",
@@ -72033,8 +72222,27 @@ function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArt
         onLocate: onResumeSession,
         onOpenExternal
       }, artifact.path)) })
-    ] }) })
+    ] })
+    ] })
+    })
   ] });
+}
+/* #363 第二十轮 F10：片段/模板计数助手（LibraryView 专用，localStorage 同步读）。 */
+function snippetCountForLibrary() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("zw:snippets") ?? "[]");
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
+}
+function templateCountForLibrary() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("zw:templates") ?? "[]");
+    return Array.isArray(parsed) ? parsed.length : 0;
+  } catch {
+    return 0;
+  }
 }
 /*
  * 文件时光机（侧栏「文件历史」）：左列是 Agent 用 write / edit **覆盖过**的文件清单
@@ -74069,6 +74277,7 @@ const PALETTE_GROUP_LABELS = {
   action: "动作",
   settings: "设置",
   session: "会话",
+  snippet: "片段",
   hit: "正文命中",
   workspace: "工作空间",
   expert: "专家",
@@ -74086,7 +74295,8 @@ const PALETTE_KIND_ICONS = {
   expert: IconUser,
   skill: IconSkill,
   connector: IconCloud,
-  automation: IconAutomation
+  automation: IconAutomation,
+  snippet: IconCopy
 };
 /*
  * 声明式动作表：每条都是既有入口的「换一个入口」，run 只调用既有 setState 或
@@ -76526,6 +76736,41 @@ function App() {
       keywords: [task.prompt ?? ""],
       run: () => openAutomations()
     }));
+    /* #363 第二十轮 F1+F7：片段库条目。兑现「⌘K 搜『片段』可取用」的承诺
+       （#316 存片段时 toast 是这么说的，但面板条目一直没实装）。
+       条目形状兼容旧字符串与新 {text,tag}；run 在会话页插入草稿，首页复制。 */
+    const snippetEntries = (() => {
+      try {
+        const parsed = JSON.parse(window.localStorage.getItem("zw:snippets") ?? "[]");
+        if (!Array.isArray(parsed)) return [];
+        return parsed.slice(0, 10).map((item, index) => {
+          const legacy = typeof item === "string";
+          const text2 = legacy ? item : item.text ?? "";
+          const tag = legacy ? void 0 : item.tag;
+          if (text2 === "") return null;
+          return {
+            id: `snippet:${index}:${text2.slice(0, 24)}`,
+            kind: "snippet",
+            title: text2.length > 40 ? `${text2.slice(0, 40)}…` : text2,
+            subtitle: tag !== void 0 && tag !== "" ? `片段 · ${tag}` : "片段",
+            keywords: [tag ?? "", "片段", "snippet"],
+            run: () => {
+              if (viewRef.current === "chat") {
+                window.dispatchEvent(new CustomEvent("zw:insert-draft", { detail: { text: text2 } }));
+                window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "片段已插入输入框" }] }));
+              } else {
+                navigator.clipboard.writeText(text2).then(() => {
+                  window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制片段（打开会话后可直接插入）" }] }));
+                }).catch(() => {
+                });
+              }
+            }
+          };
+        }).filter((entry) => entry !== null);
+      } catch {
+        return [];
+      }
+    })();
     const hitEntries = paletteContentHits.map(({ session, hit, query }) => ({
       id: `hit:${session.sessionId}:${hit.entryId ?? "0"}`,
       kind: "hit",
@@ -76534,7 +76779,7 @@ function App() {
       keywords: [],
       run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path, query })
     }));
-    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...hitEntries];
+    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...snippetEntries, ...hitEntries];
     // 依赖数组**只能靠人维护**：本文件不在 eslint 的覆盖内（eslint.config.mjs 的
     // ignores 列了 "src/renderer/src/**"），react-hooks/exhaustive-deps 根本不加载，
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
