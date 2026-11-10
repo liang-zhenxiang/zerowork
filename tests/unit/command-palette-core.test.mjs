@@ -110,9 +110,11 @@ describe("matchRank —— 不匹配与空查询", () => {
 });
 
 describe("KIND_WEIGHT —— 类别权重契约", () => {
-	it("九个类别齐全，权重严格递增，正文命中排在会话后、工作区前", () => {
+	it("十个类别齐全，权重严格递增，正文命中排在会话后、工作区前", () => {
 		// #286 全局搜索：hit=2.5 插在 session(2) 与 workspace(3) 之间 ——
 		// 命中的正文比命令近（它就是你要找的内容），但压不过同名会话的标题命中。
+		// #363 第二十轮 F1：snippet=4.5 插在 expert(4) 与 skill(5) 之间 ——
+		// 片段是内容资产，搜索意图强于技能列表但弱于专家直用。
 		expect(KIND_WEIGHT).toEqual({
 			action: 0,
 			settings: 1,
@@ -120,6 +122,7 @@ describe("KIND_WEIGHT —— 类别权重契约", () => {
 			hit: 2.5,
 			workspace: 3,
 			expert: 4,
+			snippet: 4.5,
 			skill: 5,
 			connector: 6,
 			automation: 7,
