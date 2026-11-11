@@ -67158,6 +67158,272 @@ function PermissionSection({ busy }) {
     ] })
   ] });
 }
+/*
+ * 确定性 hooks（设置 → 通用 → 权限之后）。
+ *
+ * 与「开局模板」同一套交互（列表 + 内联编辑 + 二次确认删除），因为它要解决的
+ * 是同一类问题：用户自己维护的一小组条目，误删不可逆。
+ *
+ * 两层的边界（PRD 决策）：
+ *   · 用户级 hooks —— 设置页可编辑、可试运行；始终生效。
+ *   · 工作区 hooks —— `.zerowork/hooks.json` 随项目走，**默认不执行**；
+ *     这里只读展示 + 信任开关（按绝对路径记在偏好里）。
+ *     不让设置页写工作区文件，是为了避免 UI 替用户写「可执行配置」这件事
+ *     再叠一层信任判断。
+ */
+const HOOK_EVENT_OPTIONS = [
+  { value: "PreToolUse", label: "工具调用前（可阻断）" },
+  { value: "PostToolUse", label: "工具调用后（只审计）" }
+];
+const HOOK_EVENT_LABELS = {
+  PreToolUse: "工具调用前",
+  PostToolUse: "工具调用后"
+};
+const HOOK_TIMEOUT_MIN = 1000;
+const HOOK_TIMEOUT_MAX = 30000;
+const HOOK_TIMEOUT_DEFAULT = 5000;
+function newHookId() {
+  const stamp = Date.now().toString(36).slice(-8);
+  const tail = Math.floor(Math.random() * 36 ** 3).toString(36).padStart(3, "0");
+  return `hook-${stamp}${tail}`;
+}
+function hookErrorText(e) {
+  return e instanceof Error ? e.message : String(e);
+}
+/** 试运行结果弹窗：载荷、退出码、stdout / stderr、耗时。 */
+function HookTestModal({ hook, result, error, onClose }) {
+  const closeRef = reactExports.useRef(null);
+  const cardRef = useModalFocus({ initialFocus: () => closeRef.current });
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const verdict = result === void 0 ? void 0 : result.verdict;
+  const verdictText = verdict === "allow" ? "通过（退出码 0）" : verdict === "deny" ? "拒绝（退出码 2）" : verdict === "fail" ? "失败（按 fail-closed 阻止）" : "";
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "modal-backdrop", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "hooks-test-card", role: "dialog", "aria-modal": "true", "aria-label": "Hook 试运行", ref: cardRef, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "hooks-test-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "试运行" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: hook.id }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", ref: closeRef, onClick: onClose, children: "关闭" })
+    ] }),
+    result === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在运行 hook…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `provider-tag${verdict === "allow" ? "" : " hooks-tag-warn"}`, children: verdictText }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "退出码" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name", children: result.exitCode === void 0 ? "—" : result.exitCode }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: `${result.durationMs}ms` }),
+        result.timedOut === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag hooks-tag-warn", children: "超时" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "载荷（stdin）" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "hooks-test-pre", children: JSON.stringify(result.payload, null, 2) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "stdout" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "hooks-test-pre", children: result.stdout === "" ? "（空）" : result.stdout }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "stderr" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "hooks-test-pre", children: result.stderr === "" ? "（空）" : result.stderr })
+    ] })
+  ] }) });
+}
+function HooksSection({ busy }) {
+  const [data, setData] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  const [draft, setDraft] = reactExports.useState(void 0);
+  const [confirming, setConfirming] = reactExports.useState(void 0);
+  const [saving, setSaving] = reactExports.useState(false);
+  const [testing, setTesting] = reactExports.useState(void 0);
+  const [testResult, setTestResult] = reactExports.useState(void 0);
+  const [testError, setTestError] = reactExports.useState(void 0);
+  const refresh = reactExports.useCallback(async () => {
+    try {
+      setData(await window.kami.getHooks());
+      setError(void 0);
+    } catch (e) {
+      setError(hookErrorText(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  const persist = (next) => {
+    setSaving(true);
+    setError(void 0);
+    return window.kami.setHooksUser(next).then(() => {
+      setDraft(void 0);
+      setConfirming(void 0);
+      return refresh();
+    }).catch((e) => setError(hookErrorText(e))).finally(() => setSaving(false));
+  };
+  const current = data?.user ?? [];
+  // 新增中的草稿不在 current 里，必须单独渲染在列表之后（否则点「新增」什么都不出现）。
+  const isNewDraft = draft !== void 0 && !current.some((item) => item.id === draft.id);
+  const saveDraft = () => {
+    if (draft === void 0) return;
+    const command = draft.command.trim();
+    if (command === "") return setError("命令不能为空");
+    const timeoutMs = Number(draft.timeoutMs);
+    if (!Number.isInteger(timeoutMs) || timeoutMs < HOOK_TIMEOUT_MIN || timeoutMs > HOOK_TIMEOUT_MAX) {
+      return setError(`超时必须是 ${HOOK_TIMEOUT_MIN}–${HOOK_TIMEOUT_MAX} 之间的整数毫秒`);
+    }
+    const matcher = draft.matcher.trim();
+    const next = current.some((item) => item.id === draft.id)
+      ? current.map((item) => item.id === draft.id ? { ...item, event: draft.event, matcher: matcher === "" ? "*" : matcher, command, timeoutMs } : item)
+      : [...current, { id: draft.id, event: draft.event, matcher: matcher === "" ? "*" : matcher, command, timeoutMs }];
+    void persist(next);
+  };
+  const runTest = (hook) => {
+    setTesting(hook);
+    setTestResult(void 0);
+    setTestError(void 0);
+    // 只传 id：命令由 daemon 从已保存的配置里取（试运行不是任意命令执行入口）。
+    void window.kami.testHook(hook.id).then((result) => setTestResult(result)).catch((e) => setTestError(hookErrorText(e)));
+  };
+  const toggleTrust = (next) => {
+    if (data === void 0) return;
+    setSaving(true);
+    setError(void 0);
+    void window.kami.setHooksTrusted(data.workspace.root, next).then(() => refresh()).catch((e) => setError(hookErrorText(e))).finally(() => setSaving(false));
+  };
+  const editor = draft === void 0 ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-editor", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-field", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "事件" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(SelectField, {
+        ariaLabel: "Hook 事件",
+        value: draft.event,
+        disabled: saving || busy === true,
+        options: HOOK_EVENT_OPTIONS,
+        onChange: (value) => setDraft({ ...draft, event: value })
+      })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "starter-field", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "工具匹配" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        className: "starter-input",
+        value: draft.matcher,
+        placeholder: "write、write* 或 *（全部）",
+        "aria-label": "Hook 工具匹配",
+        onChange: (e) => setDraft({ ...draft, matcher: e.currentTarget.value })
+      })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "starter-field", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "命令（stdin 收 JSON 载荷；退出码 0 放行 / 2 拒绝）" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", {
+        className: "starter-textarea",
+        value: draft.command,
+        rows: 3,
+        placeholder: "例如：node scripts/check-write.mjs",
+        "aria-label": "Hook 命令",
+        onChange: (e) => setDraft({ ...draft, command: e.currentTarget.value })
+      })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "starter-field", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "超时（毫秒）" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        className: "starter-input",
+        type: "number",
+        min: HOOK_TIMEOUT_MIN,
+        max: HOOK_TIMEOUT_MAX,
+        value: draft.timeoutMs,
+        "aria-label": "Hook 超时",
+        onChange: (e) => setDraft({ ...draft, timeoutMs: e.currentTarget.value })
+      })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-editor-actions", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", disabled: saving || busy === true, onClick: saveDraft, children: "保存 hook" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ghost-btn", onClick: () => { setDraft(void 0); setError(void 0); }, children: "取消" })
+    ] })
+  ] });
+  const workspace = data?.workspace;
+  const workspaceHooks = workspace?.hooks ?? [];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "Hooks" }) }),
+    data === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取 hooks 设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
+      data.userFatal !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: `用户级 hooks 配置无效，工具调用会被拒绝，直到修好为止：${data.userFatal}` }),
+      data.userErrors.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: `有 ${data.userErrors.length} 条用户级 hook 因格式非法被忽略：${data.userErrors.map((entry) => `第 ${entry.index + 1} 条：${entry.message}`).join("；")}` }),
+      current.length === 0 && draft === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hooks-empty", children: "还没有用户级 hook。加一条后，匹配到的工具调用会先经过它的判定。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "starter-list", children: current.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "starter-item", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: draft?.id === item.id ? "starter-row is-editing" : "starter-row", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row-main", title: item.command, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: `${HOOK_EVENT_LABELS[item.event] ?? item.event} · ${item.matcher ?? "*"} · 超时 ${item.timeoutMs}ms` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-prompt", children: item.command })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "starter-actions", children: confirming === item.id ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-confirm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-confirm-text", children: "删除这条 hook？" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action starter-action-danger", disabled: saving, onClick: () => void persist(current.filter((entry) => entry.id !== item.id)), children: "确认删除" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", onClick: () => setConfirming(void 0), children: "取消" })
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "starter-action", disabled: saving || busy === true, onClick: () => runTest(item), children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlay, { size: 12 }),
+              "试运行"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "starter-action", disabled: saving || busy === true, onClick: () => { setError(void 0); setConfirming(void 0); setDraft({ ...item, matcher: item.matcher ?? "*" }); }, children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(IconEdit, { size: 13 }),
+              "编辑"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "starter-action starter-action-danger", disabled: saving || busy === true, onClick: () => setConfirming(item.id), children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 13 }),
+              "删除"
+            ] })
+          ] }) })
+        ] }),
+        draft !== void 0 && draft.id === item.id ? editor : null
+      ] }, item.id)) }),
+      isNewDraft ? editor : null,
+      draft === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+        type: "button",
+        className: "starter-add",
+        disabled: saving || busy === true,
+        onClick: () => { setError(void 0); setConfirming(void 0); setDraft({ id: newHookId(), event: "PreToolUse", matcher: "*", command: "", timeoutMs: HOOK_TIMEOUT_DEFAULT }); },
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 14 }),
+          "新增 hook"
+        ]
+      }) : null,
+      workspace !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "工作区 hooks" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row hooks-workspace-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-name hooks-workspace-path", title: workspace.path, children: workspace.path }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag", children: !workspace.exists ? "未配置" : workspace.trusted ? "已信任" : "未信任" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+          workspace.exists && /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "mcp-switch", title: workspace.trusted ? "点击停止执行" : "点击信任并执行", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+              type: "checkbox",
+              checked: workspace.trusted,
+              disabled: saving || busy === true,
+              "aria-label": "信任此工作区的 hooks",
+              onChange: (e) => toggleTrust(e.currentTarget.checked)
+            }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "mcp-switch-thumb" }) })
+          ] })
+        ] }) }),
+        !workspace.exists ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "工作区里还没有 .zerowork/hooks.json。把文件放进这个路径后，回到设置页刷新即可看到；它默认不会执行。" }) : workspace.trusted ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "已信任：这个文件的 hooks 会与用户级一起生效；任一拒绝即终止工具调用。改动对新创建的会话与之后派生的子代理生效。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "未信任：这个文件不会执行（克隆仓库不等于执行它带的脚本）。信任后对新创建的会话与之后派生的子代理生效；此页只读展示它的内容。" }),
+        workspace.fatalMessage !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: `工作区 hooks 配置无效：${workspace.fatalMessage}` }),
+        workspace.errors.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: `有 ${workspace.errors.length} 条工作区 hook 因格式非法被忽略：${workspace.errors.map((entry) => `第 ${entry.index + 1} 条：${entry.message}`).join("；")}` }),
+        workspaceHooks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "starter-list", children: workspaceHooks.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { className: "starter-item", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row-main", title: item.command, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: `${HOOK_EVENT_LABELS[item.event] ?? item.event} · ${item.matcher ?? "*"} · 超时 ${item.timeoutMs}ms` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-prompt", children: item.command })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag", children: workspace.trusted ? "已启用" : "已跳过" })
+        ] }) }, item.id)) }),
+        workspace.exists && workspaceHooks.length === 0 && workspace.fatalMessage === void 0 && workspace.errors.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hooks-empty", children: "这个文件里没有 hook。" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（同样阻止调用）。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
+    ] }),
+    testing !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookTestModal, {
+      hook: testing,
+      result: testResult,
+      error: testError,
+      onClose: () => { setTesting(void 0); setTestResult(void 0); setTestError(void 0); }
+    })
+  ] });
+}
+
 function TeamSection({ busy }) {
   const [enabled, setEnabled] = reactExports.useState(void 0);
   const [loaded, setLoaded] = reactExports.useState(false);
@@ -67222,6 +67488,8 @@ function GeneralSection({ busy }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx(WebSearchSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(DefaultWorkspaceSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(PermissionSection, { busy }),
+    /* Hooks 紧跟权限：同属「边界」心智模型（PRD 决策：不新开一级导航）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(HooksSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(TeamSection, { busy })
   ] });
 }
@@ -69648,7 +69916,8 @@ const AUDIT_CATEGORY_LABELS = {
   sandbox: "沙箱",
   runtime: "运行时",
   audit: "审计管理",
-  file: "文件改动"
+  file: "文件改动",
+  hook: "Hooks"
 };
 const AUDIT_OUTCOME_LABELS = {
   blocked: "已拦截",
@@ -69656,9 +69925,10 @@ const AUDIT_OUTCOME_LABELS = {
   failed: "失败",
   disabled: "已禁用",
   cleared: "已清空",
-  restored: "已还原"
+  restored: "已还原",
+  skipped: "已跳过"
 };
-const AUDIT_CATEGORIES = ["command", "sandbox", "runtime", "audit", "file"];
+const AUDIT_CATEGORIES = ["command", "sandbox", "runtime", "audit", "file", "hook"];
 function pad2(n) {
   return n < 10 ? `0${n}` : `${n}`;
 }
