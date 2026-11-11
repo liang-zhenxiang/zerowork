@@ -107,6 +107,19 @@ import {
 	writeAuditRecord,
 } from "./audit.js";
 import { EventLog } from "./event-log.js";
+import {
+	assertHookConfig,
+	chooseWorkspaceRoot,
+	clip,
+	createPostToolUseHookExtension,
+	createPreToolUseHookExtension,
+	normalizeWorkspacePath,
+	payloadForPreToolUse,
+	resolveHookSet,
+	resolveSavedHook,
+	runHook,
+	workspaceHooksPath,
+} from "./hooks.js";
 /*
  * 模型对比的编排（一问多答）与「留为会话」的登记表 / 手术纯函数。顶层只做声明、
  * 跨模块的**使用**放进函数体 —— 本文件是 daemon 的枢纽，顶层求值顺序敏感
@@ -173,6 +186,7 @@ import {
 	isSkillEnabled,
 	isThemePreference,
 	isUpdateChannel,
+	readHooksConfig,
 	readPaletteMemory,
 	readPreferences,
 	validateProxyInput,
@@ -1236,6 +1250,54 @@ function watchIntentOf(toolName, input) {
   return { tool: toolName, kind: "write", ...(path === void 0 ? {} : { path }) };
 }
 
+/**
+ * 工作区 hooks 的查找根（**所有装配点共用这一处**）。
+ *
+ * 三条优先级见 hooks.js 的 chooseWorkspaceRoot：
+ *   1. worktree → 源仓库（`worktree.sourceCwd`）。worktree 路径每次都新，
+ *      「按路径信任」永远命中不了；用源仓库根，才能让用户在那个仓库上信任的
+ *      规则生效，也避免把另一个已信任工作区的规则套到无关项目上。
+ *   2. 临时任务 / 自动会话目录 → 生效工作区根。
+ *   3. 普通会话 → cwd。
+ *
+ * 子代理 / 团队成员必须拿到与主会话**同一个 root**（调用方显式传入），
+ * 否则会出现「主会话更严、委派更松」的旁路。
+ */
+function hooksRootFor(cwd, worktree) {
+  /*
+   * 显式传入的 worktree 若已带 sourceCwd（创建时）就直接用；否则从 cwd 现推
+   * （resume 的旧记录、子代理的 worktree cwd 都走这条）。读不到 `.git` 时
+   * sourceCwd 缺席，chooseWorkspaceRoot 回退到既有行为。
+   */
+  const info = worktree?.sourceCwd === void 0 ? worktreeInfoFromCwd(cwd) : worktree;
+  return chooseWorkspaceRoot({
+    cwd,
+    sourceCwd: info?.sourceCwd,
+    isTask: isTempCwd(cwd),
+    effectiveRoot: getEffectiveWorkspaceRoot()
+  });
+}
+
+/** 按已确定的 root 读一次 hooks 配置（会话创建 / 派生时调用一次）。 */
+function hookSetForRoot(root) {
+  const { config, trusted } = readHooksConfig();
+  return resolveHookSet({
+    user: config,
+    workspaceRoot: root,
+    trustedWorkspaceHooks: trusted
+  });
+}
+
+/**
+ * 一个会话的 hooks 配置快照（**创建时读一次**，按会话缓存）。
+ *
+ * 主会话在扩展创建时读；子代理 / 团队成员 / 定时任务在**派生时**读一次。
+ * 中途改设置不会影响已创建的会话 —— UI 文案按这个事实写。
+ */
+function hookSetForCwd(cwd, worktree) {
+  return hookSetForRoot(hooksRootFor(cwd, worktree));
+}
+
 function buildRunExtensions(deps, cwd, getHost2, watch) {
   /*
    * 值守边界（本任务自己声明的规矩）。**必须包在权限门之前** ——
@@ -1247,7 +1309,20 @@ function buildRunExtensions(deps, cwd, getHost2, watch) {
    * 于是老任务的行为与今天逐字段相同。
    */
   const boundary = watch === void 0 ? void 0 : boundaryFor(watch.policy);
-  const extensions = [];
+  /*
+   * 确定性 hooks 的 PreToolUse 闸门。**必须在值守边界与权限门之前** ——
+   * 它是用户的显式规则，拒绝即终局；无人值守任务更需要这条确定性拒绝。
+   * PostToolUse 注册在 tool_result 链的最后（spill 之后，见文件尾部）。
+   */
+  const hookSet = hookSetForCwd(cwd);
+  const extensions = [
+    createPreToolUseHookExtension({
+      cwd,
+      hookSet,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
+      onAudit: writeAuditRecord
+    })
+  ];
   if (watch !== void 0) {
     extensions.push(
       createWatchBoundary({
@@ -1317,6 +1392,17 @@ function buildRunExtensions(deps, cwd, getHost2, watch) {
      * 只有 read 例外，见 spill-hook 文件头。
      */
     spillExtensionFactory({ dir: getSpillsDir(cwd), report: deps.reportSpill }),
+    /*
+     * PostToolUse：**排在 spill 之后**（tool_result 是逐扩展链式的，
+     * 后一个看到的是前一个改过的 content —— 这里要的是模型最终看到的内容）。
+     * 只审计，不改变结果。
+     */
+    createPostToolUseHookExtension({
+      cwd,
+      hookSet,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
+      onAudit: writeAuditRecord
+    }),
     /*
      * 结构化提问的无人值守变体：craft 白名单含 questionnaire，run 会话
      * 必须注册同名工具（否则模型对着白名单调一个不存在的能力）；
@@ -2483,6 +2569,13 @@ const subagentRunner = createSubagentRunner({
   isOwnWorkspace: (dir) => isPathInside(getEffectiveWorkspaceRoot(), dir) || isPathInside(getConfigDir(), dir),
   getWebSearchConfig,
   /*
+   * 子代理 / 团队成员也必须装 PreToolUse hooks —— 否则模型把被主会话拒绝的
+   * 动作「委派」给子代理就绕过了用户的确定性规则（与权限门/沙箱同一条旁路纪律，
+   * 见 buildSubagentExtensions 里 powershell 那段注释）。
+   */
+  // 主会话把同一个 hooks root 传进来；缺省时按 cwd 自行推导（普通会话等价）。
+  hooksFor: (cwd, root) => hookSetForRoot(root ?? hooksRootFor(cwd)),
+  /*
    * 子代理审批的归属：subagentRunner 是进程级单例、无桶上下文，拿不到
    * 发起它的会话 id —— 传空串，渲染层把空串当「全局」（badge 不落任何行、
    * 弹窗全局），不推会误导归属的假 id。已知近似：子代理审批占少数，
@@ -2501,6 +2594,8 @@ const memberRunnerDeps = {
   isTempCwd,
   isOwnWorkspace: (dir) => isPathInside(getEffectiveWorkspaceRoot(), dir) || isPathInside(getConfigDir(), dir),
   getWebSearchConfig,
+  // 团队成员与子代理同一条分界：PreToolUse hooks 必须装，否则委派是旁路。
+  hooksFor: (cwd, root) => hookSetForRoot(root ?? hooksRootFor(cwd)),
   // 成员审批带自己的会话 id（批次 ⑦）：requestApproval 据此反查团队归属。
   requestApproval: (request, memberSessionId) => requestApproval(request, memberSessionId)
 };
@@ -2970,6 +3065,12 @@ async function createHost(bucket, sessionManager) {
     }
     return { ...started, jobId: registration.id };
   };
+  /*
+   * hooks 配置快照：**一次会话读一次**。Pre/Post 两个扩展共用同一份 ——
+   * 若各读一次，配置在这两次读之间被改（设置页保存）会让同一会话里
+   * 「拦住它的规则」与「记审计的规则」不是同一份，属于不可解释的行为。
+   */
+  const sessionHookSet = hookSetForCwd(cwd, bucket.worktree);
   const host = await SessionHost.create({
     catalog,
     modelKey,
@@ -3057,6 +3158,18 @@ async function createHost(bucket, sessionManager) {
     // （依赖方向是 extensions → core）。
     extensions: [
       /*
+       * 确定性 hooks 的 PreToolUse 闸门。**必须是数组第一条** ——
+       * pi 按注册顺序跑 tool_call 监听器，第一条 `{block:true}` 即终止；
+       * 排在权限门之前，hook 的拒绝才是终局（权限门/沙箱没有机会放行）。
+       * 配置在会话创建时读一次（按会话缓存）；设置页明确写了「对新会话生效」。
+       */
+      createPreToolUseHookExtension({
+        cwd,
+        hookSet: sessionHookSet,
+        getSessionId: () => bucket.sessionId,
+        onAudit: writeAuditRecord
+      }),
+      /*
        * 权限门：**所有会话全量装，含临时任务**。
        *
        * playground 时代曾有不装权限门的分支 —— 那时的安全前提是「不注册
@@ -3127,6 +3240,16 @@ async function createHost(bucket, sessionManager) {
        */
       createTeamOutputHook({
         composePending: () => takePendingTeamOutput(bucket.sessionId)
+      }),
+      /*
+       * PostToolUse：tool_result 链的**最后**（spill / 团队产出之后）。
+       * 只写审计、不改变结果；排最后才看到模型最终收到的那份内容。
+       */
+      createPostToolUseHookExtension({
+        cwd,
+        hookSet: sessionHookSet,
+        getSessionId: () => bucket.sessionId,
+        onAudit: writeAuditRecord
       }),
       /*
        * 项目信任：**所有会话都装**（与权限门同理）。
@@ -3389,7 +3512,8 @@ async function createHost(bucket, sessionManager) {
       	 * 换桶即新预算，同一只桶内不复位（会话切 cwd 不换桶）。
       	 */
       taskExtensionFactory({
-        runSubagent: (request) => subagentRunner.run({ ...request, cwd }),
+        // hooks root 与主会话**同一个**：否则子代理会变成「主会话更严、委派更松」的旁路。
+        runSubagent: (request) => subagentRunner.run({ ...request, cwd, hooksRoot: hooksRootFor(cwd, bucket.worktree) }),
         listAgents: () => resolveAgents(),
         checkBudget: () => {
           if (bucket.spawnBudgetRemaining <= 0) return false;
@@ -3427,7 +3551,15 @@ async function createHost(bucket, sessionManager) {
               }
               const handle = await spawnMember(
                 memberRunnerDeps,
-                { cwd, agent, memberName: member.name, task: member.task, ...member.model === void 0 ? {} : { modelKey: member.model } },
+                {
+                  cwd,
+                  // 与领导会话同一个 hooks root（worktree 会话用源仓库）。
+                  hooksRoot: hooksRootFor(cwd, bucket.worktree),
+                  agent,
+                  memberName: member.name,
+                  task: member.task,
+                  ...member.model === void 0 ? {} : { modelKey: member.model }
+                },
                 {
                   onProgress: (name, text, turnsDelta) => {
                     teamRegistry.recordProgress(leaderId, name, turnsDelta, text);
@@ -5637,6 +5769,95 @@ const handlers = {
       next.password = prev?.mode === "manual" ? prev.password ?? "" : "";
     }
     writePreferences({ ...readPreferences(), proxy: next });
+  },
+  /* ── 确定性 hooks（spec: deterministic-hooks） ────────────────── */
+  /*
+   * 设置页的读取口：用户级列表 + 当前工作区的只读视图。
+   * 工作区配置**即使未信任也解析出来展示** —— 用户需要先看见它、
+   * 再决定是否信任；静默隐藏会让「信任」这个开关无从判断。
+   */
+  [INVOKE.getHooks]: async () => {
+    const root = hooksRootFor(currentBucket.cwd, currentBucket.worktree);
+    const { config, trusted } = readHooksConfig();
+    const set = resolveHookSet({ user: config, workspaceRoot: root, trustedWorkspaceHooks: trusted });
+    return {
+      user: config.hooks,
+      userErrors: config.errors.map((entry) => ({ index: entry.index, message: entry.message })),
+      ...config.fatal ? { userFatal: config.fatalMessage } : {},
+      workspace: {
+        root,
+        path: workspaceHooksPath(root),
+        exists: set.workspace.exists,
+        trusted: set.workspace.trusted,
+        hooks: set.workspace.hooks,
+        errors: set.workspace.errors.map((entry) => ({ index: entry.index, message: entry.message })),
+        ...set.workspace.fatalMessage === void 0 ? {} : { fatalMessage: set.workspace.fatalMessage }
+      },
+      activeCount: set.hooks.length
+    };
+  },
+  // 写用户级 hooks：与读侧共用 assertHookConfig 的判据（写进去的必须能原样读回来）。
+  [INVOKE.setHooksUser]: async ([raw]) => {
+    const normalized = assertHookConfig(raw);
+    writePreferences({ ...readPreferences(), hooks: normalized });
+    return { hooks: normalized };
+  },
+  // 信任 / 取消信任工作区 hooks（按绝对路径记住）。默认不执行，必须显式打开。
+  [INVOKE.setHooksTrusted]: async ([cwd, trusted]) => {
+    if (typeof cwd !== "string" || cwd.trim() === "") {
+      throw new Error("需要指定工作区路径才能信任它的 hooks");
+    }
+    if (trusted !== true && trusted !== false) {
+      throw new Error("信任状态必须是布尔值");
+    }
+    const root = hooksRootFor(resolve(cwd));
+    const target = normalizeWorkspacePath(root);
+    const current = readPreferences().trustedWorkspaceHooks ?? [];
+    /*
+     * 新信任的放在**最前面**：读侧按 TRUSTED_WORKSPACES_MAX 截断时保留的是前
+     * N 条，追加在末尾的会被截掉 —— 那时用户点了「信任」，磁盘上也写了，
+     * 但它就是不生效。这类「信任了却没用」的静默失败最难排查，顺序上避开它。
+     */
+    const next = trusted
+      ? [target, ...current.filter((entry) => normalizeWorkspacePath(entry) !== target)]
+      : current.filter((entry) => normalizeWorkspacePath(entry) !== target);
+    writePreferences({ ...readPreferences(), trustedWorkspaceHooks: next });
+    return { trusted, root };
+  },
+  /*
+   * 试运行：真实起一次子进程。**这是唯一能看完整 stdout/stderr 的地方** ——
+   * 审计 detail 上限 240 字，承载不了全文（见 audit.js 的 clipAuditDetail）。
+   *
+   * **只接受已保存 hook 的 id**（纵深防御）：命令与事件由 daemon 从用户级配置里
+   * 取，渲染层传来的 command / event 一律忽略 —— 试运行不该成为「执行任意命令」
+   * 的第二条入口。伪造 id 之外的字段不会改变要跑的东西。
+   *
+   * 仍然留一条审计：这条通道会让 daemon 起子进程执行命令，是一条真实的命令
+   * 执行路径，不该是唯一没有痕迹的那条。detail 只写 hook id / 判定 / 耗时，
+   * **不写命令原文**（可能含路径与参数）。语义上它不是「工具门判定」，
+   * 所以文案以「试运行」开头，与 allowed/blocked 区分。
+   */
+  [INVOKE.testHook]: async ([input]) => {
+    // 只认已保存 hook 的 id；伪造的 command / event 连读都不读（纵深防御）。
+    const hook = resolveSavedHook(readHooksConfig().config, input);
+    const payload = payloadForPreToolUse({
+      toolName: "write",
+      input: { path: "示例.txt", content: "这是试运行载荷" },
+      // 试运行不要求会话已 adopt：空串在载荷里如实表示「还没有会话」。
+      sessionId: currentBucket.sessionId,
+      cwd: hooksRootFor(currentBucket.cwd, currentBucket.worktree)
+    });
+    const result = await runHook(hook, payload);
+    writeAuditRecord({
+      category: "hook",
+      outcome: result.verdict === "allow" ? "allowed" : "failed",
+      detail: clip(
+        `试运行 ${result.verdict === "allow" ? "放行" : result.verdict === "deny" ? "拒绝" : "失败"}` +
+          `（hook ${hook.id}，${result.durationMs}ms，` +
+          `${result.timedOut ? "超时" : result.exitCode === void 0 ? "无退出码" : `退出码 ${result.exitCode}`}）`
+      )
+    });
+    return { ...result, payload };
   },
   /* ── 外观主题 ─────────────────────────────────────────────────── */
   // 未配置回 light（不是 system）：存量用户升级后界面保持浅色不变，

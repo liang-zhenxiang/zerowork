@@ -36,7 +36,8 @@ const AUDIT_CATEGORY_LABELS = {
   sandbox: "沙箱",
   runtime: "运行时",
   audit: "审计管理",
-  file: "文件改动"
+  file: "文件改动",
+  hook: "Hooks"
 };
 
 const AUDIT_OUTCOME_LABELS = {
@@ -45,10 +46,11 @@ const AUDIT_OUTCOME_LABELS = {
   failed: "失败",
   disabled: "已禁用",
   cleared: "已清空",
-  restored: "已还原"
+  restored: "已还原",
+  skipped: "已跳过"
 };
 
-const AUDIT_CATEGORIES = ["command", "sandbox", "runtime", "audit", "file"];
+const AUDIT_CATEGORIES = ["command", "sandbox", "runtime", "audit", "file", "hook"];
 
 function isAuditCategory(value) {
   return typeof value === "string" && AUDIT_CATEGORIES.includes(value);
