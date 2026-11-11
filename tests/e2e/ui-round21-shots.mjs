@@ -1,5 +1,5 @@
 // 第二十一轮截图：5 张断言（skip link / 地标 / 焦点样式 / reduced-motion / 跳转目标）
-import { createHarness, waitUntil } from "./lib/harness.mjs";
+import { createHarness } from "./lib/harness.mjs";
 
 const h = createHarness({ name: "ui-round21-shots", shots: true });
 
