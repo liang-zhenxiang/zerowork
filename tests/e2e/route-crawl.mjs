@@ -113,79 +113,42 @@ const bandMean = (shot, from, to, xRange) => {
 	return sum / n;
 };
 
-/**
- * 主列之外的画布留白（换算成图片像素）。
- *
- * 优先取主列右侧的窗口留白；右侧太窄（窄窗）时取主列与外壳左缘之间的留白。
- * 两者都不足 20px 才退回历史比例 —— 回退是为了让极端窗口给出可读的失败信息，
- * 而不是在「没有画布可量」时静默量到卡片。
- */
-async function canvasStripX(shot) {
-	const g = await win.evaluate(() => {
-		const inner = document.querySelector(".home-inner");
-		const shell = document.querySelector(".app > main.home");
-		const r = inner?.getBoundingClientRect();
-		const s = shell?.getBoundingClientRect();
-		return {
-			winW: window.innerWidth,
-			innerLeft: r?.left,
-			innerRight: r?.right,
-			shellLeft: s?.left,
-			shellRight: s?.right
-		};
-	});
-	const scale = shot.img.width / g.winW;
-	// 首选：外壳右缘往里 12–26px 的那条竖带。外壳最后十几像素是圆角与窗口
-	// 边缘的过渡带（CI 1024×679 实测 x≥1012 亮度不再单调）；再往里是主列的
-	// padding，CI 实测 979..993 三段亮度 243.3 / 238.4 / 230.4 单调。
-	// 这比按 innerRight 推算稳：innerRight 是 padding 边缘，不同布局下它与
-	// 内容右缘的距离会变（2026-11-10 的两次 CI 红就出在这里）。
-	const shell0 = (g.shellRight ?? g.winW) - 26;
-	const shell1 = (g.shellRight ?? g.winW) - 12;
-	// 次选：主列与外壳之间的两条留白（兼容外壳右缘信息缺失或极窄窗口）。
-	const right0 = (g.innerRight ?? g.winW) + 8;
-	const right1 = (g.shellRight ?? g.winW) - 12;
-	const left0 = (g.shellLeft ?? 0) + 4;
-	const left1 = (g.innerLeft ?? g.winW) - 6;
-	let x0;
-	let x1;
-	let where;
-	if (g.shellRight !== undefined && shell1 - shell0 >= 8) {
-		x0 = shell0;
-		x1 = shell1;
-		where = "外壳右缘内侧留白";
-	} else if (right1 - right0 >= 8) {
-		x0 = right0;
-		x1 = right1;
-		where = "主列右侧留白";
-	} else if (left1 - left0 >= 8) {
-		x0 = left0;
-		x1 = left1;
-		where = "主列左侧留白";
-	} else {
-		x0 = g.winW * 0.95;
-		x1 = g.winW * 0.985;
-		where = "回退 95%–98.5%";
-	}
-	return {
-		x0: Math.round(x0 * scale),
-		x1: Math.round(x1 * scale),
-		where,
-		debug: `inner=${Math.round(g.innerLeft ?? -1)}..${Math.round(g.innerRight ?? -1)} shell=${Math.round(g.shellLeft ?? -1)}..${Math.round(g.shellRight ?? -1)} winW=${g.winW}`
-	};
-}
-
 // ══ ① 首页：光照方向必须单调 ══════════════════════════════════════
 await h.check("首页画布下半部分单调变暗（底光生效，越往下越沉）", async () => {
-	const shot = await h.shoot("00-home");
-	const strip = await canvasStripX(shot);
-	console.log(`    采样带：${strip.where} x=${strip.x0}..${strip.x1}（图片像素） ${strip.debug}`);
+	// 现场图（带内容）供人看；光照断言用**隐藏内容后的画布图**，与布局彻底解耦。
+	// 2026-11-11 第三次 CI 红：第二十轮改了首页布局，固定竖带又压到新内容。
+	// 隐藏 .home-inner 后，画布上只剩外壳底图（--canvas / 极光 / 底光），
+	// 从中心取样就不会再被任何卡片、按钮或 padding 影响。
+	await h.shoot("00-home");
+	const previous = await win.evaluate(() => {
+		const inner = document.querySelector(".home-inner");
+		if (inner === null) return null;
+		const prev = inner.style.visibility;
+		inner.style.visibility = "hidden";
+		return prev;
+	});
+	let canvas;
+	try {
+		canvas = await h.shoot("00-home-canvas", { assert: false });
+	} finally {
+		if (previous !== null) {
+			await win.evaluate((prev) => {
+				const inner = document.querySelector(".home-inner");
+				if (inner !== null) inner.style.visibility = prev;
+			}, previous);
+		}
+	}
+	const strip = {
+		x0: Math.round(canvas.img.width * 0.42),
+		x1: Math.round(canvas.img.width * 0.58)
+	};
+	console.log(`    画布采样带：x=${strip.x0}..${strip.x1}（内容已隐藏）`);
 	// 只验**下半部分**：顶部那两块是极光的青/靛，颜色本身就比白画布暗，
 	// 拿整页去验「越往上越亮」会被极光染色证伪 —— 那不是缺陷。
 	// 底光要证的是一件事：从页面中段往下，明度单向衰减。
-	const a = bandMean(shot, 0.50, 0.62, strip);
-	const b = bandMean(shot, 0.70, 0.82, strip);
-	const c = bandMean(shot, 0.88, 0.98, strip);
+	const a = bandMean(canvas, 0.50, 0.62, strip);
+	const b = bandMean(canvas, 0.70, 0.82, strip);
+	const c = bandMean(canvas, 0.88, 0.98, strip);
 	// a≥b 允许 3 个亮度单位的容差（2026-10-29 PR #298 首定 1；PR #301 CI 复测
 	// 出 b-a=+2.0 的翻转，仍是采样带蹭到内容的噪声而非渐变缺失——a-c≥2 的
 	// 趋势判据仍在，容差提到 3 覆盖 CI 字体渲染的 1-2 单位漂移）。
