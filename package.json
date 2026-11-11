@@ -81,6 +81,7 @@
     "check:resources": "node scripts/check-resources.mjs",
     "check:line-endings": "node scripts/check-line-endings.mjs",
     "check:unicode": "node scripts/check-unicode.mjs",
+    "check:conflict-markers": "node scripts/check-conflict-markers.mjs",
     "check:renderer-assets": "node scripts/check-renderer-assets.mjs",
     "check:release-notes": "node scripts/check-release-notes.mjs",
     "check:package-size": "node scripts/check-package-size.mjs",
