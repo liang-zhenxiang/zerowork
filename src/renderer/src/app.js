@@ -18238,7 +18238,7 @@ function HomeView({
     composerRef.current?.setText(prompt2);
     setChipPanelOpen(false);
   };
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("main", { className: "home", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-inner", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("main", { id: "main-content", className: "home", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-inner", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "home-main", children: [
         /* #292 F3/F9/F5/F10：专注复盘小结、夜间护眼提醒、升级彩带（全部自包含）。 */
         /* @__PURE__ */ jsxRuntimeExports.jsx(FocusRecap, {}),
@@ -36730,6 +36730,7 @@ function ChatView({
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "main",
     {
+      id: "main-content",
       className: "chat",
       ref: chatRef,
       style: {
@@ -68718,6 +68719,7 @@ function CustomForm({ initial, busy, onCancel, onSave }) {
                   className: "model-num",
                   type: "number",
                   value: model.contextWindow,
+                  "aria-label": "上下文窗口",
                   title: "上下文窗口",
                   onChange: (e) => patchModel(index2, { contextWindow: Number(e.target.value) })
                 }
@@ -68741,6 +68743,7 @@ function CustomForm({ initial, busy, onCancel, onSave }) {
                   className: "model-num",
                   type: "number",
                   value: model.maxTokens,
+                  "aria-label": "单次最大输出",
                   title: "单次最大输出（写长文件会受此限制，太小会让模型写长内容时被截断）",
                   onChange: (e) => patchModel(index2, { maxTokens: Number(e.target.value) })
                 }
@@ -69129,6 +69132,7 @@ function AddModelDialog({ providers, onClose, onSaved }) {
                     className: "model-num",
                     type: "number",
                     value: model.contextWindow,
+                    "aria-label": "上下文窗口",
                     title: "上下文窗口",
                     onChange: (e) => setModel((m) => ({ ...m, contextWindow: Number(e.target.value) }))
                   }
@@ -69139,6 +69143,7 @@ function AddModelDialog({ providers, onClose, onSaved }) {
                     className: "model-num",
                     type: "number",
                     value: model.maxTokens,
+                    "aria-label": "单次最大输出",
                     title: "单次最大输出",
                     onChange: (e) => setModel((m) => ({ ...m, maxTokens: Number(e.target.value) }))
                   }
