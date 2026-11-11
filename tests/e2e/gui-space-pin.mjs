@@ -74,11 +74,43 @@ async function sendInSpace(space, text) {
 		{ timeout: 15_000, interval: 200, desc: "发送后输入框清空" },
 	);
 	const before = mock.requests.length;
-	await waitUntil(() => mock.requests.length >= before + 1, {
-		timeout: 40_000,
-		interval: 500,
-		desc: `mock 收到「${text}」的请求`,
-	});
+	try {
+		await waitUntil(() => mock.requests.length >= before + 1, {
+			// CI 负载下，切工作空间后新会话的首个请求偶发超过 40s；本地 3/3 通过。
+			// 先放宽到 60s，真正红时下面的现场快照负责给出原因。
+			timeout: 60_000,
+			interval: 500,
+			desc: `mock 收到「${text}」的请求`,
+		});
+	} catch (error) {
+		// 超时现场：消息是否提交、界面有没有报错、会话状态一起带出来 ——
+		// 下一次 CI 红时不必再靠重跑猜（2026-11-11 两次 main 红都只能重跑）。
+		const ui = await win.evaluate(() => {
+			const box = document.querySelector('[aria-label="消息输入框"]');
+			return {
+				toasts: [...document.querySelectorAll(".toast-text")]
+					.map((el) => (el.textContent ?? "").trim())
+					.filter(Boolean),
+				composer:
+					box === null
+						? null
+						: {
+								value: box.value,
+								disabled: box.disabled,
+								placeholder: box.getAttribute("placeholder"),
+							},
+				tail: (document.body.innerText ?? "").slice(-500),
+			};
+		});
+		const session = await win.evaluate(async () => {
+			const snap = await globalThis.kami.snapshot().catch(() => void 0);
+			return snap?.state ?? null;
+		});
+		throw new Error(
+			`${error.message}\n现场：${JSON.stringify({ before, after: mock.requests.length, ui, session })}`,
+			{ cause: error },
+		);
+	}
 	await waitUntil(
 		() => win.evaluate(() => document.body.innerText.includes("mock 模型的回复")),
 		{ timeout: 30_000, interval: 500, desc: "回复渲染出来" },
