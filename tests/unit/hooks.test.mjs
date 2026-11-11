@@ -19,7 +19,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -193,8 +193,11 @@ describe("assertHookConfig —— 写侧严格", () => {
 
 describe("信任名单规范化", () => {
 	it("丢弃非字符串并去重", () => {
+		// 规范形是「绝对 + 小写（Windows）」：/a 在 Windows 上会被解析到当前盘符，
+		// 所以期望值必须按平台算，不能写死 POSIX 路径。
+		const shape = (p) => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
 		const parsed = normalizeTrustedWorkspaceHooks(["/a", "/a", 1, "", "/b"]);
-		expect(parsed).toEqual(["/a", "/b"]);
+		expect(parsed).toEqual([shape("/a"), shape("/b")]);
 	});
 	it("非数组整块忽略", () => {
 		expect(normalizeTrustedWorkspaceHooks("nope")).toBeUndefined();

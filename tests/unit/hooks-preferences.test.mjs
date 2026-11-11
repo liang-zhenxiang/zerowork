@@ -16,7 +16,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { getConfigDir } from "../../src/main/daemon/config-paths.js";
 import {
@@ -68,9 +68,12 @@ describe("hooks 的读写往返", () => {
 	});
 
 	it("信任名单写入后能读回", () => {
+		// 读写两侧都走 normalizeWorkspacePath（Windows 解析到盘符并小写），
+		// 期望值按平台算，不写死 POSIX 路径。
+		const trusted = process.platform === "win32" ? resolve("/w/a").toLowerCase() : resolve("/w/a");
 		writePreferences({ ...readPreferences(), trustedWorkspaceHooks: ["/w/a"] });
-		expect(readPreferences().trustedWorkspaceHooks).toEqual(["/w/a"]);
-		expect(readHooksConfig().trusted).toEqual(["/w/a"]);
+		expect(readPreferences().trustedWorkspaceHooks).toEqual([trusted]);
+		expect(readHooksConfig().trusted).toEqual([trusted]);
 	});
 });
 
