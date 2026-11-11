@@ -39,6 +39,10 @@ import {
 	presetIdFor,
 } from "./permissions.js";
 import { normalizeStarters } from "../../shared/starter-prompts.js";
+import {
+	normalizeTrustedWorkspaceHooks,
+	parseHookConfig,
+} from "./hooks.js";
 
 const SKILL_NAME_PATTERN = /^[a-z0-9-]+$/;
 
@@ -281,6 +285,30 @@ function readPreferences() {
     const subagentTimeoutMs = optPositiveInt("subagentTimeoutMs");
     const skillOverrides = readSkillOverrides(rec["skillOverrides"]);
     const runtimes = readRuntimePrefs(rec["runtimes"]);
+    /*
+     * 确定性 hooks（spec: deterministic-hooks）。
+     *
+     * 读侧白名单必须显式列出这两个键 —— 历史上 updateChannel 只在写侧加了、
+     * 读侧漏了，导致「写进去永远读不回」。读侧宽容（单条坏数据只丢该条），
+     * 真正的写侧判据在 hooks.js 的 assertHookConfig。
+     */
+    const hooksRaw = rec["hooks"];
+    const hooksConfig = parseHookConfig(hooksRaw, "用户级");
+    /*
+     * 读不回来的**原样保留**，不要改写成「只剩能读的那几条」。
+     *
+     * readPreferences 的返回值会被 `writePreferences({ ...readPreferences(), xxx })`
+     * 整份写回：若在这里把 fatal / 有错的配置折成空，任何一个**与 hooks 无关**的
+     * 设置项保存（改主题、改代理……）都会把用户的 hooks 键悄悄抹掉 ——
+     * 损坏的配置就此消失，而「配置损坏 → PreToolUse 全部拒绝」这条 fail-closed
+     * 也随之中止。那是「静默降级」，不是「读侧宽容」。
+     */
+    const hooks = hooksConfig.fatal || hooksConfig.errors.length > 0
+      ? hooksRaw
+      : hooksConfig.hooks.length > 0
+        ? hooksConfig.hooks
+        : void 0;
+    const trustedWorkspaceHooks = normalizeTrustedWorkspaceHooks(rec["trustedWorkspaceHooks"]);
     return {
       activeModelKey: key,
       ...webSearch !== void 0 && webSearch.providerId !== "" ? { webSearch } : {},
@@ -305,7 +333,9 @@ function readPreferences() {
       ...skillOverrides !== void 0 ? { skillOverrides } : {},
       ...runtimes !== void 0 ? { runtimes } : {},
       ...proxy !== void 0 ? { proxy } : {},
-      ...starterPrompts.length > 0 ? { starterPrompts } : {}
+      ...starterPrompts.length > 0 ? { starterPrompts } : {},
+      ...hooks !== void 0 ? { hooks } : {},
+      ...trustedWorkspaceHooks !== void 0 ? { trustedWorkspaceHooks } : {}
     };
   } catch {
     return EMPTY;
@@ -374,6 +404,73 @@ function readRuntimePrefs(value) {
   };
 }
 
+/**
+ * 读 hooks 的**完整诊断视图**（含结构性错误与逐条错误）。
+ *
+ * 为什么不复用 readPreferences 的返回值：readPreferences 是「读改写」的底座，
+ * 它的返回值会被原样写回 preferences.json —— 往里塞 `hooksConfigErrors`
+ * 这类派生字段等于把诊断信息持久化。这里单独读一次原文，返回
+ * `{ config, trusted }`，只供 hooks 的读取方与设置页使用。
+ *
+ * 整个偏好文件不是合法 JSON 时，`config.fatal` 为真 —— 这是 PreToolUse
+ * fail-closed 的来源，不能像 readPreferences 那样静默退回 EMPTY。
+ *
+ * 读取失败同理：`ENOENT` 是「还没配置过」（空配置是对的），其它错误
+ * （权限、IO）意味着**用户可能配了规则但读不到** —— 这时静默当成「没有配置」
+ * 就是让工具调用在没有规则的情况下继续跑。按 fail-closed 处理并说明原因。
+ */
+function readHooksConfig() {
+  let raw;
+  try {
+    raw = readFileSync(getPath$1(), "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return {
+        config: { hooks: [], errors: [], fatal: false, fatalMessage: void 0 },
+        trusted: void 0,
+      };
+    }
+    return {
+      config: {
+        hooks: [],
+        errors: [],
+        fatal: true,
+        fatalMessage: `读取偏好文件失败：${error instanceof Error ? error.message : String(error)}`,
+      },
+      trusted: void 0,
+    };
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return {
+      config: {
+        hooks: [],
+        errors: [],
+        fatal: true,
+        fatalMessage: `偏好文件不是合法 JSON：${error instanceof Error ? error.message : String(error)}`,
+      },
+      trusted: void 0,
+    };
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return {
+      config: {
+        hooks: [],
+        errors: [],
+        fatal: true,
+        fatalMessage: "偏好文件的顶层必须是对象",
+      },
+      trusted: void 0,
+    };
+  }
+  return {
+    config: parseHookConfig(parsed["hooks"], "用户级"),
+    trusted: normalizeTrustedWorkspaceHooks(parsed["trustedWorkspaceHooks"]),
+  };
+}
+
 function writePreferences(preferences) {
   const path = getPath$1();
   mkdirSync(dirname(path), { recursive: true });
@@ -403,6 +500,7 @@ export {
 	isThemePreference,
 	isUpdateChannel,
 	readPaletteMemory,
+	readHooksConfig,
 	readPermissions,
 	readPreferences,
 	readRuntimePrefs,

@@ -18952,7 +18952,93 @@ html[data-sidebar-density='compact'] .space-group-header {
 	}
 }
 
-/* ── §45 第二十一轮十连（#370 可访问性与包容） ─────────────────────── */
+/* ── §45 确定性 hooks（设置 → 通用 → Hooks） ──────────────────────── */
+/* 试运行弹窗：内容比表单卡更宽（载荷 JSON + 两路输出），但沿用同一套
+   遮罩、圆角、阴影与入场动效档位（不新造视觉值）。 */
+.hooks-test-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	width: 100%;
+	max-width: 720px;
+	max-height: 100%;
+	overflow-y: auto;
+	padding: var(--space-5);
+	background: var(--bg);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-lg);
+	animation: pop-layer-in var(--dur-base) var(--ease-out);
+	transform-origin: center;
+}
+
+.hooks-test-head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+}
+
+.hooks-test-head h2 {
+	margin: 0;
+	font-size: var(--text-body);
+	font-weight: 600;
+}
+
+/* 输出区：等宽字体、保留空白、长行折行 —— 与 .permission-details 同一条口径。 */
+.hooks-test-pre {
+	margin: 0;
+	padding: var(--space-3) var(--space-4);
+	max-height: 220px;
+	overflow: auto;
+	background: var(--bg-sidebar);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	font-size: var(--text-meta);
+	font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+/* 工作区路径可能很长：允许它收缩并省略，状态标签与开关不跟着被挤扁。 */
+.hooks-workspace-path {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.hooks-workspace-row .provider-tag {
+	flex: 0 0 auto;
+}
+
+/* 空态：与 .starter-empty 同档位，但**独立类名** —— 设置页里两个分组
+   同屏渲染，复用同一个类名会让别处的「空态计数」断言多算一个。 */
+.hooks-empty {
+	padding: var(--space-3) 0;
+	color: var(--text-secondary);
+	font-size: var(--text-list);
+}
+
+/* 非「通过」的判定用状态色；「通过」保持默认标签色（状态色只表状态）。 */
+.hooks-tag-warn {
+	color: var(--danger);
+	border-color: color-mix(in srgb, var(--danger) 32%, var(--border));
+}
+
+@media (max-width: 899px) {
+	.hooks-test-card {
+		max-width: 100%;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.hooks-test-card {
+		animation: none;
+	}
+}
+
+/* ── §46 第二十一轮十连（#370 可访问性与包容） ─────────────────────── */
 /* F2 跳到主内容：视觉隐藏、聚焦即现（WCAG 2.4.1 Bypass Blocks）。 */
 .skip-link {
 	position: absolute;

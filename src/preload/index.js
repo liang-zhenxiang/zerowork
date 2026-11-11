@@ -400,6 +400,11 @@ const INVOKE = {
   setUpdateChannel: "settings:set-update-channel",
   getProxy: "settings:get-proxy",
   setProxy: "settings:set-proxy",
+  /* ── 确定性 hooks（与 shared/ipc.js 手工同步的副本表） ─────────── */
+  getHooks: "hooks:get",
+  setHooksUser: "hooks:set-user",
+  setHooksTrusted: "hooks:set-trusted",
+  testHook: "hooks:test",
   appVersion: "app:get-version",
   getUpdateState: "updates:get-state",
   checkForUpdates: "updates:check",
@@ -787,6 +792,11 @@ const bridge = {
   setUpdateChannel: (channel) => ipcRenderer.invoke(INVOKE.setUpdateChannel, channel),
   getProxy: () => ipcRenderer.invoke(INVOKE.getProxy),
   setProxy: (input) => ipcRenderer.invoke(INVOKE.setProxy, input),
+  getHooks: () => ipcRenderer.invoke(INVOKE.getHooks),
+  setHooksUser: (hooks) => ipcRenderer.invoke(INVOKE.setHooksUser, hooks),
+  setHooksTrusted: (cwd, trusted) => ipcRenderer.invoke(INVOKE.setHooksTrusted, cwd, trusted),
+  // 只传 id：命令由 daemon 从已保存的配置里取，渲染层无法指定要跑什么。
+  testHook: (id) => ipcRenderer.invoke(INVOKE.testHook, id),
   getUpdateState: () => ipcRenderer.invoke(INVOKE.getUpdateState),
   /*
    * 版本号是**同步**取值（不是 invoke）：侧栏品牌行在首帧就渲染，

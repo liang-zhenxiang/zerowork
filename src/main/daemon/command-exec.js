@@ -76,6 +76,10 @@ import {
 } from "./session-view.js";
 import { SessionHost } from "./session-host.js";
 import {
+	createPostToolUseHookExtension,
+	createPreToolUseHookExtension,
+} from "./hooks.js";
+import {
 	readMemberTranscriptView,
 	sanitizeSubagentOutput,
 } from "./mailbox.js";
@@ -1974,7 +1978,7 @@ function createSubagentRunner(deps) {
   };
   const activeHosts = /* @__PURE__ */ new Set();
   async function runOne(input) {
-    const { agent, task, cwd } = input;
+    const { agent, task, cwd, hooksRoot } = input;
     const catalog = await deps.getCatalog();
     let modelKey;
     if (agent.model !== void 0) {
@@ -2030,7 +2034,7 @@ function createSubagentRunner(deps) {
         // undefined 传给 pi（pi 走自己的 medium 默认链）。
         thinkingLevel: deps.getThinkingLevel(),
         toolsOverride: agent.tools,
-        extensions: buildSubagentExtensions(deps, agent, cwd, () => host)
+        extensions: buildSubagentExtensions(deps, agent, cwd, () => host, hooksRoot)
       });
       host.markSubagentRun(agent.name);
       activeHosts.add(host);
@@ -2101,8 +2105,32 @@ function partialDiagnosis(reason, lastText, turns) {
 ${partial}`;
 }
 
-function buildSubagentExtensions(deps, agent, cwd, getHost2) {
+function buildSubagentExtensions(deps, agent, cwd, getHost2, hooksRoot) {
+  /*
+   * 确定性 hooks 的配置快照（创建时读一次）。deps 没给时**不装**而不是装一个
+   * 空壳：空壳会在每个工具结果上多跑一层监听器，却永远不会命中任何规则。
+   *
+   * PreToolUse 必须是第一条（权限门之前）；PostToolUse 排在 spill 之后 ——
+   * 见两处插入点的注释。
+   */
+  // hooksRoot 由主会话显式传入（worktree → 源仓库）；缺省时由 hooksFor 按 cwd 推导。
+  const hookSet = deps.hooksFor?.(cwd, hooksRoot);
+  const hookExtensions = hookSet === void 0 ? {} : {
+    pre: createPreToolUseHookExtension({
+      cwd,
+      hookSet,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
+      onAudit: writeAuditRecord
+    }),
+    post: createPostToolUseHookExtension({
+      cwd,
+      hookSet,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
+      onAudit: writeAuditRecord
+    })
+  };
   return [
+    ...(hookExtensions.pre === void 0 ? [] : [hookExtensions.pre]),
     createPermissionGate({
       paths: {
         workspaceDir: cwd,
@@ -2165,6 +2193,11 @@ function buildSubagentExtensions(deps, agent, cwd, getHost2) {
      * （core/spill.ts 的响亮失败），只是不进事件日志。
      */
     spillExtensionFactory({ dir: getSpillsDir(cwd) }),
+    /*
+     * PostToolUse：排在 spill 之后（tool_result 逐扩展链式，后一个看到的
+     * 是前一个改过的 content）。只审计、不改变结果。
+     */
+    ...(hookExtensions.post === void 0 ? [] : [hookExtensions.post]),
     /*
      * shell 的用户在场变体：三道防线与主会话**完全一致**
      * （危险命令检查器 + 权限门 + 沙箱）。worker 的 frontmatter 含 powershell，
@@ -2272,7 +2305,7 @@ function roundFinishFor(args) {
 }
 
 async function spawnMember(deps, input, hooks) {
-  const { agent, cwd, memberName } = input;
+  const { agent, cwd, memberName, hooksRoot } = input;
   const catalog = await deps.getCatalog();
   const explicit = input.modelKey ?? agent.model;
   const modelKey = explicit ?? deps.getModelKey();
@@ -2339,13 +2372,16 @@ async function spawnMember(deps, input, hooks) {
         isTempCwd: deps.isTempCwd,
         isOwnWorkspace: deps.isOwnWorkspace,
         getWebSearchConfig: deps.getWebSearchConfig,
+        // PreToolUse hooks 与子代理同一套：漏了它就是「委派绕过用户规则」。
+        hooksFor: deps.hooksFor,
         // 审批带成员会话归属（批次 ⑦）：装配层只认单参，包一层把成员自己的
         // sessionId 补上（宿主建成前是空串，daemon 侧按「无归属」处理）。
         requestApproval: (request) => deps.requestApproval(request, sessionIdRef.current)
       },
       agent,
       cwd,
-      () => host
+      () => host,
+      hooksRoot
     )
   });
   host.markTeamMemberRun(memberName);

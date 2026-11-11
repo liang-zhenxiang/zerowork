@@ -488,6 +488,25 @@ const INVOKE = {
    * password 缺省表示「保持不变」，空串表示「清除」。
    */
   setProxy: "settings:set-proxy",
+  /* ── 确定性 hooks（spec: deterministic-hooks） ────────────────── */
+  /**
+   * 读 hooks 配置：用户级列表 + 当前工作区的只读视图（路径 / 是否存在 / 是否信任）。
+   * 工作区 hooks 未信任时也在返回值里（只读展示），但不会执行。
+   */
+  getHooks: "hooks:get",
+  /**
+   * 写用户级 hooks。daemon 用 assertHookConfig 校验（与读侧共用一份判据），
+   * 非法值一律抛可诊断错误 —— 写进去的必须能原样读回来。
+   */
+  setHooksUser: "hooks:set-user",
+  /** 信任 / 取消信任某个工作区（按绝对路径记住）。工作区 hooks 默认不执行。 */
+  setHooksTrusted: "hooks:set-trusted",
+  /**
+   * 试运行一条**已保存**的 hook（只传 id）：daemon 从用户级配置里取出那条命令，
+   * 渲染层传来的 command / event 一律忽略 —— 试运行不该成为「执行任意命令」的
+   * 第二条入口。返回载荷、退出码、stdout/stderr 与耗时；这是看完整输出的唯一入口。
+   */
+  testHook: "hooks:test",
   /**
    * 应用版本号（`app.getVersion()`）。**同步通道**（preload 用 sendSync 取值）——
    * 侧栏品牌行是同步渲染的，异步取会先显示错误值再跳变。见 preload 的用法注释。

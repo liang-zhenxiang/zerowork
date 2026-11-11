@@ -355,6 +355,35 @@ async function getBranchList(cwd) {
   return { isGitRepo: true, branches, currentBranch };
 }
 
+/**
+ * worktree 的**源仓库**根。
+ *
+ * 为什么需要它：hooks 的查找根必须是「用户信任过的那个仓库」，而 worktree
+ * 每次都是新路径（按路径信任永远命中不了）。worktree 的 `.git` 是一个文件，
+ * 内容是 `gitdir: <源仓库>/.git/worktrees/<id>` —— 从这一行就能反推出源仓库。
+ *
+ * 读不到（目录已被清理、不是标准 git worktree）就返回 undefined，由调用方
+ * 回退到既有行为。**不抛错**：这是尽力而为的推断，不是硬依赖。
+ */
+function worktreeSourceCwd(worktreePath) {
+  try {
+    const raw = readFileSync(join(worktreePath, ".git"), "utf8");
+    const match = /^gitdir:\s*(.+)$/m.exec(raw);
+    if (match === null) return void 0;
+    let gitDir = match[1].trim();
+    if (gitDir === "") return void 0;
+    if (!isAbsolute(gitDir)) gitDir = resolve(worktreePath, gitDir);
+    // 统一成正斜杠再找标记，避免 Windows 的 `\` 与 git 写出的 `/` 混用。
+    const slashed = gitDir.replace(/\\/g, "/");
+    const marker = "/.git/worktrees/";
+    const at = slashed.lastIndexOf(marker);
+    if (at <= 0) return void 0;
+    return normalize$1(slashed.slice(0, at));
+  } catch {
+    return void 0;
+  }
+}
+
 function worktreeInfoFromCwd(cwd) {
   if (!isWorktreePath(cwd)) return void 0;
   const root = normalize$1(getWorktreeRoot()).replace(/\\/g, "/").replace(/\/+$/, "");
@@ -363,7 +392,12 @@ function worktreeInfoFromCwd(cwd) {
   if (parts.length !== 2) return void 0;
   const branchId = parts[1];
   if (branchId === void 0 || branchId === "") return void 0;
-  return { worktreePath: cwd, taskBranch: taskBranchFromBranchId(branchId) };
+  const sourceCwd = worktreeSourceCwd(cwd);
+  return {
+    worktreePath: cwd,
+    taskBranch: taskBranchFromBranchId(branchId),
+    ...sourceCwd === void 0 ? {} : { sourceCwd }
+  };
 }
 
 function isWorktreePath(cwd) {

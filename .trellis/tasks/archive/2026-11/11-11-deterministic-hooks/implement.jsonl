@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/11-11-deterministic-hooks/research/integration-map.md","reason":"工具链路/权限门/生命周期/审计/设置页/测试的集成点与行号"}
+{"file":".trellis/spec/daemon/index.md","reason":"daemon 模块/子进程/配置存储/校验惯例"}
+{"file":".trellis/spec/shared/index.md","reason":"IPC 通道与 preload 契约"}
+{"file":".trellis/spec/renderer/index.md","reason":"设置页组件与 token 纪律"}
+{"file":".trellis/spec/testing/index.md","reason":"单测/GUI 分层、等待纪律、环境陷阱"}
