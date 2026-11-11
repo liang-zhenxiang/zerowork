@@ -1,0 +1,2 @@
+{"file":".trellis/spec/testing/index.md","reason":"验收：测试必须可证伪、GUI 真实启动"}
+{"file":"SECURITY.md","reason":"新增本地代码执行入口，需同步威胁模型"}
