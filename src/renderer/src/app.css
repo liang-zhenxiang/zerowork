@@ -19071,8 +19071,8 @@ html[data-sidebar-density='compact'] .space-group-header {
    none 后回落到静态样式，与终态一致或近似，无视觉断裂）。 */
 @media (prefers-reduced-motion: reduce) {
 	*, *::before, *::after {
-		animation-duration: 0.01ms !important;
+		animation-duration: 0s !important;
 		animation-iteration-count: 1 !important;
-		transition-duration: 0.01ms !important;
+		transition-duration: 0s !important;
 	}
 }
