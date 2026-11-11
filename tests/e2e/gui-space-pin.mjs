@@ -47,8 +47,32 @@ async function sendInSpace(space, text) {
 	);
 	const box = win.locator('[aria-label="消息输入框"]');
 	await box.waitFor({ state: "visible", timeout: 30_000 });
+	// 输入框在会话未就绪时是 disabled、placeholder 为「正在准备…」；此时
+	// fill/Enter 可能落空，mock 永远收不到请求（2026-11-10 CI 实测：第二条
+	// 消息等 40s 超时）。先等它真的可输入，再填、再确认值已进 React state。
+	await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const el = document.querySelector('[aria-label="消息输入框"]');
+				if (el === null || el.disabled) return false;
+				const placeholder = el.getAttribute("placeholder") ?? "";
+				return !placeholder.includes("正在准备");
+			}),
+		{ timeout: 30_000, interval: 300, desc: "消息输入框就绪" },
+	);
 	await box.fill(text);
+	await waitUntil(
+		() =>
+			win.evaluate((value) => document.querySelector('[aria-label="消息输入框"]')?.value === value, text),
+		{ timeout: 10_000, interval: 200, desc: "输入框拿到要发送的文本" },
+	);
 	await box.press("Enter");
+	// 提交成功的可见信号：草稿被清空。等到它再等 mock，避免把「Enter 没被
+	// Composer 接住」误报成「mock 没收到」。
+	await waitUntil(
+		() => win.evaluate(() => (document.querySelector('[aria-label="消息输入框"]')?.value ?? "") === ""),
+		{ timeout: 15_000, interval: 200, desc: "发送后输入框清空" },
+	);
 	const before = mock.requests.length;
 	await waitUntil(() => mock.requests.length >= before + 1, {
 		timeout: 40_000,
