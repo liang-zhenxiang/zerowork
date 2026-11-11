@@ -531,7 +531,9 @@
 	--text: #000000;                  /* 主文：正文、标题、按钮主文字 */
 	--text-secondary: rgba(0, 0, 0, 0.5); /* 次文：辅助信息、次要按钮、meta 行（吸收原 0.7 档：
 	                                     首页 pills、能力 chip、案例标题这些 0.7 的引用点） */
-	--text-faint: rgba(0, 0, 0, 0.3); /* 弱文：禁用态文字、禁用态占位符、最弱图标。
+	--text-faint: rgba(0, 0, 0, 0.42); /* 弱文：meta/提示/hover 弱化文字（#370 F4 对比体检：
+	                                   0.3 在白底上仅 2.4:1，提到 0.42 ≈ 3.3:1 达到 WCAG
+	                                   大文本与次要信息线；层级仍明显弱于 secondary 0.5）。
 	                                     文字第四档 faint（black-30，--cb-question-floating-text-faint），
 	                                     原先只为问卷浮层禁用态圆形按钮的图标色而补。
 	                                     【2026-09-18 订正】原注释把「占位符」笼统算在本档，
@@ -585,6 +587,8 @@
 	                        接线前踩过的坑：`.markdown a` 与 `.view-switcher-check` 已引用本变量，
 	                        但当时的定义块里没有它——`var()` 解析失败回退到继承色，markdown 链接
 	                        与正文同色，只有 hover 下划线可辨。现为唯一真源，不会再出现该现象。 */
+	--accent-contrast: #ffffff; /* accent 之上的文字色（#370 第二十一轮 F4：此前从未定义） */
+	--accent-contrast-strong-bg: #ffffff; /* 覆盖块的 accent 为深色系时白字 */
 	--brand: #00c29a;    /* 品牌绿：仅状态点/品牌位点缀，不进常规组件 */
 
 	/* ── 遮罩（1 档）────────────────────────────────────────────────── */
@@ -735,6 +739,7 @@
 	--primary-text: #ffffff;
 
 	--accent: #0f766e;        /* 链接/可点标识：白底 5.4:1 */
+	--accent-contrast: #ffffff; /* 暗色默认 accent 深青，白字对比充足 */
 	--brand: #14b8a6;
 	--signal: #ea580c;        /* 唯一暖色信号，只做点缀（AI 火花） */
 	--violet: #6366f1;
@@ -854,7 +859,7 @@
 
 	--text: rgba(255, 255, 255, 0.92);
 	--text-secondary: rgba(255, 255, 255, 0.55);
-	--text-faint: rgba(255, 255, 255, 0.35);
+	--text-faint: rgba(255, 255, 255, 0.45); /* #370 F4 对比体检：暗色底上 0.35 仅 ~2.5:1，提至 0.45 */
 
 	--bg: #1c1c1e;
 	--bg-sidebar: #141416;
@@ -877,6 +882,7 @@
 	--danger: #ff6b6c;
 	--ok: #32d74b;
 	--warning: #e8a13a;
+	--accent-contrast: #0a1220; /* 此主题 accent 亮蓝，需深字 */
 	--accent: #4c9fe0;
 	--brand: #00c29a;
 
@@ -912,7 +918,8 @@
 
 	--text: #eaf0f8;
 	--text-secondary: rgba(234, 240, 248, 0.6);
-	--text-faint: rgba(234, 240, 248, 0.34);
+	--accent-contrast-strong-bg: #0a1220; /* 暗色覆盖块 accent 为亮色系时深字 */
+	--text-faint: rgba(234, 240, 248, 0.45); /* #370 F4 对比体检 */
 
 	--bg: #070b14;
 	--bg-sidebar: rgba(12, 18, 30, 0.55);
@@ -926,6 +933,7 @@
 	--primary-hover: #2dd4bf;
 	--primary-active: #0f766e;
 	--primary-text: #04121a;
+	--accent-contrast: #0a1220; /* 此主题 accent 亮青，需深字 */
 
 	--accent: #5eead4;
 	--brand: #2dd4bf;
@@ -15186,6 +15194,8 @@ html[data-focus="on"] .app> :not(.titlebar):not(.sidebar):not(button) {
 
 html[data-palette='dusk'] {
 	--accent: var(--preset-dusk-1);
+	--accent-contrast: var(--accent-contrast-strong-bg);
+	--accent-contrast: var(--accent-contrast-strong-bg);
 	--brand: var(--preset-dusk-1);
 	--ring: var(--preset-dusk-2);
 	--aurora-1: color-mix(in srgb, var(--preset-dusk-1) 13%, transparent);
@@ -15195,6 +15205,8 @@ html[data-palette='dusk'] {
 
 html[data-palette='sunset'] {
 	--accent: var(--preset-sunset-1);
+	--accent-contrast: var(--accent-contrast-strong-bg);
+	--accent-contrast: var(--accent-contrast-strong-bg);
 	--brand: var(--preset-sunset-2);
 	--ring: var(--preset-sunset-2);
 	--aurora-1: color-mix(in srgb, var(--preset-sunset-2) 14%, transparent);
@@ -15204,6 +15216,8 @@ html[data-palette='sunset'] {
 
 html[data-palette='forest'] {
 	--accent: var(--preset-forest-1);
+	--accent-contrast: var(--accent-contrast-strong-bg);
+	--accent-contrast: var(--accent-contrast-strong-bg);
 	--brand: var(--preset-forest-2);
 	--ring: var(--preset-forest-2);
 	--aurora-1: color-mix(in srgb, var(--preset-forest-2) 13%, transparent);
@@ -15213,6 +15227,8 @@ html[data-palette='forest'] {
 
 html[data-palette='graphite'] {
 	--accent: var(--preset-graphite-1);
+	--accent-contrast: var(--accent-contrast-strong-bg);
+	--accent-contrast: var(--accent-contrast-strong-bg);
 	--brand: var(--preset-graphite-2);
 	--ring: var(--preset-graphite-2);
 	--aurora-1: color-mix(in srgb, var(--preset-graphite-1) 16%, transparent);
@@ -17917,13 +17933,13 @@ mark.find-hit {
 }
 /* F1 强调色覆盖：data-accent 只覆盖 --accent/--ring 两点（比配色预设轻一档）。
    派生色 hover/soft 用 color-mix，避免每个色值手写三份。 */
-html[data-accent='ocean'] { --accent: var(--accent-choice-ocean); }
-html[data-accent='iris'] { --accent: var(--accent-choice-iris); }
-html[data-accent='charm'] { --accent: var(--accent-choice-charm); }
-html[data-accent='amber'] { --accent: var(--accent-choice-amber); }
-html[data-accent='flame'] { --accent: var(--accent-choice-flame); }
-html[data-accent='forest'] { --accent: var(--accent-choice-forest); }
-html[data-accent='graphite'] { --accent: var(--accent-choice-graphite); }
+html[data-accent='ocean'] { --accent: var(--accent-choice-ocean); --accent-contrast: var(--accent-contrast-strong-bg); }
+html[data-accent='iris'] { --accent: var(--accent-choice-iris); --accent-contrast: var(--accent-contrast-strong-bg); }
+html[data-accent='charm'] { --accent: var(--accent-choice-charm); --accent-contrast: var(--accent-contrast-strong-bg); }
+html[data-accent='amber'] { --accent: var(--accent-choice-amber); --accent-contrast: var(--accent-contrast-strong-bg); }
+html[data-accent='flame'] { --accent: var(--accent-choice-flame); --accent-contrast: var(--accent-contrast-strong-bg); }
+html[data-accent='forest'] { --accent: var(--accent-choice-forest); --accent-contrast: var(--accent-contrast-strong-bg); }
+html[data-accent='graphite'] { --accent: var(--accent-choice-graphite); --accent-contrast: var(--accent-contrast-strong-bg); }
 @media (prefers-reduced-motion: reduce) {
 	.accent-swatch {
 		transition: none;
@@ -18933,5 +18949,44 @@ html[data-sidebar-density='compact'] .space-group-header {
 @media (prefers-reduced-motion: reduce) {
 	.merge-preview-item {
 		transition: none;
+	}
+}
+
+/* ── §45 第二十一轮十连（#370 可访问性与包容） ─────────────────────── */
+/* F2 跳到主内容：视觉隐藏、聚焦即现（WCAG 2.4.1 Bypass Blocks）。 */
+.skip-link {
+	position: absolute;
+	left: -9999px;
+	top: 0;
+	z-index: 999;
+	background: var(--accent);
+	color: var(--accent-contrast);
+	padding: var(--space-2) var(--space-4);
+	border-radius: 0 0 var(--radius-md) 0;
+	font-size: var(--text-sm);
+	text-decoration: none;
+}
+.skip-link:focus-visible {
+	left: 0;
+}
+/* F9 焦点可见统一：键盘导航一律 2px accent 外圈（§22 已有基础，此处统一加粗
+   并保证在深浅主题下都有 3:1 与背景的对比）。 :focus-visible 只对键盘聚焦生效，
+   鼠标点击不受影响。 */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+/* F10 局部语言标注辅助：代码块/等宽内容默认继承 lang，无需额外；此处仅为
+   未来局部 lang 切换预留的样式钩子（无样式负担）。 */
+
+/* F5 动效偏好深审计（#370）：34 个 animation 名逐一核对，凡未在既有
+   reduced-motion 块出现的在此统一关停。装饰性/位移/闪烁动画在「减少动效」
+   下一律 animation: none——元素直接以终态呈现（关键帧的 to 帧多为 opacity:1，
+   none 后回落到静态样式，与终态一致或近似，无视觉断裂）。 */
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
 	}
 }

@@ -14,6 +14,9 @@
 		<link rel="stylesheet" href="./src/katex.css" />
 	</head>
 	<body>
+		<!-- #370 第二十一轮 F2：跳到主内容。Tab 首个到达（视觉隐藏，聚焦显现），
+		     让键盘/读屏用户跳过侧栏导航直达内容区。目标 #main-content 由 App 结构标注。 -->
+		<a class="skip-link" href="#main-content">跳到主内容</a>
 		<!-- 启动品牌帧（issue #331 F5）：React 挂载前的静态层，避免白屏期。
 		     样式内联（此时 app.css 已加载，但选择器挂 .splash-brand 亦可）；
 		     app.js 首帧渲染后移除本层（见 app.js 移除逻辑）。 -->
