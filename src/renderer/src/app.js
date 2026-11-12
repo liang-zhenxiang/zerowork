@@ -13640,6 +13640,8 @@ function Sidebar({
   }, []);
   /* #363 第二十轮 F9：合并预览浮层开关。 */
   const [mergePreviewOpen, setMergePreviewOpen] = reactExports.useState(false);
+  /* #379 F4：最近一次用户手势滚动的时间戳（wheel/touch）。 */
+  const sidebarUserScrollRef = reactExports.useRef(0);
   /* #300 F6：批量归档多选。Set 存 path；⌘点任务行切换选中并进入多选态；
    * Esc 或清空退出。批量动作直接循环 archiveTask（IPC 幂等、量小）。 */
   /* round15 F4：任务行拖拽排序。拖起的 path 放 dragRef，落到另一行时按
@@ -14921,11 +14923,20 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         !planningCollapsed && PLANNED_NAV_ITEMS.map(renderNavItem)
       ] })
     ] }),
+    /* #379 第二���二轮 F4：滚到近底部自动翻页。仅响应**用户手势滚动**
+       （wheel/touchstart 后 3s 内）——程序化 scrollIntoView（既有 e2e 的
+       菜单定位、focus 管理都会用）不触发翻页，避免放宽窗口破坏「折叠到
+       N 行」的契约（session-pin ⑤④⑦ 在 CI 矮视口实测撞过）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
       className: "sidebar-scroll",
+      onWheel: () => {
+        sidebarUserScrollRef.current = Date.now();
+      },
+      onTouchStart: () => {
+        sidebarUserScrollRef.current = Date.now();
+      },
       onScroll: (event) => {
-        /* #379 第二十二轮 F4：滚到近底部自动翻页——「查看更多/显示更多」
-           不再要求一次点击，长列表顺滑到底。 */
+        if (Date.now() - sidebarUserScrollRef.current > 3000) return;
         const el = event.currentTarget;
         if (el.scrollHeight - el.scrollTop - el.clientHeight > 120) return;
         if (hiddenTaskCount > 0) setTasksExpanded(true);
