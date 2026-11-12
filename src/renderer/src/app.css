@@ -14084,14 +14084,18 @@ select:focus-visible,
 	}
 }
 
+/* #379 第二十二轮 F7 GPU 化：box-shadow 逐帧重绘改「常驻 shadow + opacity 呼吸」
+   （opacity 是合成层属性，动画不触发布局/重绘）。视觉近似原 3px↔6px 呼吸。 */
 @keyframes home-eyebrow-pulse {
 	0%,
 	100% {
 		box-shadow: 0 0 0 3px var(--ring-soft);
+		opacity: 1;
 	}
 
 	50% {
 		box-shadow: 0 0 0 6px var(--halo-d);
+		opacity: 0.82;
 	}
 }
 
@@ -15720,9 +15724,17 @@ html[data-palette='graphite'] {
 .composer-card:focus-within::after {
 	animation-duration: 2.6s;
 }
+/* #379 第二十二轮 F7：inset shadow 呼吸叠 opacity 合成——重绘区域从整条
+   composer 收窄到 alpha 混合，动画帧成本更低。 */
 @keyframes composer-breathe {
-	0%, 100% { box-shadow: inset 0 0 10px color-mix(in oklab, var(--accent) 8%, transparent); }
-	50% { box-shadow: inset 0 0 22px color-mix(in oklab, var(--accent) 18%, transparent); }
+	0%, 100% {
+		box-shadow: inset 0 0 10px color-mix(in oklab, var(--accent) 8%, transparent);
+		opacity: 1;
+	}
+	50% {
+		box-shadow: inset 0 0 22px color-mix(in oklab, var(--accent) 18%, transparent);
+		opacity: 0.94;
+	}
 }
 @media (prefers-reduced-motion: reduce) {
 	.composer-card::after { animation: none; }
@@ -19132,4 +19144,11 @@ html[data-sidebar-density='compact'] .space-group-header {
 		white-space: normal;
 		overflow-wrap: anywhere;
 	}
+}
+
+/* F6 大 markdown 截断条：截断提示与「渲染完整内容」按钮 */
+.md-truncated-bar {
+	padding: var(--space-2) var(--space-4);
+	border-top: 1px dashed var(--border);
+	text-align: center;
 }
