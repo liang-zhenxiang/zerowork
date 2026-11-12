@@ -19076,3 +19076,60 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition-duration: 0s !important;
 	}
 }
+
+/* ── §47 hooks 生命周期事件（#373） ───────────────────────────────── */
+/* 只补「没有现成类名」的三处：编辑区提示行、最近运行列表、试运行弹窗的说明行。
+   颜色 / 间距 / 圆角全部走既有 token，不新增视觉值；无动画，故不需要
+   单独的 reduced-motion 块（§46 的全局关停已覆盖）。 */
+.hooks-lifecycle-hint {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	overflow-wrap: anywhere;
+}
+
+/* 弹窗里的说明行：复用 .settings-foot 的字号与颜色，但要压掉它 24px 的段距
+   （弹窗内部由 flex gap 管间距）。 */
+.hooks-test-note {
+	margin: 0;
+}
+
+/* 最近运行：一行一条。detail 优先省略（完整文本在 title 里），
+   窄窗下改为折行 —— 详情里是「试运行 放行（hook …，12ms，退出码 0）」
+   这类短句，折行比横向挤压可读。 */
+.hooks-runs {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.hooks-run {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	min-width: 0;
+}
+
+.hooks-run .provider-tag {
+	flex: 0 0 auto;
+}
+
+.hooks-run-detail {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+@media (max-width: 899px) {
+	.hooks-run-detail {
+		white-space: normal;
+		overflow-wrap: anywhere;
+	}
+}

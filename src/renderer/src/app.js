@@ -67174,12 +67174,37 @@ function PermissionSection({ busy }) {
  */
 const HOOK_EVENT_OPTIONS = [
   { value: "PreToolUse", label: "工具调用前（可阻断）" },
-  { value: "PostToolUse", label: "工具调用后（只审计）" }
+  { value: "PostToolUse", label: "工具调用后（只审计）" },
+  { value: "SessionStart", label: "会话开始（SessionStart）" },
+  { value: "UserPromptSubmit", label: "发送消息前（UserPromptSubmit）" },
+  { value: "Stop", label: "一轮结束（Stop）" }
 ];
 const HOOK_EVENT_LABELS = {
   PreToolUse: "工具调用前",
-  PostToolUse: "工具调用后"
+  PostToolUse: "工具调用后",
+  SessionStart: "会话开始",
+  UserPromptSubmit: "发送消息前",
+  Stop: "一轮结束"
 };
+/*
+ * 生命周期事件没有工具名可比：daemon 保存时只接受缺省 / "" / "*"，写工具名会被拒绝。
+ * 这里镜像同一张表（判据的单一事实源在 hooks.js），用于禁用输入框、给提示，
+ * 以及保存时**省略 matcher 字段** —— 不写 "*"，因为 "匹配一切" 不是这里的语义。
+ */
+const HOOK_LIFECYCLE_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "Stop"]);
+/* 只有 PreToolUse 能真的拦下调用（与 hooks.js 的 BLOCKING_EVENTS 一致）。 */
+const HOOK_BLOCKING_EVENTS = new Set(["PreToolUse"]);
+/*
+ * 审计记录里 hook 的四种结论；文案与审计页（AUDIT_OUTCOME_LABELS）保持同一口径。
+ * `blocked` 只来自工具事件（PreToolUse 的拒绝），出现在「最近运行」里时不能显示成
+ * 英文原文 —— 那一列是中文界面里唯一会露出原始取值的地方。
+ */
+const HOOK_RUN_OUTCOME_LABELS = { allowed: "已放行", blocked: "已拦截", failed: "失败", skipped: "已跳过" };
+/* 列表行标题：生命周期事件不显示 matcher —— 它没有工具名，写 "*" 会读成「匹配一切」。 */
+function hookRowTitle(item) {
+  const label = HOOK_EVENT_LABELS[item.event] ?? item.event;
+  return HOOK_LIFECYCLE_EVENTS.has(item.event) ? `${label} · 超时 ${item.timeoutMs}ms` : `${label} · ${item.matcher ?? "*"} · 超时 ${item.timeoutMs}ms`;
+}
 const HOOK_TIMEOUT_MIN = 1000;
 const HOOK_TIMEOUT_MAX = 30000;
 const HOOK_TIMEOUT_DEFAULT = 5000;
@@ -67206,11 +67231,16 @@ function HookTestModal({ hook, result, error, onClose }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const verdict = result === void 0 ? void 0 : result.verdict;
-  const verdictText = verdict === "allow" ? "通过（退出码 0）" : verdict === "deny" ? "拒绝（退出码 2）" : verdict === "fail" ? "失败（按 fail-closed 阻止）" : "";
+  /*
+   * 文案必须按事件区分：生命周期事件里退出码 2 只是「脚本说了不」，会话照常继续。
+   * 沿用工具事件那两句（「按 fail-closed 阻止」）会让用户以为消息真的被拦下了。
+   */
+  const blockable = HOOK_BLOCKING_EVENTS.has(hook.event);
+  const verdictText = verdict === "allow" ? "通过（退出码 0）" : verdict === "deny" ? blockable ? "拒绝（退出码 2）" : "拒绝（退出码 2，未阻断）" : verdict === "fail" ? blockable ? "失败（按 fail-closed 阻止）" : "失败（未阻断）" : "";
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "modal-backdrop", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "hooks-test-card", role: "dialog", "aria-modal": "true", "aria-label": "Hook 试运行", ref: cardRef, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "hooks-test-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "试运行" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: hook.id }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: `${HOOK_EVENT_LABELS[hook.event] ?? hook.event} · ${hook.id}` }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", ref: closeRef, onClick: onClose, children: "关闭" })
     ] }),
@@ -67222,6 +67252,7 @@ function HookTestModal({ hook, result, error, onClose }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: `${result.durationMs}ms` }),
         result.timedOut === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag hooks-tag-warn", children: "超时" })
       ] }),
+      !blockable && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot hooks-test-note", children: "这类事件不参与判定：退出码只记入审计（未阻断），不会拦下消息或一轮对话；输出也不会进入提示词。" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "载荷（stdin）" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "hooks-test-pre", children: JSON.stringify(result.payload, null, 2) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "stdout" }),
@@ -67272,9 +67303,16 @@ function HooksSection({ busy }) {
       return setError(`超时必须是 ${HOOK_TIMEOUT_MIN}–${HOOK_TIMEOUT_MAX} 之间的整数毫秒`);
     }
     const matcher = draft.matcher.trim();
-    const next = current.some((item) => item.id === draft.id)
-      ? current.map((item) => item.id === draft.id ? { ...item, event: draft.event, matcher: matcher === "" ? "*" : matcher, command, timeoutMs } : item)
-      : [...current, { id: draft.id, event: draft.event, matcher: matcher === "" ? "*" : matcher, command, timeoutMs }];
+    /*
+     * 生命周期事件没有工具名：**不写 matcher 字段**（也不是写 "*" —— 写侧不该替用户
+     * 制造一个「匹配一切」的概念；daemon 的 normalizeHook 接受缺省，写工具名会拒绝）。
+     * 工具事件沿用原有规范化：空 → "*"。
+     */
+    const entry = { id: draft.id, event: draft.event, command, timeoutMs };
+    if (!HOOK_LIFECYCLE_EVENTS.has(draft.event)) {
+      entry.matcher = matcher === "" ? "*" : matcher;
+    }
+    const next = current.some((item) => item.id === draft.id) ? current.map((item) => item.id === draft.id ? entry : item) : [...current, entry];
     void persist(next);
   };
   const runTest = (hook) => {
@@ -67282,7 +67320,11 @@ function HooksSection({ busy }) {
     setTestResult(void 0);
     setTestError(void 0);
     // 只传 id：命令由 daemon 从已保存的配置里取（试运行不是任意命令执行入口）。
-    void window.kami.testHook(hook.id).then((result) => setTestResult(result)).catch((e) => setTestError(hookErrorText(e)));
+    void window.kami.testHook(hook.id).then((result) => {
+      setTestResult(result);
+      // 试运行会写一条 hook 审计：刷新一次，让「最近运行」当场反映它（不必重开设置页）。
+      void refresh();
+    }).catch((e) => setTestError(hookErrorText(e)));
   };
   const toggleTrust = (next) => {
     if (data === void 0) return;
@@ -67305,14 +67347,16 @@ function HooksSection({ busy }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "工具匹配" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
         className: "starter-input",
-        value: draft.matcher,
-        placeholder: "write、write* 或 *（全部）",
+        value: HOOK_LIFECYCLE_EVENTS.has(draft.event) ? "" : draft.matcher,
+        placeholder: HOOK_LIFECYCLE_EVENTS.has(draft.event) ? "该事件没有工具名" : "write、write* 或 *（全部）",
+        disabled: HOOK_LIFECYCLE_EVENTS.has(draft.event),
         "aria-label": "Hook 工具匹配",
         onChange: (e) => setDraft({ ...draft, matcher: e.currentTarget.value })
       })
     ] }),
+    HOOK_LIFECYCLE_EVENTS.has(draft.event) ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hooks-lifecycle-hint", children: "该事件没有工具名，匹配留空（*）。" }) : null,
     /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "starter-field", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: "命令（stdin 收 JSON 载荷；退出码 0 放行 / 2 拒绝）" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-label", children: HOOK_LIFECYCLE_EVENTS.has(draft.event) ? "命令（stdin 收 JSON 载荷；退出码只记入审计，不阻断）" : "命令（stdin 收 JSON 载荷；退出码 0 放行 / 2 拒绝）" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("textarea", {
         className: "starter-textarea",
         value: draft.command,
@@ -67341,6 +67385,7 @@ function HooksSection({ busy }) {
   ] });
   const workspace = data?.workspace;
   const workspaceHooks = workspace?.hooks ?? [];
+  const recentRuns = data?.recentRuns ?? [];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "Hooks" }) }),
     data === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取 hooks 设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
@@ -67350,7 +67395,7 @@ function HooksSection({ busy }) {
       current.length === 0 && draft === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hooks-empty", children: "还没有用户级 hook。加一条后，匹配到的工具调用会先经过它的判定。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "starter-list", children: current.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "starter-item", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: draft?.id === item.id ? "starter-row is-editing" : "starter-row", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row-main", title: item.command, children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: `${HOOK_EVENT_LABELS[item.event] ?? item.event} · ${item.matcher ?? "*"} · 超时 ${item.timeoutMs}ms` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: hookRowTitle(item) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-prompt", children: item.command })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "starter-actions", children: confirming === item.id ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-confirm", children: [
@@ -67407,14 +67452,25 @@ function HooksSection({ busy }) {
         workspace.errors.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: `有 ${workspace.errors.length} 条工作区 hook 因格式非法被忽略：${workspace.errors.map((entry) => `第 ${entry.index + 1} 条：${entry.message}`).join("；")}` }),
         workspaceHooks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "starter-list", children: workspaceHooks.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { className: "starter-item", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-row-main", title: item.command, children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: `${HOOK_EVENT_LABELS[item.event] ?? item.event} · ${item.matcher ?? "*"} · 超时 ${item.timeoutMs}ms` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-title", children: hookRowTitle(item) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "starter-row-prompt", children: item.command })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag", children: workspace.trusted ? "已启用" : "已跳过" })
         ] }) }, item.id)) }),
         workspace.exists && workspaceHooks.length === 0 && workspace.fatalMessage === void 0 && workspace.errors.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hooks-empty", children: "这个文件里没有 hook。" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（同样阻止调用）。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "最近运行" }),
+      /*
+       * 最近运行的单一事实源是审计（daemon 从 `hook` 类别取最后 5 条），这里只做投影。
+       * 展示按「最新在前」：daemon 给的是时间升序，反转的是副本，不改它的返回值。
+       */
+      recentRuns.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hooks-empty", children: "还没有运行记录。hook 被触发或试运行后，这里会显示最近 5 次的时间与结论。" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "hooks-runs", children: [...recentRuns].reverse().map((run, index2) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "hooks-run", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: run.outcome === "failed" ? "provider-tag hooks-tag-warn" : "provider-tag", children: HOOK_RUN_OUTCOME_LABELS[run.outcome] ?? run.outcome }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hooks-run-detail", title: run.detail, children: run.detail }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: formatAuditTime(run.ts) })
+      ] }, `${run.ts}-${index2}`)) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（工具事件下同样阻止调用；会话开始 / 发送消息前 / 一轮结束这三类只记审计，不阻断）。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。hook 的输出只进审计与试运行，不会进入提示词。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
     ] }),
     testing !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookTestModal, {
       hook: testing,

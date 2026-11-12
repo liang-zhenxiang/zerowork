@@ -49,6 +49,19 @@ writeFileSync(
 );
 const hookCommand = `"${process.execPath}" "${fixture}"`;
 
+/**
+ * 拒绝脚本：退出码 2。生命周期事件用它验证**文案**——
+ * 「拒绝」在工具事件里等于拦下调用，在这里只说明这个脚本不同意（未阻断）。
+ * 用 exit 0 的脚本测不出这句话，因为「通过」的事件无关分支。
+ */
+const denyFixture = join(h.WORKSPACE_DIR, "gui-hook-deny.mjs");
+writeFileSync(
+	denyFixture,
+	`let input = "";\nprocess.stdin.setEncoding("utf8");\nprocess.stdin.on("data", (c) => (input += c));\nprocess.stdin.on("end", () => {\n  console.error("DENY:" + input.length);\n  process.exit(2);\n});\n`,
+	"utf8",
+);
+const denyCommand = `"${process.execPath}" "${denyFixture}"`;
+
 await h.launch();
 const win = h.window();
 
@@ -135,6 +148,77 @@ async function settleAnimations(selector) {
 		if (node === null) return;
 		await Promise.all([...node.getAnimations({ subtree: true })].map((animation) => animation.finished));
 	}, selector);
+}
+
+/** 在 hook 编辑区的「事件」下拉里按文案选中一个事件。 */
+async function pickHookEvent(text) {
+	await win.evaluate(() => {
+		const trigger = document.querySelector('[aria-label="Hook 事件"]');
+		if (trigger === null) throw new Error("编辑区里没有事件下拉");
+		trigger.click();
+	});
+	await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), {
+		timeout: 10_000,
+		desc: "hook 事件下拉展开",
+	});
+	await win.evaluate((needle) => {
+		const listbox = document.querySelector('[role="listbox"]');
+		const hit = [...listbox.querySelectorAll('[role="option"]')].find((node) => (node.textContent ?? "").includes(needle));
+		if (hit === undefined) throw new Error(`事件下拉里没有「${needle}」`);
+		hit.click();
+	}, text);
+}
+
+/** matcher 输入框的当前状态（未渲染时返回 null）。 */
+const matcherState = () =>
+	win.evaluate(() => {
+		const node = document.querySelector('[aria-label="Hook 工具匹配"]');
+		return node === null ? null : { disabled: node.disabled, value: node.value };
+	});
+
+/** 等 matcher 被禁用（事件切换是异步渲染，别点完立刻断言）。 */
+async function waitMatcherDisabled() {
+	return waitUntil(
+		async () => {
+			const state = await matcherState();
+			return state !== null && state.disabled ? state : null;
+		},
+		{ timeout: 10_000, interval: 200, desc: "命中生命周期事件后 matcher 输入框被禁用" },
+	);
+}
+
+/** 用户级列表里标题含 titleText 的那一行，点它的 actionText 按钮。 */
+async function clickHookAction(titleText, actionText) {
+	await win.evaluate(
+		({ title, action }) => {
+			const section = [...document.querySelectorAll(".settings-section")].find(
+				(node) => node.querySelector("h2")?.textContent.trim() === "Hooks",
+			);
+			if (section === undefined) throw new Error("找不到 Hooks 分组");
+			const row = [...section.querySelectorAll(".starter-item")].find((node) =>
+				(node.querySelector(".starter-row-title")?.textContent ?? "").includes(title),
+			);
+			if (row === undefined) throw new Error(`没有标题含「${title}」的 hook 行`);
+			const button = [...row.querySelectorAll(".starter-action")].find(
+				(node) => !node.disabled && (node.textContent ?? "").includes(action),
+			);
+			if (button === undefined) throw new Error(`「${title}」行没有可点的「${action}」按钮`);
+			button.click();
+		},
+		{ title: titleText, action: actionText },
+	);
+}
+
+/** 把「最近运行」滚进视口中央：截图要拍到这一块（分组很长，滚到顶端只会拍到列表）。 */
+async function scrollToRecentRuns() {
+	await win.evaluate(() => {
+		const section = [...document.querySelectorAll(".settings-section")].find(
+			(node) => node.querySelector("h2")?.textContent.trim() === "Hooks",
+		);
+		const heading = [...(section?.querySelectorAll("h3") ?? [])].find((node) => node.textContent.trim() === "最近运行");
+		heading?.scrollIntoView({ block: "center" });
+	});
+	await h.waitForSettled();
 }
 
 await h.check("设置 → 通用 → Hooks：空列表有可读空态，工作区文件默认未信任", async () => {
@@ -282,6 +366,162 @@ await h.check("试运行留下 hook 审计（这条通道不该无痕）", async
 	);
 });
 
+await h.check("事件下拉出现三个生命周期事件；选中后 matcher 被禁用并给出说明", async () => {
+	await clickInSection("Hooks", ".starter-add");
+	await waitUntil(() => sectionReady("Hooks", ".starter-editor"), { timeout: 10_000, desc: "hook 编辑区展开" });
+	await win.evaluate(() => {
+		const trigger = document.querySelector('[aria-label="Hook 事件"]');
+		if (trigger === null) throw new Error("编辑区里没有事件下拉");
+		trigger.click();
+	});
+	await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), {
+		timeout: 10_000,
+		desc: "hook 事件下拉展开",
+	});
+	const labels = await win.evaluate(() =>
+		[...document.querySelectorAll('[role="listbox"] [role="option"]')].map((node) => node.textContent ?? ""),
+	);
+	for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+		assert.ok(
+			labels.some((text) => text.includes(event)),
+			`事件下拉里应有 ${event}：${labels.join(" / ")}`,
+		);
+	}
+	await win.evaluate(() => {
+		const hit = [...document.querySelectorAll('[role="listbox"] [role="option"]')].find((node) =>
+			(node.textContent ?? "").includes("SessionStart"),
+		);
+		if (hit === undefined) throw new Error("事件下拉里没有 SessionStart");
+		hit.click();
+	});
+	const state = await waitMatcherDisabled();
+	assert.equal(state.value, "", "生命周期事件下 matcher 不应显示工具名");
+	const hints = await win.evaluate(() =>
+		[...document.querySelectorAll(".hooks-lifecycle-hint")].map((node) => node.textContent ?? ""),
+	);
+	assert.ok(
+		hints.some((text) => text.includes("该事件没有工具名")),
+		`应提示「该事件没有工具名」：${hints.join(" / ")}`,
+	);
+	await win.evaluate(() => {
+		const button = [...document.querySelectorAll(".starter-editor-actions button")].find((node) => node.textContent.trim() === "取消");
+		if (button === undefined) throw new Error("编辑区里没有「取消」按钮");
+		button.click();
+	});
+	await waitUntil(() => win.evaluate(() => document.querySelector(".starter-editor") === null), {
+		timeout: 10_000,
+		desc: "编辑区关闭",
+	});
+});
+
+await h.check("新增一条 SessionStart hook → 列表显示「会话开始」，落盘不带 matcher", async () => {
+	await clickInSection("Hooks", ".starter-add");
+	await waitUntil(() => sectionReady("Hooks", ".starter-editor"), { timeout: 10_000, desc: "hook 编辑区展开" });
+	await pickHookEvent("SessionStart");
+	await waitMatcherDisabled();
+	await setInput("Hook 命令", denyCommand);
+	await win.evaluate(() => {
+		const button = [...document.querySelectorAll(".starter-editor-actions button")].find((node) => node.textContent.trim() === "保存 hook");
+		if (button === undefined) throw new Error("编辑区里没有「保存 hook」按钮");
+		button.click();
+	});
+	await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const section = [...document.querySelectorAll(".settings-section")].find(
+					(node) => node.querySelector("h2")?.textContent.trim() === "Hooks",
+				);
+				if (section === undefined) return false;
+				// 与上一条 hook 的等待同一条口径：只认用户级列表，且「新增」按钮回来且可用
+				// = 保存后的刷新已落地（否则读到的仍是保存前的列表）。
+				const userList = section.querySelector("ul.starter-list");
+				const addButton = section.querySelector(".starter-add");
+				if (userList === null || addButton === null || addButton.disabled) return false;
+				return [...userList.querySelectorAll(".starter-row-title")].some((title) =>
+					title.textContent.includes("会话开始"),
+				);
+			}),
+		{ timeout: 15_000, interval: 200, desc: "用户级列表出现「会话开始」行（保存后的刷新已落地）" },
+	);
+	const parsed = JSON.parse(readFileSync(join(h.CONFIG_DIR, "preferences.json"), "utf8"));
+	const entry = parsed.hooks.find((item) => item.event === "SessionStart");
+	assert.ok(entry !== undefined, `preferences.json 里应有 SessionStart hook：${JSON.stringify(parsed.hooks)}`);
+	assert.equal(entry.command, denyCommand);
+	assert.equal(entry.timeoutMs, 5000);
+	// 生命周期事件没有工具名：写侧**不写 matcher 字段**（不是写 "*"）。
+	assert.equal("matcher" in entry, false, `生命周期事件不应落盘 matcher：${JSON.stringify(entry)}`);
+});
+
+await h.check("生命周期事件试运行 → 文案是「未阻断」，且最近运行立刻出现这条记录", async () => {
+	await clickHookAction("会话开始", "试运行");
+	await waitUntil(() => win.evaluate(() => document.querySelector(".hooks-test-card") !== null), {
+		timeout: 10_000,
+		desc: "试运行弹窗打开",
+	});
+	try {
+		await waitUntil(
+			() =>
+				win.evaluate(() => {
+					const text = document.querySelector(".hooks-test-card")?.textContent ?? "";
+					return text.includes("未阻断") ? text : false;
+				}),
+			{ timeout: 15_000, interval: 200, desc: "弹窗显示结果（而不是一直加载）" },
+		);
+	} catch (error) {
+		const modal = await win.evaluate(() => document.querySelector(".hooks-test-card")?.textContent ?? "(no modal)");
+		throw new Error(`${error.message}\n弹窗文本：${modal}`, { cause: error });
+	}
+	const modalText = await win.evaluate(() => document.querySelector(".hooks-test-card")?.textContent ?? "");
+	assert.ok(
+		modalText.includes("拒绝（退出码 2，未阻断）"),
+		`生命周期事件的退出码 2 必须标成「未阻断」：${modalText}`,
+	);
+	assert.ok(
+		!modalText.includes("按 fail-closed 阻止"),
+		`非阻断事件不得出现 fail-closed 文案：${modalText}`,
+	);
+	assert.ok(modalText.includes("会话开始"), `弹窗头部应标明事件：${modalText}`);
+	assert.ok(modalText.includes("SessionStart"), "载荷里应显示事件名");
+	await settleAnimations(".hooks-test-card");
+	await h.shoot("settings-hooks-test-lifecycle-light");
+	await win.evaluate(() => {
+		const button = [...document.querySelectorAll(".hooks-test-card button")].find((node) => node.textContent.trim() === "关闭");
+		button?.click();
+	});
+	await waitUntil(() => win.evaluate(() => document.querySelector(".hooks-test-card") === null), {
+		timeout: 10_000,
+		desc: "试运行弹窗关闭",
+	});
+	/*
+	 * 最近运行的单一事实源是审计：试运行写完审计后才返回结果，`runTest` 收到结果时
+	 * refresh() 一次。所以这里等的是「界面上真的出现了这条记录」—— 它同时钉住
+	 * 「refresh 没被漏掉」（漏掉时列表停在保存那一刻，见反向验证）。
+	 */
+	const rows = await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const section = [...document.querySelectorAll(".settings-section")].find(
+					(node) => node.querySelector("h2")?.textContent.trim() === "Hooks",
+				);
+				if (section === undefined) return false;
+				const items = [...section.querySelectorAll(".hooks-run")].map((node) => node.textContent ?? "");
+				return items.some((text) => text.includes("试运行 拒绝")) ? items : null;
+			}),
+		{ timeout: 15_000, interval: 200, desc: "「最近运行」出现本次试运行的记录（runTest 后的 refresh 生效）" },
+	);
+	// 早前那次 PreToolUse 试运行也应留在列表里（最近运行是「最近 5 条」而不是「最后一条」）。
+	assert.ok(
+		rows.some((text) => text.includes("试运行 放行")),
+		`最近运行应保留之前那次放行记录：${rows.join(" | ")}`,
+	);
+	assert.ok(
+		rows.some((text) => text.includes("失败")),
+		`拒绝的试运行结论应是「失败」（非阻断事件只有 allowed / failed）：${rows.join(" | ")}`,
+	);
+	await scrollToRecentRuns();
+	await h.shoot("settings-hooks-recent-runs-light");
+});
+
 await h.check("信任工作区 hooks → 状态变为已信任并落盘", async () => {
 	await win.evaluate(() => {
 		const input = document.querySelector('[aria-label="信任此工作区的 hooks"]');
@@ -334,6 +574,9 @@ await h.check("暗色下 hooks 分组与试运行卡片可读", async () => {
 	await pickDark();
 	await scrollToHooks();
 	await h.shoot("settings-hooks-dark");
+	// 「最近运行」在分组底部：滚到那里再拍一张，确认它不靠浅色背景才可读。
+	await scrollToRecentRuns();
+	await h.shoot("settings-hooks-recent-runs-dark");
 });
 
 await h.finish();
