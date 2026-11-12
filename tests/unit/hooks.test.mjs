@@ -23,12 +23,17 @@ import { join, resolve } from "node:path";
 import { EventEmitter } from "node:events";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	BLOCKING_EVENTS,
+	HOOK_EVENTS,
 	HOOK_OUTPUT_MAX,
 	HOOK_TIMEOUT_DEFAULT,
 	HOOK_TIMEOUT_MAX,
 	HOOK_TIMEOUT_MIN,
+	LIFECYCLE_EVENTS,
+	TOOL_EVENTS,
 	assertHookConfig,
 	chooseWorkspaceRoot,
+	createLifecycleHookExtension,
 	createPostToolUseHookExtension,
 	createPreToolUseHookExtension,
 	decideVerdict,
@@ -42,6 +47,9 @@ import {
 	parseHookConfig,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
+	payloadForSessionStart,
+	payloadForStop,
+	payloadForUserPromptSubmit,
 	readWorkspaceHookConfig,
 	resolveHookSet,
 	resolveSavedHook,
@@ -143,6 +151,69 @@ describe("matchesEvent —— matcher 只作用于工具事件", () => {
 		expect(matchesEvent(pre, "PreToolUse", "write")).toBe(true);
 		expect(matchesEvent(pre, "PreToolUse", "read")).toBe(false);
 	});
+	it("生命周期事件忽略 matcher（没有工具名可比）", () => {
+		const stop = { id: "s", event: "Stop", command: "x", timeoutMs: 1000 };
+		expect(matchesEvent(stop, "Stop", undefined)).toBe(true);
+		expect(matchesEvent(stop, "Stop", "write")).toBe(true);
+	});
+});
+
+/*
+ * 事件表是「哪些事件存在」与「哪些能阻断」的单一事实源。
+ * 写死断言而不是 `toContain` 是有意的：多一个/少一个事件都必须被人看见 ——
+ * 少一个 = 用户配了却永不触发；多一个 = 可能悄悄改变安全边界。
+ */
+describe("事件表 —— 五个事件、三类生命周期、只有一个可阻断", () => {
+	it("HOOK_EVENTS 含三个生命周期事件（顺序即设置页下拉顺序）", () => {
+		expect(HOOK_EVENTS).toEqual(["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop"]);
+	});
+
+	it("TOOL_EVENTS / LIFECYCLE_EVENTS 覆盖全部事件且互斥", () => {
+		expect([...TOOL_EVENTS]).toEqual(["PreToolUse", "PostToolUse"]);
+		expect([...LIFECYCLE_EVENTS]).toEqual(["SessionStart", "UserPromptSubmit", "Stop"]);
+		const union = new Set([...TOOL_EVENTS, ...LIFECYCLE_EVENTS]);
+		expect([...union].sort()).toEqual([...HOOK_EVENTS].sort());
+		for (const event of TOOL_EVENTS) expect(LIFECYCLE_EVENTS.has(event)).toBe(false);
+	});
+
+	it("BLOCKING_EVENTS 只有 PreToolUse —— 三个生命周期事件都不可阻断", () => {
+		expect([...BLOCKING_EVENTS]).toEqual(["PreToolUse"]);
+		for (const event of LIFECYCLE_EVENTS) expect(BLOCKING_EVENTS.has(event)).toBe(false);
+		expect(BLOCKING_EVENTS.has("PostToolUse")).toBe(false);
+	});
+});
+
+describe("生命周期事件的 matcher 校验 —— 接受却不生效比报错更坏", () => {
+	it("缺省 / 空串 / * 都通过，且不写回 matcher", () => {
+		const bare = normalizeHook({ event: "SessionStart", command: "x" });
+		expect(bare.matcher).toBeUndefined();
+		expect(normalizeHook({ event: "UserPromptSubmit", command: "x", matcher: "" }).matcher).toBeUndefined();
+		expect(normalizeHook({ event: "Stop", command: "x", matcher: "*" }).matcher).toBe("*");
+	});
+
+	it("写工具名被拒，错误里说清原因与实际值", () => {
+		expect(() => normalizeHook({ event: "UserPromptSubmit", command: "x", matcher: "write*" })).toThrow(
+			/没有工具名/u,
+		);
+		expect(() => normalizeHook({ event: "UserPromptSubmit", command: "x", matcher: "write*" })).toThrow(
+			/write\*/u,
+		);
+		expect(() => normalizeHook({ event: "Stop", command: "x", matcher: "bash" })).toThrow(/没有工具名/u);
+	});
+
+	it("写侧整体校验同样拒绝（assertHookConfig 会抛）", () => {
+		expect(() =>
+			assertHookConfig([
+				{ id: "a", event: "PreToolUse", matcher: "write*", command: "x" },
+				{ id: "b", event: "SessionStart", matcher: "write*", command: "x" },
+			]),
+		).toThrow(/没有工具名/u);
+	});
+
+	it("工具事件仍接受工具名 matcher", () => {
+		expect(normalizeHook({ event: "PreToolUse", matcher: "write*", command: "x" }).matcher).toBe("write*");
+		expect(normalizeHook({ event: "PostToolUse", matcher: "ls", command: "x" }).matcher).toBe("ls");
+	});
 });
 
 describe("parseHookConfig —— 读侧宽容、结构坏掉才 fatal", () => {
@@ -171,7 +242,7 @@ describe("parseHookConfig —— 读侧宽容、结构坏掉才 fatal", () => {
 		expect(() => normalizeHook({ event: "PreToolUse", command: "x", timeoutMs: HOOK_TIMEOUT_MIN - 1 })).toThrow();
 		expect(() => normalizeHook({ event: "PreToolUse", command: "x", timeoutMs: HOOK_TIMEOUT_MAX + 1 })).toThrow();
 		expect(() => normalizeHook({ event: "PreToolUse", command: "   " })).toThrow();
-		expect(() => normalizeHook({ event: "Stop", command: "x" })).toThrow();
+		expect(() => normalizeHook({ event: "Nope", command: "x" })).toThrow();
 	});
 
 	it("缺省超时是 5000", () => {
@@ -437,6 +508,50 @@ describe("载荷构造 —— 不传 now 时用当前时间", () => {
 	});
 });
 
+describe("生命周期载荷 —— 形状与工具事件一致，只有各自的事实", () => {
+	it("SessionStart 带 reason（缺省 startup）", () => {
+		expect(payloadForSessionStart({ sessionId: "s", cwd: "/w", reason: "resume", now: () => 42 })).toEqual({
+			event: "SessionStart",
+			session: { id: "s", cwd: "/w" },
+			reason: "resume",
+			timestamp: 42,
+		});
+		expect(payloadForSessionStart({ sessionId: "", cwd: "" }).reason).toBe("startup");
+	});
+
+	it("UserPromptSubmit 带完整 prompt（不截断）", () => {
+		const prompt = "x".repeat(HOOK_OUTPUT_MAX * 2);
+		const payload = payloadForUserPromptSubmit({ sessionId: "s", cwd: "/w", prompt, now: () => 1 });
+		expect(payload).toEqual({
+			event: "UserPromptSubmit",
+			session: { id: "s", cwd: "/w" },
+			prompt,
+			timestamp: 1,
+		});
+		expect(payload.prompt).toHaveLength(HOOK_OUTPUT_MAX * 2);
+	});
+
+	it("Stop 带 aborted（只认 true）", () => {
+		expect(payloadForStop({ sessionId: "s", cwd: "/w", aborted: true, now: () => 2 })).toEqual({
+			event: "Stop",
+			session: { id: "s", cwd: "/w" },
+			aborted: true,
+			timestamp: 2,
+		});
+		expect(payloadForStop({ aborted: undefined }).aborted).toBe(false);
+	});
+
+	it("三个载荷都不含 tool 字段（没有工具名可比）", () => {
+		for (const payload of [
+			payloadForSessionStart({}),
+			payloadForUserPromptSubmit({}),
+			payloadForStop({}),
+		]) {
+			expect("tool" in payload).toBe(false);
+		}
+	});
+});
+
 describe("shellInvocation —— 两个平台的 shell 与 Windows 的引号处理", () => {
 	it("POSIX 走 /bin/sh -lc", () => {
 		const invocation = shellInvocation("node x.js", "linux");
@@ -543,6 +658,16 @@ describe("接入点 —— 主会话 / 定时任务 / 子代理都装（静态�
 		expect(indexes(sessionFiles, /createPostToolUseHookExtension\(/g)).toHaveLength(2);
 		expect(indexes(commandExec, /createPreToolUseHookExtension\(/g)).toHaveLength(1);
 		expect(indexes(commandExec, /createPostToolUseHookExtension\(/g)).toHaveLength(1);
+	});
+
+	/*
+	 * 生命周期事件不可阻断，所以「漏装一处」不会带来安全旁路 —— 它的失败形态是
+	 * 静默：用户配了「每条消息记一行」，委派出去的子代理跑完却什么都没留下。
+	 * 这条静态断言让「漏装」在单测阶段就可见。
+	 */
+	it("三处装配点都注册生命周期扩展（SessionStart / UserPromptSubmit / Stop）", () => {
+		expect(indexes(sessionFiles, /createLifecycleHookExtension\(/g)).toHaveLength(2);
+		expect(indexes(commandExec, /createLifecycleHookExtension\(/g)).toHaveLength(1);
 	});
 
 	it("每一处 Pre 都排在权限门之前（第一个 block 才是终局）", () => {
@@ -754,6 +879,245 @@ describe("扩展接线 —— 命中才 spawn、拒绝才 block", () => {
 		expect(result.reason).toMatch(/配置无效/);
 		expect(fake.calls).toHaveLength(0);
 		expect(audits[0]).toMatchObject({ category: "hook", outcome: "failed" });
+	});
+});
+
+describe("生命周期扩展 —— 非阻断、全部跑完、fatal 不刷审计", () => {
+	/** 装扩展并收集三个 handler（按 pi 的事件名索引）。 */
+	const mountLifecycle = (hookSet, deps, audits, getSessionId = () => "s-1") => {
+		const handlers = new Map();
+		createLifecycleHookExtension({
+			cwd: "/w",
+			hookSet,
+			getSessionId,
+			onAudit: (record) => audits.push(record),
+			deps,
+		})({ on: (name, fn) => handlers.set(name, fn) });
+		return handlers;
+	};
+	/**
+	 * 收集每次 spawn 收到的 stdin 载荷。
+	 *
+	 * `createFakeChild` 的 `stdin.end` 是空实现（其他用例不关心载荷），这里替换掉它
+	 * 才能断言「hook 到底收到了什么」—— 那正是 SessionStart 缺 session.id 的可见面。
+	 */
+	const spawnCapturingPayloads = (payloads) => (_file, _args, _options) => {
+		const child = createFakeChild({ closeCode: 0 });
+		child.stdin.end = (text) => payloads.push(JSON.parse(text));
+		return child;
+	};
+	const setOf = (...hooks) => ({ hooks, fatal: [], skippedWorkspace: false, workspace: {} });
+	const fakeDeps = (behaviors) => {
+		const fake = fakeSpawn(behaviors);
+		return { fake, deps: { spawn: fake.spawn, platform: "linux", now: () => 0 } };
+	};
+
+	it("三个 pi 事件各自注册一个 handler", () => {
+		const fake = fakeDeps([]);
+		const handlers = mountLifecycle(setOf(), fake.deps, []);
+		expect([...handlers.keys()].sort()).toEqual(["agent_settled", "before_agent_start", "session_start"]);
+	});
+
+	it("无命中不 spawn、不写审计（空配置零成本）", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 0 }]);
+		const audits = [];
+		// 只有 PreToolUse 的 hook：生命周期事件一条也不命中。
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "p", event: "PreToolUse", command: "x" })),
+			deps,
+			audits,
+		);
+		expect(await handlers.get("session_start")({ reason: "startup" })).toBeUndefined();
+		expect(await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" })).toBeUndefined();
+		expect(await handlers.get("agent_settled")({ aborted: false })).toBeUndefined();
+		expect(fake.calls).toHaveLength(0);
+		expect(audits).toHaveLength(0);
+	});
+
+	it("顺序执行、全部跑完：第一条 exit 1 第二条仍然跑，且都不改变返回值", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 1, stderr: "第一个失败" }, { closeCode: 0 }]);
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(
+				normalizeHook({ id: "a", event: "UserPromptSubmit", command: "x" }),
+				normalizeHook({ id: "b", event: "UserPromptSubmit", command: "y" }),
+			),
+			deps,
+			audits,
+		);
+		const result = await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		expect(result).toBeUndefined();
+		expect(fake.calls).toHaveLength(2);
+		expect(audits.map((record) => record.outcome)).toEqual(["failed", "allowed"]);
+		// 非阻断的失败必须写明「未阻断」——只写「失败」会让人以为这一轮真的被拦下了。
+		expect(audits[0].detail).toMatch(/失败（未阻断）/u);
+	});
+
+	it("exit 2 只记 failed，文案是「拒绝（未阻断）」", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 2, stderr: "不同意" }]);
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "s", event: "Stop", command: "x" })),
+			deps,
+			audits,
+		);
+		const result = await handlers.get("agent_settled")({ aborted: true });
+		expect(result).toBeUndefined();
+		expect(fake.calls).toHaveLength(1);
+		expect(audits).toHaveLength(1);
+		expect(audits[0]).toMatchObject({ category: "hook", outcome: "failed" });
+		expect(audits[0].detail).toMatch(/Stop 拒绝（未阻断）/u);
+		expect(audits[0].detail).not.toMatch(/已拦截/u);
+	});
+
+	it("超时记为 failed（未阻断）", async () => {
+		vi.useFakeTimers();
+		const { fake, deps } = fakeDeps([{ hang: true }]);
+		const audits = [];
+		deps.platform = "win32"; // 走注入的 taskkill 分支，避免真的 process.kill(-pid)
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "t", event: "SessionStart", command: "x" })),
+			deps,
+			audits,
+		);
+		const promise = handlers.get("session_start")({ reason: "startup" });
+		await vi.advanceTimersByTimeAsync(6000);
+		await promise;
+		expect(fake.calls.length).toBeGreaterThan(0);
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("failed");
+		expect(audits[0].detail).toMatch(/超时/u);
+		expect(audits[0].detail).toMatch(/未阻断/u);
+	});
+
+	it("配置 fatal → 不 spawn、不写审计（工具事件已留证，重复记会淹没审计）", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 0 }]);
+		const audits = [];
+		const handlers = mountLifecycle(
+			{
+				hooks: [normalizeHook({ id: "s", event: "SessionStart", command: "x" })],
+				fatal: [{ source: "user", message: "配置坏了" }],
+				skippedWorkspace: false,
+				workspace: {},
+			},
+			deps,
+			audits,
+		);
+		await handlers.get("session_start")({ reason: "startup" });
+		await handlers.get("agent_settled")({ aborted: false });
+		expect(fake.calls).toHaveLength(0);
+		expect(audits).toHaveLength(0);
+	});
+
+	it("before_agent_start 的 custom 不触发（只认用户提交）", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 0 }]);
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "u", event: "UserPromptSubmit", command: "x" })),
+			deps,
+			audits,
+		);
+		expect(await handlers.get("before_agent_start")({ messageType: "custom", message: {} })).toBeUndefined();
+		expect(fake.calls).toHaveLength(0);
+		expect(audits).toHaveLength(0);
+	});
+
+	it("三个事件互不串台：只有对应事件的 hook 会被执行", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 0 }]);
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(
+				normalizeHook({ id: "start", event: "SessionStart", command: "x" }),
+				normalizeHook({ id: "submit", event: "UserPromptSubmit", command: "y" }),
+				normalizeHook({ id: "stop", event: "Stop", command: "z" }),
+			),
+			deps,
+			audits,
+		);
+		await handlers.get("session_start")({ reason: "resume" });
+		await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		await handlers.get("agent_settled")({ aborted: false });
+		expect(fake.calls).toHaveLength(3);
+		expect(audits.map((record) => record.detail.split(" ")[0])).toEqual(["SessionStart", "UserPromptSubmit", "Stop"]);
+	});
+
+	it("SessionStart 的 session.id：装配点为空时回落到 pi 的 ctx.sessionManager", async () => {
+		/*
+		 * 真实时序：`SessionStart` 由 `SessionHost.create` 末尾的 `bindExtensions`
+		 * 发出，那一刻宿主还没被 adopt，装配点给的 getter 读到的是空串；
+		 * pi 的 sessionManager 已经有 id（AgentSession.sessionId 就是它的
+		 * getSessionId()）。不回落的话载荷里的 session.id 恒为空。
+		 */
+		const payloads = [];
+		const deps = { spawn: spawnCapturingPayloads(payloads), platform: "linux", now: () => 0 };
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "s", event: "SessionStart", command: "x" })),
+			deps,
+			[],
+			() => "",
+		);
+		await handlers.get("session_start")(
+			{ reason: "startup" },
+			{ sessionManager: { getSessionId: () => "pi-session-1" } },
+		);
+		expect(payloads).toHaveLength(1);
+		expect(payloads[0].session.id).toBe("pi-session-1");
+	});
+
+	it("装配点的 getter 有值时优先于 ctx（真值只有一个来源且组装方更准）", async () => {
+		const payloads = [];
+		const deps = { spawn: spawnCapturingPayloads(payloads), platform: "linux", now: () => 0 };
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "s", event: "SessionStart", command: "x" })),
+			deps,
+			[],
+			() => "daemon-session",
+		);
+		await handlers.get("session_start")(
+			{ reason: "startup" },
+			{ sessionManager: { getSessionId: () => "pi-session-1" } },
+		);
+		expect(payloads[0].session.id).toBe("daemon-session");
+	});
+
+	it("ctx 缺失或两侧都抛错时退化为空串，不炸事件", async () => {
+		const payloads = [];
+		const deps = { spawn: spawnCapturingPayloads(payloads), platform: "linux", now: () => 0 };
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "s", event: "SessionStart", command: "x" })),
+			deps,
+			[],
+			() => {
+				throw new Error("装配点坏了");
+			},
+		);
+		await handlers.get("session_start")({ reason: "startup" }, {
+			sessionManager: {
+				getSessionId: () => {
+					throw new Error("manager 也坏了");
+				},
+			},
+		});
+		expect(payloads).toHaveLength(1);
+		expect(payloads[0].session.id).toBe("");
+	});
+
+	it("执行异常 → 写一条 failed 审计并吞掉（不抛给 pi，不炸会话）", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 0 }]);
+		deps.now = () => {
+			throw new Error("时钟坏了");
+		};
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "e", event: "Stop", command: "x" })),
+			deps,
+			audits,
+		);
+		expect(await handlers.get("agent_settled")({ aborted: false })).toBeUndefined();
+		expect(fake.calls).toHaveLength(0);
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("failed");
+		expect(audits[0].detail).toMatch(/执行异常（未阻断）/u);
 	});
 });
 

@@ -253,6 +253,16 @@ class SessionHost {
       sessionManager: options.sessionManager ?? SessionManager.create(cwd, getSessionsDir()),
       settingsManager,
       resourceLoader,
+      /*
+       * `session_start` 的 reason：resume 与新建不是同一件事（生命周期 hooks
+       * 的 `SessionStart` 会把原值交给脚本）。pi 自己的模式在切换会话时会传
+       * `new` / `resume`；daemon 没有「切换」这个动作 —— 注入 manager 就是 resume，
+       * 否则是一次全新的启动。
+       */
+      sessionStartEvent: {
+        type: "session_start",
+        reason: options.sessionManager === void 0 ? "startup" : "resume"
+      },
       // 仅新会话注入全局默认档；resume 不传（pi 从会话文件还原，见 options 注释）。
       ...options.thinkingLevel === void 0 ? {} : { thinkingLevel: options.thinkingLevel },
       tools: options.toolsOverride !== void 0 ? [...options.toolsOverride] : [
@@ -281,6 +291,19 @@ class SessionHost {
     );
     host.sessionCwd = cwd;
     session.subscribe((event) => host.translate(event));
+    /*
+     * pi 只在它自己的三种运行模式（print / interactive / rpc）里调用
+     * `bindExtensions`；daemon 直接嵌 SDK，从不调它 —— 于是 `session_start`
+     * **根本不会发出**，生命周期 hooks 的 `SessionStart` 就成了永不触发的配置。
+     *
+     * 这是 pi 的公开入口，除了发事件还应用一遍 UI / 错误绑定的缺省值
+     * （本宿主从不设这些绑定，所以是等价操作）。放在建好宿主之后、返回之前：
+     * 会话装载完成的那一刻正是 `SessionStart` 的语义点。
+     *
+     * **必须 await**：hook 是子进程，pi 的派发逐 handler 串行等待 ——
+     * 不 await 会让「会话创建完成」与「hook 真的跑完」脱钩。
+     */
+    await session.bindExtensions({});
     return host;
   }
   /* ── 对外操作 ────────────────────────────────────────────────── */

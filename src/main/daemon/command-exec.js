@@ -76,6 +76,7 @@ import {
 } from "./session-view.js";
 import { SessionHost } from "./session-host.js";
 import {
+	createLifecycleHookExtension,
 	createPostToolUseHookExtension,
 	createPreToolUseHookExtension,
 } from "./hooks.js";
@@ -2111,12 +2112,24 @@ function buildSubagentExtensions(deps, agent, cwd, getHost2, hooksRoot) {
    * 空壳：空壳会在每个工具结果上多跑一层监听器，却永远不会命中任何规则。
    *
    * PreToolUse 必须是第一条（权限门之前）；PostToolUse 排在 spill 之后 ——
-   * 见两处插入点的注释。
+   * 见两处插入点的注释。生命周期事件不可阻断，紧挨 Pre 注册。
    */
   // hooksRoot 由主会话显式传入（worktree → 源仓库）；缺省时由 hooksFor 按 cwd 推导。
   const hookSet = deps.hooksFor?.(cwd, hooksRoot);
   const hookExtensions = hookSet === void 0 ? {} : {
     pre: createPreToolUseHookExtension({
+      cwd,
+      hookSet,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
+      onAudit: writeAuditRecord
+    }),
+    /*
+     * 子代理**会**触发 SessionStart / UserPromptSubmit / Stop —— 一致性优先于
+     * 「少起进程」：主会话里配的「每条消息记一行」若在委派出去的路径上缺失，
+     * 用户会以为规则覆盖了全部工作。代价是每个子代理各一次 SessionStart/Stop，
+     * 文档里写明（PRD 装配点一节）。
+     */
+    lifecycle: createLifecycleHookExtension({
       cwd,
       hookSet,
       getSessionId: () => getHost2()?.state.sessionId ?? "",
@@ -2131,6 +2144,7 @@ function buildSubagentExtensions(deps, agent, cwd, getHost2, hooksRoot) {
   };
   return [
     ...(hookExtensions.pre === void 0 ? [] : [hookExtensions.pre]),
+    ...(hookExtensions.lifecycle === void 0 ? [] : [hookExtensions.lifecycle]),
     createPermissionGate({
       paths: {
         workspaceDir: cwd,

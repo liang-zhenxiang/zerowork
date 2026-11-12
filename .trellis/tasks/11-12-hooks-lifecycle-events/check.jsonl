@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：可证伪、真实启动、反向验证"}
+{"file": "SECURITY.md", "reason": "非阻断事件与不注入上下文的威胁模型"}

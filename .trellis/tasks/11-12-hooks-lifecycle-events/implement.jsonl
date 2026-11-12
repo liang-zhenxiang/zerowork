@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/11-12-hooks-lifecycle-events/research/pi-events.md", "reason": "pi 事件名/派发语义/能否注入的核实结论"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 子进程、配置存储与安全惯例"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/集成/GUI 分层与等待纪律"}
