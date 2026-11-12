@@ -13597,6 +13597,14 @@ function Sidebar({
   /* #300 F4'：侧栏任务即时过滤。过滤词非空时窗口全开（过滤本身就说明
    * 用户在找具体某条，「查看更多」再藏一半是反作用）；清空恢复原窗口。 */
   const [taskFilter, setTaskFilter] = reactExports.useState("");
+  /* #379 第二十二轮 F5：过滤输入 150ms 防抖。input 即时回显（taskFilter），
+     过滤计算读防抖后的 debouncedFilter——80+ 行列表每键全量重算在长列表下
+     会让输入出现可感知延迟。 */
+  const [debouncedFilter, setDebouncedFilter] = reactExports.useState("");
+  reactExports.useEffect(() => {
+    const timer = setTimeout(() => setDebouncedFilter(taskFilter), 150);
+    return () => clearTimeout(timer);
+  }, [taskFilter]);
   /* round15 F7：侧栏键盘完整导航。↑/↓ 在任务行间移动焦点行（视觉高亮），
      Enter 打开，Del/Backspace 归档。输入焦点时不劫持；列表为空静默。 */
   const navIndexRef = reactExports.useRef(-1);
@@ -13632,6 +13640,8 @@ function Sidebar({
   }, []);
   /* #363 第二十轮 F9：合并预览浮层开关。 */
   const [mergePreviewOpen, setMergePreviewOpen] = reactExports.useState(false);
+  /* #379 F4：最近一次用户手势滚动的时间戳（wheel/touch）。 */
+  const sidebarUserScrollRef = reactExports.useRef(0);
   /* #300 F6：批量归档多选。Set 存 path；⌘点任务行切换选中并进入多选态；
    * Esc 或清空退出。批量动作直接循环 archiveTask（IPC 幂等、量小）。 */
   /* round15 F4：任务行拖拽排序。拖起的 path 放 dragRef，落到另一行时按
@@ -14636,7 +14646,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
   reactExports.useEffect(() => {
     if (totalTasks <= 80) setVirtualPages(1);
   }, [totalTasks]);
-  const filterNeedle = taskFilter.trim().toLowerCase();
+  const filterNeedle = debouncedFilter.trim().toLowerCase();
   /* #354 第十九轮 F1：会话年龄分组。活跃时间取 modifiedAt（列表排序同源）。
      分档：今天 / 本周（7 天内非今天）/ 本月（30 天内非本周）/ 更早。 */
   const [ageCollapsed, setAgeCollapsed] = reactExports.useState(() => {
@@ -14913,7 +14923,26 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         !planningCollapsed && PLANNED_NAV_ITEMS.map(renderNavItem)
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "sidebar-scroll", children: [
+    /* #379 第二���二轮 F4：滚到近底部自动翻页。仅响应**用户手势滚动**
+       （wheel/touchstart 后 3s 内）——程序化 scrollIntoView（既有 e2e 的
+       菜单定位、focus 管理都会用）不触发翻页，避免放宽窗口破坏「折叠到
+       N 行」的契约（session-pin ⑤④⑦ 在 CI 矮视口实测撞过）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+      className: "sidebar-scroll",
+      onWheel: () => {
+        sidebarUserScrollRef.current = Date.now();
+      },
+      onTouchStart: () => {
+        sidebarUserScrollRef.current = Date.now();
+      },
+      onScroll: (event) => {
+        if (Date.now() - sidebarUserScrollRef.current > 3000) return;
+        const el = event.currentTarget;
+        if (el.scrollHeight - el.scrollTop - el.clientHeight > 120) return;
+        if (hiddenTaskCount > 0) setTasksExpanded(true);
+        else if (virtualHidden > 0) setVirtualPages((pages) => pages + 1);
+      },
+      children: [
       /* round14 F3：每日回归摘要。昨天完成任务 ≥1 才显示（首次启动/无昨日数据
          不占空间）；点击查看统计。数据由 App 的 usageStats effect 写 localStorage，
          这里只读快照。 */
@@ -32310,6 +32339,7 @@ function InlineCode({
     }
   );
 }
+const MARKDOWN_TRUNCATE_AT = 50 * 1024;
 const Markdown = React.memo(function Markdown2({
   text: text2,
   resolveImageSrc,
@@ -32320,13 +32350,22 @@ const Markdown = React.memo(function Markdown2({
   /* #312 F6：传入后 h2/h3 出现 ⚓ 按钮，点击复制 `${base}#${slug}` 深链。 */
   headingAnchorBase
 }) {
+  /* #379 第二���二轮 F6：大文本分段。>100KB 的回复（模型偶尔的巨型输出）
+     解析 markdown 是毫秒级到百毫秒级的热点；先渲前 50KB（按行边界截断，
+     避免切在语法中间），「渲染完整内容」按钮点击后再全量。 */
+  const [fullRender, setFullRender] = reactExports.useState(false);
+  const displayText = !fullRender && (text2?.length ?? 0) > MARKDOWN_TRUNCATE_AT * 2
+    ? text2.slice(0, text2.lastIndexOf("\n", MARKDOWN_TRUNCATE_AT))
+    : text2;
+  const truncated = displayText !== text2;
   const renderCode = reactExports.useMemo(
     () => ({ children }) => /* @__PURE__ */ jsxRuntimeExports.jsx(InlineCode, { cwd: cwd2, onPathClick, children }),
     [cwd2, onPathClick]
   );
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "markdown", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "markdown", children: [/* @__PURE__ */ jsxRuntimeExports.jsx(
     Markdown$1,
     {
+      text: displayText,
       remarkPlugins: [remarkGfm, [remarkMath, { singleDollarTextMath: false }]],
       // rehype-katex 在 hast 层把 math 节点渲染成 KaTeX 的 HTML+MathML
       //（颜色继承 currentColor，双主题直接可用）。
@@ -32429,9 +32468,16 @@ const Markdown = React.memo(function Markdown2({
           h3: HeadingAnchor("h3", headingAnchorBase)
         })
       },
-      children: text2
+      children: displayText
     }
-  ) });
+  ),
+  truncated && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "md-truncated-bar", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+      type: "button",
+      className: "mini-btn",
+      onClick: () => setFullRender(true),
+      children: ["渲染完整内容（剩余约 ", Math.round((text2.length - displayText.length) / 1024), " KB）"]
+    }) })
+  ] });
 });
 /* #312 F6：heading 锚点组件工厂。slug 用文本转小写、非字词替换 -；
    中文标题保留原字（剪贴板里原样可读）。 */
@@ -35162,6 +35208,9 @@ function QuickPromptChips({
   )) });
 }
 const BOTTOM_THRESHOLD_PX = 40;
+/* #379 第二十二轮 F2：长会话窗口化阈值。超过 100 轮只渲染头 2 + 尾 40。 */
+const TURN_WINDOW_THRESHOLD = 100;
+const TURN_WINDOW_TAIL = 40;
 /* ── 计划书（Plan Book）──────────────────────────────────────────────
  *
  * plan 模式的产出原本只是一条普通 assistant 消息：翻两屏就找不到、不能改步骤、
@@ -36263,11 +36312,71 @@ function ChatView({
     });
   }, [sessionId]);
   const [pendingAlign, setPendingAlign] = reactExports.useState(void 0);
+            const renderTurnView = (view, index2) => {
+              const isLast = index2 === turnViews.length - 1;
+              const anchored = isLast && anchorSpace && view.startsWithUser;
+              const turnId = view.turnId;
+              const userEntry = view.userEntry;
+              return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                "div",
+                {
+                  className: anchored ? "turn-group anchor-space" : "turn-group",
+                  "data-turn-key": view.key,
+                  children: [
+                    userEntry !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      UserBubble,
+                      {
+                        entryId: userEntry.id,
+                        text: userEntry.text,
+                        at: userEntry.at,
+                        images: userEntry.images,
+                        skillNames: userEntry.skillNames,
+                        sessionPath: currentSessionPath,
+                        target: branchTargets.get(userEntry.id),
+                        branchable: branchReady,
+                        onRestart: restartFrom,
+                        onBranch: forkFrom,
+                        onQuote: quoteReply
+                      }
+                    ),
+                    turnId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      TurnHeader,
+                      {
+                        active: streaming && turnId === lastUserId,
+                        assistantName: agentName,
+                        turn: streaming && turnId === lastUserId ? conversation.turn : conversation.turnTimings?.[turnId],
+                        collapsible: view.plan.hasTurnFold,
+                        expanded: turnFoldExpanded(turnFolds, turnId),
+                        onToggle: () => toggleTurn(turnId),
+                        onCopyTurn: userEntry !== void 0 && !(streaming && turnId === lastUserId) ? () => copyTurn(userEntry.id) : void 0
+                      }
+                    ),
+                    // 轨迹条在 plan.items 之外：回合「过程」折叠时正文隐藏，它仍完整显示
+                    // ——折叠态下的工作全貌正是这条轨迹存在的理由。
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      TurnTraceBar,
+                      {
+                        trace: view.trace,
+                        onFocusEntry: (entryId) => focusEntryInTurn(view, entryId)
+                      }
+                    ),
+                    view.plan.items.map((item) => renderPlanItem(view, item)),
+                    view.cancelled && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "user-cancelled", children: "用户已取消" }),
+                    isLast && streamTail
+                  ]
+                },
+                view.key
+              );
+            };
+  /* #379 第二十二轮 F2：长会话窗口化「展开全部」开关。 */
+  const [expandedAllTurns, setExpandedAllTurns] = reactExports.useState(false);
   const handleStreamScroll = () => {
     const node2 = scrollRef.current;
     if (node2 === null) return;
     const atBottom = node2.scrollHeight - node2.scrollTop - node2.clientHeight < BOTTOM_THRESHOLD_PX;
     followRef.current = atBottom;
+    /* #379 第二十二轮 F8 审计结论：本 handler 已自带 readPos 800ms 防抖与标尺 rAF
+       合并；setShowJumpToBottom 为布尔去重，React 对相同值 bail out。无需再包一层。 */
     setShowJumpToBottom(!atBottom);
     /* round9 F2：阅读进度记忆。800ms 防抖写 localStorage；滚到近底视为读完即清除。
        key 带会话 id，互不串位；恢复动作在 sessionId 切换的 layout effect 里。 */
@@ -36786,62 +36895,26 @@ function ChatView({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-pct", children: `${rulerPct}%` })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stream", ref: scrollRef, onScroll: handleStreamScroll, children: [
-            turnViews.map((view, index2) => {
-              const isLast = index2 === turnViews.length - 1;
-              const anchored = isLast && anchorSpace && view.startsWithUser;
-              const turnId = view.turnId;
-              const userEntry = view.userEntry;
-              return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "div",
-                {
-                  className: anchored ? "turn-group anchor-space" : "turn-group",
-                  "data-turn-key": view.key,
-                  children: [
-                    userEntry !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      UserBubble,
-                      {
-                        entryId: userEntry.id,
-                        text: userEntry.text,
-                        at: userEntry.at,
-                        images: userEntry.images,
-                        skillNames: userEntry.skillNames,
-                        sessionPath: currentSessionPath,
-                        target: branchTargets.get(userEntry.id),
-                        branchable: branchReady,
-                        onRestart: restartFrom,
-                        onBranch: forkFrom,
-                        onQuote: quoteReply
-                      }
-                    ),
-                    turnId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      TurnHeader,
-                      {
-                        active: streaming && turnId === lastUserId,
-                        assistantName: agentName,
-                        turn: streaming && turnId === lastUserId ? conversation.turn : conversation.turnTimings?.[turnId],
-                        collapsible: view.plan.hasTurnFold,
-                        expanded: turnFoldExpanded(turnFolds, turnId),
-                        onToggle: () => toggleTurn(turnId),
-                        onCopyTurn: userEntry !== void 0 && !(streaming && turnId === lastUserId) ? () => copyTurn(userEntry.id) : void 0
-                      }
-                    ),
-                    // 轨迹条在 plan.items 之外：回合「过程」折叠时正文隐藏，它仍完整显示
-                    // ——折叠态下的工作全貌正是这条轨迹存在的理由。
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      TurnTraceBar,
-                      {
-                        trace: view.trace,
-                        onFocusEntry: (entryId) => focusEntryInTurn(view, entryId)
-                      }
-                    ),
-                    view.plan.items.map((item) => renderPlanItem(view, item)),
-                    view.cancelled && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "user-cancelled", children: "用户已取消" }),
-                    isLast && streamTail
-                  ]
-                },
-                view.key
-              );
-            }),
+            /* #379 第二十二轮 F2：长会话窗口化。超阈值只渲头 2 + 尾 40 + 展开条。 */
+            turnViews.length > TURN_WINDOW_THRESHOLD && !expandedAllTurns ? (() => {
+              const headViews = turnViews.slice(0, 2);
+              const tailViews = turnViews.slice(-(TURN_WINDOW_TAIL));
+              const hiddenCount = turnViews.length - headViews.length - tailViews.length;
+              return [
+                ...headViews.map((view, index2) => renderTurnView(view, index2)),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    className: "turn-window-more",
+                    onClick: () => setExpandedAllTurns(true),
+                    children: `展开中间的 ${hiddenCount} 轮（当前只渲染最近的 ${TURN_WINDOW_TAIL} 轮）`
+                  },
+                  "turn-window-more"
+                ),
+                ...tailViews.map((view, index2) => renderTurnView(view, turnViews.length - TURN_WINDOW_TAIL + index2))
+              ];
+            })() : turnViews.map((view, index2) => renderTurnView(view, index2)),
             turnViews.length === 0 && streamTail
           ] }, sessionId),
           /* #310 审计：右缘 ActivityRail 已移除 —— 轮头 TraceBar（聚合后每类一段）
@@ -70360,6 +70433,13 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
           if (first === "" || first === current) return null;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta about-upgrade-from", children: ["自 ", first, " 升级"] });
         })()
+      /* #379 第二十二轮 F1：启动耗时（渲染层首帧挂载毫秒数）。性能回归的
+         仪表——用户不一定看，但出问题时「打开诊断就能报数」。 */
+      , (() => {
+          const ms = window.__zwBootMs;
+          if (ms === void 0) return null;
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: ["启动 ", ms, " ms"] });
+        })()
     ] }) }),
     /* 项目主页：菜单「关于」里那条走 shell.openExternal，这里走渲染层的
        target=_blank + 主进程 setWindowOpenHandler —— 两条通道最终都交给系统浏览器，
@@ -76242,6 +76322,16 @@ function App() {
     initialConversation
   );
   const viewCacheRef = reactExports.useRef(/* @__PURE__ */ new Map());
+  /* #379 第二���二轮 F9：会话视图缓存上限（近似 LRU——Map 保持插入序，
+     触达即重插到尾部）。超 20 条时淘汰最旧；无限增长在长会话重度使用下
+     每条可达数 MB，20 条 ≈ 几十 MB 是可接受的内存上限。 */
+  const touchViewCache = reactExports.useCallback((sessionId) => {
+    const cache = viewCacheRef.current;
+    if (!cache.has(sessionId)) return;
+    const value = cache.get(sessionId);
+    cache.delete(sessionId);
+    cache.set(sessionId, value);
+  }, []);
   const turnFoldCacheRef = reactExports.useRef(/* @__PURE__ */ new Map());
   const visibleSessionIdRef = reactExports.useRef("");
   const conversationRef = reactExports.useRef(conversation);
@@ -76356,7 +76446,14 @@ function App() {
           availableModes: conversationRef.current.availableModes,
           welcome: conversationRef.current.welcome
         };
+        touchViewCache(sessionId);
         viewCacheRef.current.set(sessionId, conversationReducer(base, { type: "event", event }));
+        /* #379 F9：容量守护——超 20 条淘汰最旧（跳过当前可见会话）。 */
+        while (viewCacheRef.current.size > 20) {
+          const oldestKey = viewCacheRef.current.keys().next().value;
+          if (oldestKey === void 0 || oldestKey === visibleSessionIdRef.current) break;
+          viewCacheRef.current.delete(oldestKey);
+        }
         if (event.type === "run_finished" && event.outcome === "completed") {
           const title2 = taskListRef.current?.find((t) => t.id === sessionId)?.title;
           showToast(title2 === void 0 ? "后台任务已完成" : `任务「${title2}」已完成`, "success");
@@ -77109,7 +77206,13 @@ function App() {
   const stashVisibleView = (nextId) => {
     const prevId = visibleSessionIdRef.current;
     if (prevId === "" || prevId === nextId) return;
+    touchViewCache(prevId);
     viewCacheRef.current.set(prevId, conversationRef.current);
+    while (viewCacheRef.current.size > 20) {
+      const oldestKey = viewCacheRef.current.keys().next().value;
+      if (oldestKey === void 0 || oldestKey === prevId) break;
+      viewCacheRef.current.delete(oldestKey);
+    }
   };
   const applySnapshot = reactExports.useCallback((snapshot) => {
     const nextId = snapshot.state.sessionId;
@@ -78671,6 +78774,27 @@ try {
   }
 } catch { /* 隐私模式放弃 */ }
 initNightDim();initTheme();initPersonalExpression();
+/* #379 第二十二轮 F1：启动剖析。performance.mark 打点首帧挂载完成；
+   诊断页（AboutSection）可读取这些标记显示「启动耗时」。 */
+try {
+  performance.mark("zerowork:app-mounted");
+  const navEntry = performance.getEntriesByType("navigation")[0];
+  if (navEntry !== void 0) {
+    const mountMs = Math.round(performance.now());
+    window.__zwBootMs = mountMs;
+    window.dispatchEvent(new CustomEvent("zw:boot-profiled", { detail: { mountMs, domInteractive: Math.round(navEntry.domInteractive) } }));
+  }
+} catch {
+}
+/* #379 第二十二轮 F10：启动预热。首帧渲染完成后 idle 时预取一次 listSessions——
+   侧栏首屏本来就要它；预热让「点开侧栏前的空白期」变成数据已就绪期。
+   失败静默（真实调用点会再拉一次并显示错误态）。 */
+if (typeof window.requestIdleCallback === "function") {
+  window.requestIdleCallback(() => {
+    window.kami?.listSessions?.().catch(() => {
+    });
+  }, { timeout: 2000 });
+}
 initPalette();
 const root = document.getElementById("root");
 if (root === null) throw new Error("#root 不存在");
