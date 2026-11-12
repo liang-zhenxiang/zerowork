@@ -40,7 +40,7 @@
 - [x] `SECURITY.md`、`.trellis/spec/daemon/index.md` §七、`CHANGELOG.md`
 - [x] `npm run lint:all`、`npm test`、`npm run build && npm run check:renderer-assets`；
       相关 GUI 套件本地跑通，全量 `test:gui` 由 CI 把关
-- [ ] PR（Closes #373）→ `CI 总览` 绿 → squash 合并
+- [x] PR（Closes #373）→ `CI 总览` 绿 → squash 合并（#377，提交 c649a58）
 
 ## 回滚
 
