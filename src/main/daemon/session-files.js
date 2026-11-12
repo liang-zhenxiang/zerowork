@@ -111,10 +111,15 @@ import {
 	assertHookConfig,
 	chooseWorkspaceRoot,
 	clip,
+	createLifecycleHookExtension,
 	createPostToolUseHookExtension,
 	createPreToolUseHookExtension,
 	normalizeWorkspacePath,
+	payloadForPostToolUse,
 	payloadForPreToolUse,
+	payloadForSessionStart,
+	payloadForStop,
+	payloadForUserPromptSubmit,
 	resolveHookSet,
 	resolveSavedHook,
 	runHook,
@@ -1317,6 +1322,17 @@ function buildRunExtensions(deps, cwd, getHost2, watch) {
   const hookSet = hookSetForCwd(cwd);
   const extensions = [
     createPreToolUseHookExtension({
+      cwd,
+      hookSet,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
+      onAudit: writeAuditRecord
+    }),
+    /*
+     * 生命周期事件（SessionStart / UserPromptSubmit / Stop）**不可阻断**，
+     * 排在哪都改变不了判定链；紧挨 Pre 放是为了「同一个 hookSet 的三条
+     * 监听器在源码里也是一处」—— 装配漏一处就是一处静静不生效的配置。
+     */
+    createLifecycleHookExtension({
       cwd,
       hookSet,
       getSessionId: () => getHost2()?.state.sessionId ?? "",
@@ -3164,6 +3180,20 @@ async function createHost(bucket, sessionManager) {
        * 配置在会话创建时读一次（按会话缓存）；设置页明确写了「对新会话生效」。
        */
       createPreToolUseHookExtension({
+        cwd,
+        hookSet: sessionHookSet,
+        getSessionId: () => bucket.sessionId,
+        onAudit: writeAuditRecord
+      }),
+      /*
+       * 生命周期事件（SessionStart / UserPromptSubmit / Stop）。**不可阻断**，
+       * 与 Pre 共用同一个 hookSet（一次会话读一次配置）—— 于是「拦住工具」
+       * 与「记下会话开始」永远是同一份配置。
+       *
+       * 不做上下文注入：hook 的 stdout 不进提示词
+       * （理由见 hooks.js 文件头与 SECURITY.md）。
+       */
+      createLifecycleHookExtension({
         cwd,
         hookSet: sessionHookSet,
         getSessionId: () => bucket.sessionId,
@@ -5780,6 +5810,16 @@ const handlers = {
     const root = hooksRootFor(currentBucket.cwd, currentBucket.worktree);
     const { config, trusted } = readHooksConfig();
     const set = resolveHookSet({ user: config, workspaceRoot: root, trustedWorkspaceHooks: trusted });
+    /*
+     * 最近运行：从审计里取 hook 类别最后 5 条。**不新增审计格式** ——
+     * 设置页要的是「它真的跑过」的可观察证据，而审计已经是这件事的单一事实源。
+     *
+     * 只给 `{ ts, outcome, detail }`：面板要显示时间 / 结论 / 说明，
+     * 其余字段（category 恒为 hook）没有信息量。
+     */
+    const recentRuns = readAuditRecords({ category: "hook", limit: 20 })
+      .records.slice(-5)
+      .map((record) => ({ ts: record.ts, outcome: record.outcome, detail: record.detail }));
     return {
       user: config.hooks,
       userErrors: config.errors.map((entry) => ({ index: entry.index, message: entry.message })),
@@ -5793,7 +5833,8 @@ const handlers = {
         errors: set.workspace.errors.map((entry) => ({ index: entry.index, message: entry.message })),
         ...set.workspace.fatalMessage === void 0 ? {} : { fatalMessage: set.workspace.fatalMessage }
       },
-      activeCount: set.hooks.length
+      activeCount: set.hooks.length,
+      recentRuns
     };
   },
   // 写用户级 hooks：与读侧共用 assertHookConfig 的判据（写进去的必须能原样读回来）。
@@ -5840,13 +5881,35 @@ const handlers = {
   [INVOKE.testHook]: async ([input]) => {
     // 只认已保存 hook 的 id；伪造的 command / event 连读都不读（纵深防御）。
     const hook = resolveSavedHook(readHooksConfig().config, input);
-    const payload = payloadForPreToolUse({
-      toolName: "write",
-      input: { path: "示例.txt", content: "这是试运行载荷" },
-      // 试运行不要求会话已 adopt：空串在载荷里如实表示「还没有会话」。
+    // 试运行不要求会话已 adopt：空串在载荷里如实表示「还没有会话」。
+    const common = {
       sessionId: currentBucket.sessionId,
       cwd: hooksRootFor(currentBucket.cwd, currentBucket.worktree)
-    });
+    };
+    /*
+     * 示例载荷按事件给：试运行的意义是让用户看清「我的脚本会收到什么」，
+     * 而生命周期事件没有 `tool` 字段 —— 统一发一个 write 的载荷会让用户
+     * 以为自己的 SessionStart hook 也会收到工具名。
+     */
+    const payload =
+      hook.event === "SessionStart"
+        ? payloadForSessionStart({ ...common, reason: "startup" })
+        : hook.event === "UserPromptSubmit"
+          ? payloadForUserPromptSubmit({ ...common, prompt: "这是试运行载荷" })
+          : hook.event === "Stop"
+            ? payloadForStop({ ...common, aborted: false })
+            : hook.event === "PostToolUse"
+              ? payloadForPostToolUse({
+                  toolName: "write",
+                  input: { path: "示例.txt", content: "这是试运行载荷" },
+                  ok: true,
+                  ...common
+                })
+              : payloadForPreToolUse({
+                  toolName: "write",
+                  input: { path: "示例.txt", content: "这是试运行载荷" },
+                  ...common
+                });
     const result = await runHook(hook, payload);
     writeAuditRecord({
       category: "hook",

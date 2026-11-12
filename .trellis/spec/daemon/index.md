@@ -163,6 +163,15 @@ macOS / Linux 上受限档直接拒绝执行 —— 这也是本项目不发 Lin
    pi 按 extensions 注册顺序执行，第一个 `{block:true}` 终止；只装主会话会让
    定时任务/子代理成为旁路。主会话、派生任务、子代理/成员必须共用同一个根。
 
+5. **非阻断事件也在事件派发的等待路径上（2026-11-12，生命周期 hooks）。**
+   `SessionStart` / `UserPromptSubmit` / `Stop` 不改变任何判定，但 pi 的
+   `emit()` 是**逐 handler 串行 await**：`SessionStart` 拖住会话创建，
+   `UserPromptSubmit` 拖住用户提交（最坏延迟 = 命中条数 × 超时），`Stop` 拖住
+   settle。给它们加逻辑时别以为「不可阻断 = 不进等待路径」。
+   另外：`session_start` 只在 pi 调用 `bindExtensions()` 时发出，而 daemon 是直接
+   嵌 SDK 的 —— 所以 `SessionHost.create` 末尾自己调了一次（不调就等于该事件
+   永远不触发）。
+
 ---
 
 ## 相关

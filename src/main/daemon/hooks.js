@@ -29,17 +29,41 @@
  *
  * ## 事件边界
  *
- * 本轮只做两个事件（PRD 明确收敛）：
+ * 五个事件，分两类：
+ *
+ * **工具事件**（matcher 比工具名）
  *   - `PreToolUse`  —— 工具调用之前、权限检查之前；可阻断（终局）。
  *   - `PostToolUse` —— 工具真正执行之后；只写审计，不改变工具结果。
  * 被 PreToolUse 拦下的调用不会触发 PostToolUse（pi 的 agent-loop 直接返回）。
+ *
+ * **生命周期事件**（没有工具名，不可阻断）
+ *   - `SessionStart`     ← pi 的 `session_start`（startup / reload / new / resume / fork）
+ *   - `UserPromptSubmit` ← pi 的 `before_agent_start`，且 `messageType === "user"`
+ *   - `Stop`             ← pi 的 `agent_settled`（无自动重试 / 压缩 / 排队续跑之后）
+ *
+ * 生命周期事件**永不改变会话结果**：hook 的 exit 2 也只是「拒绝（未阻断）」，
+ * stdout **不进入提示词**（不做上下文注入，见 SECURITY.md 与 design §二）——
+ * 本地脚本的输出静默进入提示词等于新增一条提示注入面，且与「只是跑了个脚本」
+ * 的心智不符。
+ *
+ * 注意 `Stop` 用 `agent_settled` 而不是 `agent_end`：当前 pi 的 `AgentEndEvent`
+ * 没有 `willRetry`，一次模型失败的重试也会先发 `agent_end` —— 那不是「一轮结束」。
  */
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-/** 本轮支持的事件。顺序即设置页下拉的顺序。 */
-const HOOK_EVENTS = ["PreToolUse", "PostToolUse"];
+/** 支持的事件。顺序即设置页下拉的顺序。 */
+const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop"];
+
+/** 按工具名匹配的事件。matcher 只对这两类有意义。 */
+const TOOL_EVENTS = /* @__PURE__ */ new Set(["PreToolUse", "PostToolUse"]);
+
+/**
+ * 生命周期事件。**都不可阻断**（`BLOCKING_EVENTS` 只含 PreToolUse），
+ * 且没有工具名 —— matcher 必须是缺省 / `""` / `"*"`（见 normalizeHook）。
+ */
+const LIFECYCLE_EVENTS = /* @__PURE__ */ new Set(["SessionStart", "UserPromptSubmit", "Stop"]);
 
 /** 可阻断的事件。只有这一类会把 hook 的拒绝变成工具调用的终局。 */
 const BLOCKING_EVENTS = /* @__PURE__ */ new Set(["PreToolUse"]);
@@ -107,13 +131,13 @@ function matchTool(matcher, toolName) {
 /**
  * 这个 hook 是否对该事件 / 工具生效。
  *
- * matcher **只对工具事件有意义**；生命周期事件（本轮没有）忽略 matcher。
- * 这样以后加 SessionStart 之类的事件时，不会因为一条带 matcher 的 hook
- * 被意外跳过。
+ * matcher **只对工具事件有意义**；生命周期事件忽略 matcher
+ *（写侧也不许给它写工具名，见 normalizeHook —— 接受一个永不生效的
+ * matcher 比报错更坏）。
  */
 function matchesEvent(hook, event, toolName) {
 	if (hook.event !== event) return false;
-	if (event === "PreToolUse" || event === "PostToolUse") return matchTool(hook.matcher, toolName);
+	if (TOOL_EVENTS.has(event)) return matchTool(hook.matcher, toolName);
 	return true;
 }
 
@@ -143,6 +167,16 @@ function normalizeHook(raw, index = 0) {
 			throw new Error(`hook 的 matcher 最长 ${HOOK_MATCHER_MAX} 个字符`);
 		}
 		matcher = raw.matcher;
+	}
+	/*
+	 * 生命周期事件没有工具名可比。接受一个 `"write*"` 只会得到一条**永不生效**
+	 * 的配置（matchesEvent 会忽略 matcher），用户以为有筛选、其实没有 ——
+	 * 与 watch-policy 的「接受却不生效比报错更坏」同一姿态。
+	 */
+	if (LIFECYCLE_EVENTS.has(event) && matcher !== undefined && matcher !== "*") {
+		throw new Error(
+			`hook 的事件 ${event} 没有工具名，matcher 只能留空或写 *（实际是 ${JSON.stringify(matcher)}）`
+		);
 	}
 	let timeoutMs = HOOK_TIMEOUT_DEFAULT;
 	if (raw.timeoutMs !== undefined && raw.timeoutMs !== null) {
@@ -684,6 +718,40 @@ function payloadForPostToolUse({ toolName, input, sessionId, cwd, ok, error, now
 	};
 }
 
+/**
+ * 生命周期事件的三个载荷。形状与工具事件一致（`event` / `session` / `timestamp`），
+ * 只是把「工具」换成各自的事实。
+ *
+ * `prompt` **不截断**：hook 的常见用法就是看用户到底说了什么，截断会造成
+ * 「只检查了前半段就放行」。它由用户本地代码消费，不上传。三个载荷都不含密钥。
+ */
+function payloadForSessionStart({ sessionId, cwd, reason, now = Date.now }) {
+	return {
+		event: "SessionStart",
+		session: { id: sessionId ?? "", cwd: cwd ?? "" },
+		reason: typeof reason === "string" && reason !== "" ? reason : "startup",
+		timestamp: now()
+	};
+}
+
+function payloadForUserPromptSubmit({ sessionId, cwd, prompt, now = Date.now }) {
+	return {
+		event: "UserPromptSubmit",
+		session: { id: sessionId ?? "", cwd: cwd ?? "" },
+		prompt: typeof prompt === "string" ? prompt : "",
+		timestamp: now()
+	};
+}
+
+function payloadForStop({ sessionId, cwd, aborted, now = Date.now }) {
+	return {
+		event: "Stop",
+		session: { id: sessionId ?? "", cwd: cwd ?? "" },
+		aborted: aborted === true,
+		timestamp: now()
+	};
+}
+
 /** 审计 detail 的局部截断（audit.js 的上限是 240，这里先按同一口径收）。 */
 function clip(text, max = 240) {
 	const oneLine = String(text).replace(/\s+/g, " ").trim();
@@ -702,8 +770,11 @@ function stderrSummary(result) {
 /**
  * 一条 hook 运行结果的审计 detail（≤240 字）。
  *
- * `blockable` 影响 deny 的措辞：PostToolUse 不可阻断，写「拒绝」会让人误以为
- * 那次工具调用真的被拦下了 —— 必须写成「拒绝（未阻断）」。
+ * `blockable` 影响措辞：不可阻断的事件（PostToolUse 与三个生命周期事件）写
+ * 「拒绝 / 失败（未阻断）」—— 只写「拒绝」会让人误以为那次调用真的被拦下了。
+ *
+ * `toolName` 对生命周期事件**不存在**，此时省略这一段（写成 `undefined`
+ * 会把审计变成一条读不懂的记录）。
  */
 function auditDetail({ event, hook, toolName, result, blockable = true }) {
 	const verdictText =
@@ -713,10 +784,12 @@ function auditDetail({ event, hook, toolName, result, blockable = true }) {
 				? blockable
 					? "拒绝"
 					: "拒绝（未阻断）"
-				: "失败";
+				: blockable
+					? "失败"
+					: "失败（未阻断）";
+	const subject = typeof toolName === "string" && toolName !== "" ? ` ${toolName}` : "";
 	return clip(
-		`${event} ${verdictText} ` +
-			`${toolName}（hook ${hook.id}，${result.durationMs}ms，${stderrSummary(result)}）`
+		`${event} ${verdictText}${subject}（hook ${hook.id}，${result.durationMs}ms，${stderrSummary(result)}）`
 	);
 }
 
@@ -878,6 +951,109 @@ function createPostToolUseHookExtension(options) {
 	};
 }
 
+/**
+ * 生命周期扩展：`SessionStart` / `UserPromptSubmit` / `Stop`，**全部不可阻断**。
+ *
+ * 这个工厂刻意**不返回任何东西**：即使手滑改成 `{ block }` / `{ message }` /
+ * `{ systemPrompt }`，pi 的那三个事件也不消费它 —— 但这里连写都不写，
+ * 让「非阻断事件永远不能改变会话结果」是代码形状而不是约定
+ *（PRD 的硬约束）。
+ *
+ * 三条执行纪律：
+ *  1. `hookSet.fatal.length > 0` → **直接返回，不写审计**。工具事件已被
+ *     fail-closed 拦下且每条调用留证；生命周期事件在每条消息上都重复记同一条
+ *     配置错误，只会淹没审计（理由见 design §五）。
+ *  2. 无命中 → 不 spawn（与工具事件同一条「空配置零成本」）。
+ *  3. 整体 try/catch：异常写一条 failed 审计后吞掉 —— hook 是本地脚本，
+ *     它的失败不该让会话或消息失败。
+ *
+ * **未信任工作区的 skipped 审计不由这里记**：那条记录归 PreToolUse 扩展，
+ * 每个会话一条（design §六），重复记只会让审计出现两条同样的跳过。
+ *
+ * `UserPromptSubmit` 在用户等待路径上：最坏延迟 = 命中条数 × 超时。
+ */
+function createLifecycleHookExtension(options) {
+	return (pi) => {
+		const set = options.hookSet;
+		/*
+		 * 会话 id：先问装配点（主会话 / 子代理在 adopt 之后都能读到真值），
+		 * 空时回落到 pi 的 `ctx.sessionManager`。
+		 *
+		 * **回落是 `SessionStart` 唯一有效的来源**：它发生在宿主被 adopt 之前
+		 * （`SessionHost.create` 末尾的 `bindExtensions`），那一刻装配点的
+		 * `bucket.sessionId` / `getHost2()?.state.sessionId` 还是空串；而 pi 的
+		 * manager 此刻已经有 id（`AgentSession.sessionId` 就是
+		 * `sessionManager.getSessionId()`）。不回落的话载荷里的 `session.id`
+		 * 恒为空，hook 就没法把「这次会话」与后续两条事件的行关联起来。
+		 */
+		const sessionIdOf = (ctx) => {
+			try {
+				const fromOptions = options.getSessionId?.() ?? "";
+				if (fromOptions !== "") return fromOptions;
+			} catch {
+				/* 装配点的 getter 坏了不该让事件失败 —— 继续试 pi 的那一份 */
+			}
+			try {
+				return ctx?.sessionManager?.getSessionId?.() ?? "";
+			} catch {
+				return "";
+			}
+		};
+		const run = async (event, buildPayload, ctx) => {
+			if (set.fatal.length > 0) return void 0;
+			const hooks = set.hooks.filter((hook) => matchesEvent(hook, event));
+			if (hooks.length === 0) return void 0;
+			try {
+				const results = await runHooks(hooks, buildPayload(sessionIdOf(ctx)), event, options.deps);
+				for (const { hook, result } of results) {
+					options.onAudit?.({
+						category: "hook",
+						// 非阻断事件**只有** allowed / failed 两种结果：exit 2 也只说明
+						// 这个 hook 不同意，并没有真的拦下会话或消息。
+						outcome: result.verdict === "allow" ? "allowed" : "failed",
+						detail: auditDetail({ event, hook, result, blockable: false })
+					});
+				}
+			} catch (error) {
+				options.onAudit?.({
+					category: "hook",
+					outcome: "failed",
+					detail: clip(`${event} 执行异常（未阻断）：${errorText(error)}`)
+				});
+			}
+			return void 0;
+		};
+
+		pi.on("session_start", (event, ctx) =>
+			run(
+				"SessionStart",
+				(sessionId) => payloadForSessionStart({ sessionId, cwd: options.cwd, reason: event?.reason }),
+				ctx
+			)
+		);
+		pi.on("before_agent_start", (event, ctx) => {
+			/*
+			 * 只认用户提交。`custom`（`sendMessage({triggerTurn})` 唤醒）不是
+			 * 「用户提交了一条消息」—— 把它算进来会让系统自发的一轮也触发
+			 * 用户的 pre-message hook，语义就对不上了。
+			 */
+			if (event?.messageType !== "user") return void 0;
+			return run(
+				"UserPromptSubmit",
+				(sessionId) => payloadForUserPromptSubmit({ sessionId, cwd: options.cwd, prompt: event.prompt }),
+				ctx
+			);
+		});
+		pi.on("agent_settled", (event, ctx) =>
+			run(
+				"Stop",
+				(sessionId) => payloadForStop({ sessionId, cwd: options.cwd, aborted: event?.aborted === true }),
+				ctx
+			)
+		);
+	};
+}
+
 /** 工具结果里的纯文本（PostToolUse 的 error 字段用），失败返回空串。 */
 function contentText(content) {
 	if (!Array.isArray(content)) return "";
@@ -899,12 +1075,15 @@ export {
 	HOOK_TIMEOUT_DEFAULT,
 	HOOK_TIMEOUT_MAX,
 	HOOK_TIMEOUT_MIN,
+	LIFECYCLE_EVENTS,
+	TOOL_EVENTS,
 	TRUSTED_WORKSPACES_MAX,
 	assertHookConfig,
 	auditDetail,
 	chooseWorkspaceRoot,
 	clip,
 	contentText,
+	createLifecycleHookExtension,
 	createPostToolUseHookExtension,
 	createPreToolUseHookExtension,
 	decideVerdict,
@@ -918,6 +1097,9 @@ export {
 	parseHookConfig,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
+	payloadForSessionStart,
+	payloadForStop,
+	payloadForUserPromptSubmit,
 	readWorkspaceHookConfig,
 	refusalReason,
 	resolveHookSet,
