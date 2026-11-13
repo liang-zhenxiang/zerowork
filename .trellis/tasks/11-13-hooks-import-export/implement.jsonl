@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 配置/校验/子进程惯例"}
+{"file": ".trellis/spec/shared/index.md", "reason": "IPC 通道与 preload 契约"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "设置页组件、token 纪律、文件选择"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/GUI 分层与等待纪律"}

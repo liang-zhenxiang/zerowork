@@ -67335,6 +67335,57 @@ function HookTestModal({ hook, result, error, onClose }) {
     ] })
   ] }) });
 }
+/**
+ * 导入预览弹窗：文件里有什么、合并后会变成什么、哪些条目不能导入。
+ *
+ * 「先预览、再落盘」不是一个交互偏好：导入的是**不可信输入**，而 hooks 会被执行。
+ * 让用户在写入前看清条数与每条的命令首行，是这条链上唯一一处人工确认点。
+ * 有 fatal 或逐条错误时，「导入」按钮禁用并写明原因 —— 不静默丢弃非法条目。
+ */
+function HooksImportModal({ preview, error, busy, onCancel, onConfirm }) {
+  const closeRef = reactExports.useRef(null);
+  const cardRef = useModalFocus({ initialFocus: () => closeRef.current });
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancel();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  const incoming = preview.incoming;
+  const blocked = preview.fatal !== void 0 || preview.errors.length > 0 || preview.mergedError !== void 0;
+  const canImport = !blocked && incoming.length > 0 && busy !== true;
+  const hint = preview.fatal !== void 0 ? "文件结构非法，无法导入" : preview.errors.length > 0 ? `有 ${preview.errors.length} 条非法条目，修好后才能导入` : preview.mergedError !== void 0 ? "合并后的结果不合法，无法导入" : incoming.length === 0 ? "文件里没有 hook" : `将导入 ${incoming.length} 条，合并后共 ${preview.merged.length} 条`;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "modal-backdrop", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "hooks-import-card", role: "dialog", "aria-modal": "true", "aria-label": "导入 hooks 预览", ref: cardRef, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "hooks-import-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: `导入预览 · ${incoming.length} 条` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", ref: closeRef, onClick: onCancel, children: "关闭" })
+    ] }),
+    preview.fatal !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: preview.fatal }),
+    preview.errors.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "hooks-import-errors", "aria-label": "非法条目", children: preview.errors.map((entry) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: `第 ${entry.index + 1} 条：${entry.message}` }, `${entry.index}-${entry.message}`)) }),
+    preview.mergedError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: preview.mergedError }),
+    incoming.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "hooks-import-list", "aria-label": "待导入条目", children: incoming.map((item, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "hooks-import-item", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag", children: HOOK_EVENT_LABELS[item.event] ?? item.event }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hooks-import-id", children: item.id }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hooks-import-command", title: item.command, children: item.command.split("\n")[0] })
+    ] }, `${index}-${item.id}`)) }),
+    error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "starter-error", role: "alert", children: error }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "hooks-import-actions", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-foot hooks-import-hint", children: hint }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", onClick: onCancel, children: "取消" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "primary-btn", disabled: !canImport, onClick: onConfirm, children: [
+        "导入 ",
+        incoming.length,
+        " 条"
+      ] })
+    ] })
+  ] }) });
+}
 function HooksSection({ busy }) {
   const [data, setData] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
@@ -67344,6 +67395,12 @@ function HooksSection({ busy }) {
   const [testing, setTesting] = reactExports.useState(void 0);
   const [testResult, setTestResult] = reactExports.useState(void 0);
   const [testError, setTestError] = reactExports.useState(void 0);
+  const [importText, setImportText] = reactExports.useState(void 0);
+  const [importPreview, setImportPreview] = reactExports.useState(void 0);
+  const [importing, setImporting] = reactExports.useState(false);
+  const [importError, setImportError] = reactExports.useState(void 0);
+  // 常驻的文件选择器：由「导入」按钮触发（GUI 测试也用它注入文件，故不临时创建）。
+  const fileInputRef = reactExports.useRef(null);
   const refresh = reactExports.useCallback(async () => {
     try {
       setData(await window.kami.getHooks());
@@ -67404,6 +67461,61 @@ function HooksSection({ busy }) {
     setSaving(true);
     setError(void 0);
     void window.kami.setHooksTrusted(data.workspace.root, next).then(() => refresh()).catch((e) => setError(hookErrorText(e))).finally(() => setSaving(false));
+  };
+  const toast = (type, text) => window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type, text }] }));
+  /*
+   * 导出只用**渲染层已有的数据**（`hooks:get` 的 config.hooks）：没有第二份真相，
+   * 也就不需要在 daemon 里再写一遍序列化。形状与配置文件同构（`{ version, hooks }`），
+   * 导出的文件可以直接作为导入输入。**不含信任列表** —— 那是本机绝对路径。
+   */
+  const exportHooks = () => {
+    const payload = { version: 1, hooks: current };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "zerowork-hooks.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
+    toast("success", `已导出 ${current.length} 条 hooks（文件含本机命令，分享前请确认）`);
+  };
+  const onImportFile = async (event) => {
+    const file = event.currentTarget.files?.[0];
+    // 清空 value：同一个文件连续选两次也要能再次触发 change。
+    event.currentTarget.value = "";
+    if (file === void 0) return;
+    setImportError(void 0);
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const result = await window.kami.previewHooksImport(text);
+      setImportText(text);
+      setImportPreview(result);
+    } catch (e) {
+      // 非 JSON / 超限在这里就被拒（daemon 抛的是可诊断原因，不是一句「导入失败」）。
+      const message = hookErrorText(e);
+      setImportError(message);
+      toast("error", `导入失败：${message}`);
+    } finally {
+      setImporting(false);
+    }
+  };
+  const confirmImport = async () => {
+    if (importText === void 0) return;
+    setImporting(true);
+    setImportError(void 0);
+    try {
+      const result = await window.kami.importHooks(importText);
+      setImportPreview(void 0);
+      setImportText(void 0);
+      await refresh();
+      toast("success", `已导入 ${result.imported} 条（合并后共 ${result.hooks.length} 条）`);
+    } catch (e) {
+      // 保持弹窗打开：用户需要看到「为什么这一份不行」，再决定换文件还是放弃。
+      setImportError(hookErrorText(e));
+    } finally {
+      setImporting(false);
+    }
   };
   const editor = draft === void 0 ? null : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-editor", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "starter-field", children: [
@@ -67503,6 +67615,22 @@ function HooksSection({ busy }) {
           "新增 hook"
         ]
       }) : null,
+      /* 导出 / 导入放在用户级区域底部：它们作用于这一份列表，不属于工作区那一段。
+         文件选择器是**常驻**的隐藏节点（不是点按钮时临时创建）：GUI 测试能稳定地
+         用 setInputFiles 命中它，也少一条「创建后没挂到 DOM」的失败路径。
+         键盘 / 读屏走的是可见的「导入」按钮（display:none 的 input 本身不在无障碍树里）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "hooks-io", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", disabled: saving || busy === true, onClick: exportHooks, children: "导出" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "starter-action", disabled: saving || importing || busy === true, onClick: () => fileInputRef.current?.click(), children: "导入" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+          ref: fileInputRef,
+          type: "file",
+          accept: ".json,application/json",
+          className: "hooks-import-input",
+          "aria-label": "选择 hooks 导入文件",
+          onChange: onImportFile
+        })
+      ] }),
       workspace !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "工作区 hooks" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-row hooks-workspace-row", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
@@ -67550,6 +67678,13 @@ function HooksSection({ busy }) {
       result: testResult,
       error: testError,
       onClose: () => { setTesting(void 0); setTestResult(void 0); setTestError(void 0); }
+    }),
+    importPreview !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HooksImportModal, {
+      preview: importPreview,
+      error: importError,
+      busy: importing,
+      onCancel: () => { setImportPreview(void 0); setImportText(void 0); setImportError(void 0); },
+      onConfirm: () => void confirmImport()
     })
   ] });
 }

@@ -25,6 +25,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	BLOCKING_EVENTS,
 	HOOK_EVENTS,
+	HOOK_IMPORT_MAX_BYTES,
 	HOOK_OUTPUT_MAX,
 	HOOK_TIMEOUT_DEFAULT,
 	HOOK_TIMEOUT_MAX,
@@ -41,15 +42,18 @@ import {
 	isWorkspaceTrusted,
 	matchTool,
 	matchesEvent,
+	mergeHookConfigs,
 	normalizeHook,
 	normalizeTrustedWorkspaceHooks,
 	normalizeWorkspacePath,
 	parseHookConfig,
+	parseHookImportText,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
 	payloadForSessionStart,
 	payloadForStop,
 	payloadForUserPromptSubmit,
+	previewHookImport,
 	readWorkspaceHookConfig,
 	resolveHookSet,
 	resolveSavedHook,
@@ -1167,5 +1171,158 @@ describe("runHooks —— 顺序与短路", () => {
 		const results = await runHooks(hooks, {}, "PostToolUse", d);
 		expect(results).toHaveLength(2);
 		expect(fake.calls).toHaveLength(2);
+	});
+});
+
+/*
+ * ── hooks 导出 / 导入（#387） ────────────────────────────────────────
+ *
+ * 导入文件是**不可信输入**，而 hooks 会被执行 —— 这一层的失败形态都是「静默」：
+ * 预览说有 3 条、实际只导入 2 条；合并把用户原有的其余 hooks 冲掉；
+ * 非法条目被默默丢掉而不是拦住整次导入。所以断言全都落在「整份」与「位置」上。
+ */
+describe("mergeHookConfigs（按 id 合并）", () => {
+	it("同 id 覆盖**原位置**，不追加到末尾", () => {
+		const existing = [
+			normalizeHook({ id: "a", event: "PreToolUse", command: "old-a" }),
+			normalizeHook({ id: "b", event: "PreToolUse", command: "b" })
+		];
+		const incoming = [normalizeHook({ id: "a", event: "PostToolUse", command: "new-a", timeoutMs: 8000 })];
+		const merged = mergeHookConfigs(existing, incoming);
+		expect(merged.map((hook) => hook.id)).toEqual(["a", "b"]);
+		expect(merged[0].event).toBe("PostToolUse");
+		expect(merged[0].command).toBe("new-a");
+		expect(merged[0].timeoutMs).toBe(8000);
+	});
+
+	it("新 id 追加在末尾，原有条目保留", () => {
+		const existing = [normalizeHook({ id: "a", event: "PreToolUse", command: "a" })];
+		const incoming = [normalizeHook({ id: "c", event: "Stop", command: "c" })];
+		const merged = mergeHookConfigs(existing, incoming);
+		expect(merged.map((hook) => hook.id)).toEqual(["a", "c"]);
+	});
+
+	it("不修改入参（数组与元素都不是同一份）", () => {
+		const existing = [normalizeHook({ id: "a", event: "PreToolUse", command: "a" })];
+		const incoming = [normalizeHook({ id: "a", event: "PreToolUse", command: "b" })];
+		const snapshot = JSON.parse(JSON.stringify({ existing, incoming }));
+		const merged = mergeHookConfigs(existing, incoming);
+		expect({ existing, incoming }).toEqual(snapshot);
+		expect(merged).not.toBe(existing);
+		expect(merged[0]).not.toBe(incoming[0]);
+	});
+
+	it("非数组入参按空处理（daemon 内部纯函数也要能扛住残缺值）", () => {
+		expect(mergeHookConfigs(undefined, undefined)).toEqual([]);
+		const only = [normalizeHook({ id: "a", event: "PreToolUse", command: "a" })];
+		expect(mergeHookConfigs(only, undefined).map((hook) => hook.id)).toEqual(["a"]);
+	});
+});
+
+describe("parseHookImportText（不可信文本 → JSON）", () => {
+	it("接受配置同构的对象与裸数组", () => {
+		expect(parseHookImportText('{"version":1,"hooks":[]}')).toEqual({ version: 1, hooks: [] });
+		expect(parseHookImportText("[]")).toEqual([]);
+	});
+
+	it("非法 JSON 的报错要带原因", () => {
+		expect(() => parseHookImportText("{ oops")).toThrow(/不是合法 JSON/);
+	});
+
+	it("超过 128KB 直接拒绝，并按 UTF-8 字节算", () => {
+		// 128KB / 2 个「国」= 编码后 3 倍体积：按字符数判会放过它。
+		const big = "国".repeat(HOOK_IMPORT_MAX_BYTES / 2);
+		expect(() => parseHookImportText(big)).toThrow(/超过 .* 字节上限/);
+	});
+
+	it("非字符串一律拒绝（不猜 null / undefined 的语义）", () => {
+		expect(() => parseHookImportText(null)).toThrow(/必须是文本/);
+		expect(() => parseHookImportText(undefined)).toThrow(/必须是文本/);
+	});
+});
+
+describe("previewHookImport（导入预览）", () => {
+	const existing = [normalizeHook({ id: "keep", event: "PreToolUse", command: "keep" })];
+
+	it("逐条校验，index 指向**文件里的位置**", () => {
+		const preview = previewHookImport(
+			{
+				version: 1,
+				hooks: [
+					{ id: "ok", event: "PreToolUse", command: "ok" },
+					{ id: "bad", event: "Nope", command: "x" },
+					{ id: "ok2", event: "Stop", command: "ok2" }
+				]
+			},
+			existing
+		);
+		expect(preview.fatal).toBeUndefined();
+		expect(preview.incoming.map((hook) => hook.id)).toEqual(["ok", "ok2"]);
+		expect(preview.errors).toHaveLength(1);
+		expect(preview.errors[0].index).toBe(1);
+		expect(preview.errors[0].message).toContain("事件");
+	});
+
+	it("重复 id 在预览阶段就指出（读侧不查重、写侧查重）", () => {
+		const preview = previewHookImport(
+			{
+				hooks: [
+					{ id: "dup", event: "PreToolUse", command: "a" },
+					{ id: "dup", event: "PreToolUse", command: "b" }
+				]
+			},
+			existing
+		);
+		expect(preview.errors).toHaveLength(1);
+		expect(preview.errors[0].index).toBe(1);
+		expect(preview.errors[0].message).toContain("重复 id");
+	});
+
+	it("fatal：hooks 不是数组时整份拒绝，不返回半截列表", () => {
+		const preview = previewHookImport({ version: 1, hooks: "nope" }, existing);
+		expect(typeof preview.fatal).toBe("string");
+		expect(preview.incoming).toEqual([]);
+		expect(preview.errors).toEqual([]);
+	});
+
+	it("合并后超过 32 条时预览就报 mergedError（不能等点「导入」才被拒）", () => {
+		const many = (prefix) =>
+			Array.from({ length: 20 }, (_, i) =>
+				normalizeHook({ id: `${prefix}${i}`, event: "PreToolUse", command: `echo ${i}` })
+			);
+		const preview = previewHookImport({ version: 1, hooks: many("new-") }, many("old-"));
+		// 文件本身完全合法：逐条错误为空，问题只在「合并之后」。
+		expect(preview.fatal).toBeUndefined();
+		expect(preview.errors).toEqual([]);
+		expect(preview.merged).toHaveLength(40);
+		expect(preview.mergedError).toContain("超过 32 条上限");
+	});
+
+	it("当前配置里已有重复 id 时也由 mergedError 提前拦住（读侧不查重，写侧才查）", () => {
+		// 手工改过 preferences.json 的现场：两条读起来都合法，只有写侧才会发现重复。
+		const dupExisting = [
+			normalizeHook({ id: "a", event: "PreToolUse", command: "x" }),
+			normalizeHook({ id: "a", event: "Stop", command: "y" })
+		];
+		const preview = previewHookImport(
+			{ hooks: [{ id: "b", event: "PreToolUse", command: "z" }] },
+			dupExisting
+		);
+		expect(preview.errors).toEqual([]);
+		expect(preview.mergedError).toContain("hook id 重复");
+	});
+
+	it("合并结果以当前已保存列表为基准：其余保留，同 id 覆盖", () => {
+		const preview = previewHookImport(
+			{ hooks: [{ id: "keep", event: "PostToolUse", command: "updated" }] },
+			existing
+		);
+		expect(preview.errors).toEqual([]);
+		expect(preview.merged).toHaveLength(1);
+		expect(preview.merged[0].id).toBe("keep");
+		expect(preview.merged[0].event).toBe("PostToolUse");
+		expect(preview.merged[0].command).toBe("updated");
+		// 入参没有被改写：预览是只读操作。
+		expect(existing[0].event).toBe("PreToolUse");
 	});
 });

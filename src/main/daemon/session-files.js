@@ -115,11 +115,13 @@ import {
 	createPostToolUseHookExtension,
 	createPreToolUseHookExtension,
 	normalizeWorkspacePath,
+	parseHookImportText,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
 	payloadForSessionStart,
 	payloadForStop,
 	payloadForUserPromptSubmit,
+	previewHookImport,
 	resolveHookSet,
 	resolveSavedHook,
 	runHook,
@@ -5842,6 +5844,49 @@ const handlers = {
     const normalized = assertHookConfig(raw);
     writePreferences({ ...readPreferences(), hooks: normalized });
     return { hooks: normalized };
+  },
+  /*
+   * 导入 hooks：先预览、再落盘。
+   *
+   * 合并基准是**当前已保存的用户级列表**，不是渲染层传来的旧列表 ——
+   * 设置页开着时（另一个窗口、或用户直接改了 preferences.json）列表可能已经变了，
+   * 拿旧列表做基准会把那些改动一并覆盖掉。
+   *
+   * 导入文件是不可信输入：无论 apply 与否都先跑与写侧同一份校验；apply 只决定
+   * 「要不要落盘」，不改变校验强度。这里**不执行**任何命令 —— 导入只落盘。
+   *
+   * 当前配置本身已损坏时拒绝导入：此时 readPreferences 会退回 EMPTY，
+   * 「合并后写回」会把整份偏好（不只是 hooks）冲掉，那是比重启一次更坏的后果。
+   */
+  [INVOKE.importHooks]: async ([text, apply]) => {
+    const raw = parseHookImportText(text);
+    const current = readHooksConfig().config;
+    const preview = previewHookImport(raw, current.hooks);
+    if (apply !== true) return preview;
+    if (current.fatal) {
+      throw new Error(`当前用户级 hooks 配置无效，请先修好再导入：${current.fatalMessage ?? "结构非法"}`);
+    }
+    /*
+     * 已保存的配置里有**逐条**非法项时同样拒绝：读侧把坏条目折掉了，
+     * 「合并后写回」会把这些条目从 preferences.json 里静默抹除 ——
+     * 用户只是导入一份文件，不该顺带丢掉别的配置。
+     * 设置页本身会展示这些错误，修好或删掉后再导入即可。
+     */
+    if (current.errors.length > 0) {
+      throw new Error(
+        `当前用户级 hooks 有 ${current.errors.length} 条非法，请先在设置里修好或删除后再导入`
+      );
+    }
+    if (preview.fatal !== void 0) throw new Error(preview.fatal);
+    if (preview.errors.length > 0) {
+      const first = preview.errors[0];
+      throw new Error(`第 ${first.index + 1} 条 hook 非法：${first.message}`);
+    }
+    // 合并后才成立的那类判据（条数上限 / 现有配置里的重复 id）：文案与预览完全一致。
+    if (preview.mergedError !== void 0) throw new Error(preview.mergedError);
+    const normalized = assertHookConfig(preview.merged);
+    writePreferences({ ...readPreferences(), hooks: normalized });
+    return { hooks: normalized, imported: preview.incoming.length };
   },
   // 信任 / 取消信任工作区 hooks（按绝对路径记住）。默认不执行，必须显式打开。
   [INVOKE.setHooksTrusted]: async ([cwd, trusted]) => {

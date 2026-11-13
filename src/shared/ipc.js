@@ -508,6 +508,15 @@ const INVOKE = {
    */
   testHook: "hooks:test",
   /**
+   * 导入 hooks：`(text, apply)`。
+   * `apply !== true` 只返回预览（`{ fatal?, mergedError?, incoming, merged, errors }`），
+   * 不写盘。`errors` 是**文件里**逐条非法项（带原始 index）；`mergedError` 是
+   * 合并后才成立的那类判据（条数上限），它不属于任何一条导入条目。
+   * `apply === true` 时整份校验通过才与**当前已保存的**用户级列表按 id 合并并落盘。
+   * 导入文件是不可信输入 —— 无论哪条路径都先校验，且**不执行**任何命令。
+   */
+  importHooks: "hooks:import",
+  /**
    * 应用版本号（`app.getVersion()`）。**同步通道**（preload 用 sendSync 取值）——
    * 侧栏品牌行是同步渲染的，异步取会先显示错误值再跳变。见 preload 的用法注释。
    */
