@@ -405,6 +405,7 @@ const INVOKE = {
   setHooksUser: "hooks:set-user",
   setHooksTrusted: "hooks:set-trusted",
   testHook: "hooks:test",
+  importHooks: "hooks:import",
   appVersion: "app:get-version",
   getUpdateState: "updates:get-state",
   checkForUpdates: "updates:check",
@@ -797,6 +798,9 @@ const bridge = {
   setHooksTrusted: (cwd, trusted) => ipcRenderer.invoke(INVOKE.setHooksTrusted, cwd, trusted),
   // 只传 id：命令由 daemon 从已保存的配置里取，渲染层无法指定要跑什么。
   testHook: (id) => ipcRenderer.invoke(INVOKE.testHook, id),
+  // 导入分两步：先预览（不写盘），用户确认后才落盘。校验在 daemon 侧，两端不是同一个判据。
+  previewHooksImport: (text) => ipcRenderer.invoke(INVOKE.importHooks, text),
+  importHooks: (text) => ipcRenderer.invoke(INVOKE.importHooks, text, true),
   getUpdateState: () => ipcRenderer.invoke(INVOKE.getUpdateState),
   /*
    * 版本号是**同步**取值（不是 invoke）：侧栏品牌行在首帧就渲染，

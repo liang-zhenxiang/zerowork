@@ -95,6 +95,14 @@ const HOOK_CONFIG_MAX_BYTES = 256 * 1024;
 /** 信任名单最多记多少个工作区（防止偏好文件被无限追加）。 */
 const TRUSTED_WORKSPACES_MAX = 64;
 
+/**
+ * 导入文件大小上限。
+ *
+ * 与工作区配置同族的判据（「配置不该长到读起来有成本」），但取更严的一档：
+ * 工作区文件是本机里用户自己的东西，导入文件则是**外来输入**。
+ */
+const HOOK_IMPORT_MAX_BYTES = 128 * 1024;
+
 /** 超时后等待 close 的兜底时长：SIGKILL 之后仍要回收，但不能无限等。 */
 const HOOK_KILL_GRACE_MS = 1000;
 
@@ -256,6 +264,129 @@ function assertHookConfig(raw) {
 		seen.add(hook.id);
 	}
 	return parsed.hooks;
+}
+
+/**
+ * 导入文本 → JSON 值。
+ *
+ * 与 `readWorkspaceHookConfig` 的区别：那里读的是**本机文件**，错误折进 fatal
+ * 供界面展示；这里是**不可信输入**，任何问题都必须抛一句能解释「为什么不行」
+ * 的错误 —— 调用方要么拿到完整值，要么拿到可诊断的原因，没有中间态。
+ *
+ * 大小按 **UTF-8 字节**算，不是字符数：中文命令按字符数判会放过三倍体积的文件。
+ */
+function parseHookImportText(text) {
+	if (typeof text !== "string") throw new Error("导入内容必须是文本");
+	const bytes = Buffer.byteLength(text, "utf8");
+	if (bytes > HOOK_IMPORT_MAX_BYTES) {
+		throw new Error(`导入文件超过 ${HOOK_IMPORT_MAX_BYTES} 字节上限（实际 ${bytes} 字节）`);
+	}
+	try {
+		return JSON.parse(text);
+	} catch (error) {
+		throw new Error(`导入文件不是合法 JSON：${errorText(error)}`);
+	}
+}
+
+/**
+ * 按 id 合并两份**已规范化**的 hooks：同 id 覆盖原位置，新 id 追加。
+ *
+ * 不整份替换：导入一份只含一条的文件时，用户原有的其余 hooks 不该消失。
+ * 覆盖而不是并存：id 是删除 / 试运行 / 执行时的定位键，重复会让行为不确定
+ * （写侧的 `assertHookConfig` 也会拒绝重复 id）。
+ *
+ * 纯函数：返回新数组与新条目对象，入参的数组与元素都不被修改。
+ */
+function mergeHookConfigs(existing, incoming) {
+	const out = (Array.isArray(existing) ? existing : []).map((hook) => ({ ...hook }));
+	const indexById = new Map(out.map((hook, index) => [hook.id, index]));
+	for (const hook of Array.isArray(incoming) ? incoming : []) {
+		const copy = { ...hook };
+		const at = indexById.get(copy.id);
+		if (at === void 0) {
+			indexById.set(copy.id, out.length);
+			out.push(copy);
+		} else {
+			out[at] = copy;
+		}
+	}
+	return out;
+}
+
+/**
+ * 导入预览：把「文件里有什么」与「合并后会变成什么」一次算清楚，**不写盘**。
+ *
+ * 复用读侧的 `parseHookConfig` —— 宽严必须与真正落盘时一致，否则会出现
+ * 「预览说没问题、点导入却被拒」。逐条错误保留**原始 index**（用户对着文件数行）；
+ * 重复 id 额外报一条：读侧不查重、写侧查重，预览必须提前说清，不能等用户
+ * 点了「导入」才看到错误。
+ *
+ * `mergedError` 是**合并后才成立**的那一类判据（今天只有条数上限）：
+ * 两份配置各自合法，合在一起却越界。它不属于任何一条导入条目，所以
+ * 不能塞进 `errors`（那条会被渲染成「第 N 条」，而文件里并没有那条）。
+ *
+ * @returns {{fatal?: string, mergedError?: string, incoming: object[], merged: object[], errors: {index: number, message: string}[]}}
+ */
+function previewHookImport(raw, existing = []) {
+	const parsed = parseHookConfig(raw, "导入文件");
+	if (parsed.fatal) {
+		return {
+			fatal: parsed.fatalMessage ?? "导入文件的结构非法",
+			incoming: [],
+			merged: mergeHookConfigs(existing, []),
+			errors: []
+		};
+	}
+	const errors = parsed.errors.map((entry) => ({ ...entry }));
+	/*
+	 * 重复 id 的下标要落在**文件里的位置**上：`parseHookConfig` 的 `hooks` 只保留
+	 * 合法条目，原始下标已经丢了。这里按同一份列表再走一遍，只为建 id → index
+	 * 的映射（非法条目会抛，跳过即可 —— 它们已经在上面的 errors 里）。
+	 */
+	const list = Array.isArray(raw) ? raw : isPlainObject(raw) && Array.isArray(raw.hooks) ? raw.hooks : [];
+	const firstIndexById = new Map();
+	for (const [index, entry] of list.entries()) {
+		let id;
+		try {
+			id = normalizeHook(entry, index).id;
+		} catch {
+			continue;
+		}
+		if (firstIndexById.has(id)) {
+			errors.push({ index, message: `导入文件里有重复 id：${id}` });
+		} else {
+			firstIndexById.set(id, index);
+		}
+	}
+	errors.sort((a, b) => a.index - b.index);
+	const merged = mergeHookConfigs(existing, parsed.hooks);
+	/*
+	 * 合并后的条数只能在**这里**判：`parseHookConfig` 只看导入文件自己（≤32 条），
+	 * 而「原有 20 条 + 导入 20 条」是两份各自合法的配置、合并后却越界 ——
+	 * 落盘侧会被 `assertHookConfig` 拒掉。预览必须提前说清，否则正是设计里
+	 * 点名要避免的「预览说没问题、点导入却被拒」。
+	 *
+	 * 归到 `mergedError` 而不是 `errors`：它不属于文件里的任何一条，渲染成
+	 * 「第 N 条：…」会让用户去文件里找一条并不存在的错误。
+	 */
+	let mergedError;
+	if (merged.length > HOOKS_MAX_COUNT) {
+		const kept = Array.isArray(existing) ? existing.length : 0;
+		mergedError = `合并后共 ${merged.length} 条，超过 ${HOOKS_MAX_COUNT} 条上限（现有 ${kept} 条 + 导入 ${parsed.hooks.length} 条）—— 请先删掉一些旧的再导入`;
+	} else {
+		// 兜底：将来若合并后才暴露别的写侧判据，预览也跟着一起严。
+		try {
+			assertHookConfig(merged);
+		} catch (error) {
+			mergedError = errorText(error);
+		}
+	}
+	return {
+		incoming: parsed.hooks,
+		merged,
+		errors,
+		...(mergedError === void 0 ? {} : { mergedError })
+	};
 }
 
 /**
@@ -1069,6 +1200,7 @@ export {
 	HOOK_COMMAND_MAX,
 	HOOK_CONFIG_MAX_BYTES,
 	HOOK_EVENTS,
+	HOOK_IMPORT_MAX_BYTES,
 	HOOK_KILL_GRACE_MS,
 	HOOK_MATCHER_MAX,
 	HOOK_OUTPUT_MAX,
@@ -1091,15 +1223,18 @@ export {
 	isWorkspaceTrusted,
 	matchTool,
 	matchesEvent,
+	mergeHookConfigs,
 	normalizeHook,
 	normalizeTrustedWorkspaceHooks,
 	normalizeWorkspacePath,
 	parseHookConfig,
+	parseHookImportText,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
 	payloadForSessionStart,
 	payloadForStop,
 	payloadForUserPromptSubmit,
+	previewHookImport,
 	readWorkspaceHookConfig,
 	refusalReason,
 	resolveHookSet,
