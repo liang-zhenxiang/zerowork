@@ -22,7 +22,7 @@
 - [x] `SECURITY.md`、`CHANGELOG.md`
 - [x] `npm run lint:all`、`npm test`、`npm run build && npm run check:renderer-assets`、
       相关 GUI 套件
-- [ ] PR（Closes #387）→ `CI 总览` 绿 → squash 合并
+- [x] PR（Closes #387）→ `CI 总览` 绿 → squash 合并（#388，提交 eabba76）
 
 ## 回滚
 
