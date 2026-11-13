@@ -760,9 +760,11 @@ git switch main && git pull
 git switch -c chore/release-v0.2.0
 
 # 2. 编辑 CHANGELOG.md：把 [Unreleased] 的内容归入新版本段，并保留一个空的 [Unreleased]
-#    同时把 package.json 的 version 改成同一个版本号
+#    同时把 package.json 的 version 改成同一个版本号，并用
+#    `npm install --package-lock-only` 让 package-lock.json 的根版本跟上
+#    （只改前两处会在下一次安装时产生与发布无关的 lockfile diff，v0.21.0 真实发生过）
 
-# 3. 发布前自查（tag / CHANGELOG / package.json 三者必须一致）
+# 3. 发布前自查（tag / CHANGELOG / package.json / package-lock.json 四者必须一致）
 npm run check:release-version -- v0.2.0
 
 # 4. 提交、推分支、建 PR、走完整 CI、squash 合并

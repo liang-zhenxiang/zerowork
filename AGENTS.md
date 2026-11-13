@@ -158,9 +158,12 @@ npm run check:unicode -- --all # 需要时连 resources/** 一起扫
 
 1. 从最新 `main` 切 `chore/release-vX.Y.Z`
 2. `CHANGELOG.md` 的 `[Unreleased]` 归入 `[X.Y.Z] - 日期`，段首加一句话概述本轮主题；
-   `[Unreleased]` 恢复空壳。同时把 `package.json` 的 `version` 改成同一个版本号
+   `[Unreleased]` 恢复空壳。同时把 `package.json` 的 `version` 改成同一个版本号，
+   并让 `package-lock.json` 的根版本跟上（`npm install --package-lock-only`）；
+   只改前两处会在下一次安装时产生与发布无关的 lockfile diff（真实发生过）
 3. **发布前自查**：`npm run check:release-version -- vX.Y.Z` —— 校验
-   tag / CHANGELOG / package.json 三者一致。不一致时发布说明会**静默地**只剩 PR 清单
+   tag / CHANGELOG / package.json / package-lock.json 四者一致。不一致时发布说明会
+   **静默地**只剩 PR 清单（锁文件漂移则没有任何一处会报错）
 4. 发布 PR 走完整 CI → squash 合并
 5. **推 tag 前先确认远端没有它**：`git ls-remote --tags origin vX.Y.Z`
 6. `git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z`
