@@ -19281,3 +19281,27 @@ html[data-sidebar-density='compact'] .space-group-header {
 		animation: none;
 	}
 }
+
+/* ── §47 第二十三轮十连（#390 数据与备份） ─────────────────────── */
+/* 数据链路卡：备份/恢复/导入/体检/路径各行动横排 */
+.data-ops-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius-md);
+	margin: var(--space-2) var(--space-4);
+}
+.data-ops-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	flex-wrap: wrap;
+}
+.data-ops-confirm {
+	border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+	background: color-mix(in srgb, var(--warning) 8%, var(--bg-elevated));
+	border-radius: var(--radius-sm);
+	padding: var(--space-2);
+}
