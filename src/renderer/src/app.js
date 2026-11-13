@@ -14085,6 +14085,23 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
               children: "添加备注"
             }
           ),
+          /* #390 第二十三轮 F8：复制会话路径（开发者向——报障/排查时
+             直接给出 jsonl 位置，省得去 configDir 翻）。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              onClick: () => {
+                setMenuPath(void 0);
+                navigator.clipboard.writeText(task.path).then(() => {
+                  showToast("已复制会话路径");
+                }).catch(() => {
+                });
+              },
+              children: "复制会话路径"
+            }
+          ),
           /* #354 第十九轮 F6：创建副本。daemon 复制整份 jsonl（换 id，
              标题加「(副本)」），原会话不动。 */
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -69956,6 +69973,131 @@ function RuntimesSection({ busy }) {
 function errorText$3(e) {
   return e instanceof Error ? e.message : String(e);
 }
+/* #390 第二十三轮：数据链路卡。备份（含上次备份时间与提醒）/ 从备份恢复 /
+   导入外部 jsonl / 全量 Markdown 导出 / 数据体检 / sessions/ 路径与打开。
+   每个动作都有明确的完成反馈；恢复带确认摘要（数量）。 */
+function DataOpsCard() {
+  const [backups, setBackups] = reactExports.useState(void 0);
+  const [dir, setDir] = reactExports.useState("");
+  const [health, setHealth] = reactExports.useState(void 0);
+  const [busy, setBusy] = reactExports.useState("");
+  const [result, setResult] = reactExports.useState(void 0);
+  const [confirmingRestore, setConfirmingRestore] = reactExports.useState(void 0);
+  const load = reactExports.useCallback(() => {
+    window.kami.listBackups?.().then((items) => setBackups(items)).catch(() => setBackups([]));
+    window.kami.sessionsDir?.().then((d) => setDir(d)).catch(() => {
+    });
+    window.kami.dataHealth?.().then((r) => setHealth(r)).catch(() => {
+    });
+  }, []);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  const run = (name, fn, doneText) => {
+    setBusy(name);
+    fn().then((r) => {
+      setResult(doneText(r));
+      load();
+    }).catch((e) => {
+      setResult(`失败：${e instanceof Error ? e.message : String(e)}`);
+    }).finally(() => setBusy(""));
+  };
+  const doBackup = () => run("backup", () => window.kami.backupSessions(), (r) => `已备份 ${r.count} 个会话到 ${r.archivePath.split("/").pop()}`);
+  const doExportAll = () => run("exportAll", () => window.kami.exportAllMarkdown(), (r) => `已导出 ${r.ok} 个会话（失败 ${r.failed}）到 exports/`);
+  const doImport = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".jsonl";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (file === void 0) return;
+      file.text().then((text2) => {
+        return window.kami.importSessionContent(text2, file.name);
+      }).then((r) => {
+        setResult(`已导入「${r.title}」`);
+        load();
+      }).catch((e) => {
+        setResult(`导入失败：${e instanceof Error ? e.message : String(e)}`);
+      });
+    };
+    input.click();
+  };
+  const doRestore = (archivePath) => {
+    setBusy("restore");
+    window.kami.restoreSessions(archivePath).then((r) => {
+      setResult(`恢复完成：新增 ${r.restored} 个，跳过同名 ${r.skipped} 个`);
+      setConfirmingRestore(void 0);
+      load();
+    }).catch((e) => {
+      setResult(`恢复失败：${e instanceof Error ? e.message : String(e)}`);
+    }).finally(() => setBusy(""));
+  };
+    const openSessionsDir = () => {
+    if (dir !== "") window.open(`file://${dir}`);
+  };
+  const lastBackup = backups !== void 0 && backups.length > 0 ? backups[0] : void 0;
+  const daysSinceBackup = lastBackup !== void 0 ? Math.floor((Date.now() - lastBackup.mtime) / 864e5) : void 0;
+  const healthLine = health === void 0 ? void 0 : [
+    health.total > 0 ? `${health.total} 个会话` : null,
+    health.empty > 0 ? `空 ${health.empty}` : null,
+    health.corrupt > 0 ? `损坏 ${health.corrupt}` : null,
+    health.oversized > 0 ? `超大 ${health.oversized}` : null,
+    health.unnamed > 0 ? `未命名 ${health.unnamed}` : null
+  ].filter((x) => x !== null).join(" · ");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-card", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy !== "", onClick: doBackup, children: "备份全部会话" }),
+      lastBackup !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
+        "上次备份：",
+        new Date(lastBackup.mtime).toLocaleString("zh-CN"),
+        daysSinceBackup !== void 0 && daysSinceBackup >= 7 && " ⚠ 已超 7 天"
+      ] }),
+      lastBackup === void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: "还没有备份过" })
+    ] }),
+    backups !== void 0 && backups.length > 0 && confirmingRestore === void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: `最近备份 ${backups[0].name}（${(backups[0].size / 1024).toFixed(1)} KB）` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy !== "", onClick: () => setConfirmingRestore({ name: backups[0].name, path: backups[0].path === void 0 ? backups[0].name : backups[0].path }), children: "从最近备份恢复" })
+    ] }),
+    confirmingRestore !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row data-ops-confirm", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-foot", children: `将恢复 ${confirmingRestore}——同名会话会跳过（不覆盖现有数据）。确认恢复？` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", disabled: busy !== "", onClick: () => doRestore(confirmingRestore.path), children: "确认恢复" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy !== "", onClick: () => setConfirmingRestore(void 0), children: "取消" })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy !== "", onClick: doExportAll, children: "导出全部为 Markdown" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy !== "", onClick: doImport, children: "导入 jsonl 文件" })
+    ] }),
+    healthLine !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: `体检：${healthLine}` })
+    ] }),
+    dir !== "" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", style: { wordBreak: "break-all" }, children: `存储位置：${dir}` }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: openSessionsDir, children: "在 Finder 打开" })
+    ] }),
+    /* #390 第二十三轮 F9：片段库 JSON 导出（与短语导出同形态，跨设备迁移）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      type: "button",
+      className: "mini-btn",
+      onClick: () => {
+        try {
+          const parsed = JSON.parse(window.localStorage.getItem("zw:snippets") ?? "[]");
+          const blob = new Blob([JSON.stringify(parsed, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "zerowork-snippets.json";
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch {
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "片段导出失败（存储不可用）" }] }));
+        }
+      },
+      children: "导出片段库"
+    }),
+    result !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-foot", children: result })
+  ] });
+}
+
 /* #354 第十九轮 F7：清理空会话卡片。进入数据管理页时查一次数量；
    0 个不渲染（没有「清理 0 个」的噪音）。确认摘要带数量与去向（回收目录）。 */
 function EmptyPurgeCard() {
@@ -70071,6 +70213,8 @@ function DataManagementSection() {
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "归档的任务不占用侧栏列表，但完整保留：可以在这里恢复，也可以删除。" }),
+    /* #390 第二十三轮 F1/F2/F4/F5/F6/F7：数据链路卡（备份/恢复/导入/体检/路径/全量导出）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DataOpsCard, {}),
     /* #354 第十九轮 F7：清理空会话（放分支外——归档 0 条时也要能看到）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyPurgeCard, {}),
     /*

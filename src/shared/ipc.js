@@ -823,7 +823,36 @@ const INVOKE = {
    * 仍然满足「空 + 临时 + 未归档」的，服务端二次校验。
    */
   emptySessionsCount: "session:empty-count",
-  purgeEmptySessions: "session:purge-empty"
+  purgeEmptySessions: "session:purge-empty",
+  /**
+   * #390 第二十三轮 F1/F2：会话数据备份与恢复。归档格式 .zwbackups =
+   * JSON Lines（每行 {name, content}，name 为 sessions/ 下的相对路径）——
+   * 零依赖（Node 无内置 tar/zip），纯文本可读、可 grep、可部分恢复。
+   *   backupSessions()   → { archivePath, count }（写 CONFIG_DIR/backups/）
+   *   restoreSessions(p) → { restored, skipped }（同名跳过，预览后确认调用）
+   *   listBackups()      → [{ name, size, mtime }]
+   */
+  backupSessions: "session:backup",
+  restoreSessions: "session:restore",
+  listBackups: "session:backups-list",
+  /**
+   * #390 第二十三轮 F3：导入外部会话 jsonl（校验 header.type==="session"）。
+   *   importSession(sourcePath) → { path, title }
+   */
+  importSession: "session:import",
+  importSessionContent: "session:import-content",
+  /**
+   * #390 第二十三轮 F4/F5：全量 Markdown 导出与数据体检。
+   *   exportAllMarkdown()      → { ok, failed, dir }
+   *   dataHealth()             → { total, empty, oversized, corrupt, unnamed }
+   */
+  exportAllMarkdown: "session:export-all",
+  dataHealth: "session:health",
+  /**
+   * #390 第二十三轮 F6：sessions/ 目录绝对路径（数据管理页显示 + 打开）。
+   * main 本地应答（getSessionsDir 是 daemon 内部函数，路径本机语义）。
+   */
+  sessionsDir: "session:dir"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */

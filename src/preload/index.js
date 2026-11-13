@@ -629,7 +629,16 @@ const INVOKE = {
   sessionCopy: "session:copy",
   /** #354 F7：空会话统计 / 清理。 */
   emptySessionsCount: "session:empty-count",
-  purgeEmptySessions: "session:purge-empty"
+  purgeEmptySessions: "session:purge-empty",
+  /** #390 第二十三轮：备份/恢复/导入/体检/全量导出。 */
+  backupSessions: "session:backup",
+  restoreSessions: "session:restore",
+  listBackups: "session:backups-list",
+  importSession: "session:import",
+  importSessionContent: "session:import-content",
+  exportAllMarkdown: "session:export-all",
+  dataHealth: "session:health",
+  sessionsDir: "session:dir"
 };
 const PUSH = {
   /** 会话事件流。payload 为 SessionEventEnvelope（sessionId 路由键 + 事件本体）。 */
@@ -716,6 +725,15 @@ const bridge = {
   /** #354 F7：空会话统计 / 清理。 */
   emptySessionsCount: () => ipcRenderer.invoke(INVOKE.emptySessionsCount),
   purgeEmptySessions: (paths) => ipcRenderer.invoke(INVOKE.purgeEmptySessions, paths),
+  /** #390 第二十三轮：备份/恢复/导入/体检/全量导出。 */
+  backupSessions: () => ipcRenderer.invoke(INVOKE.backupSessions),
+  restoreSessions: (p) => ipcRenderer.invoke(INVOKE.restoreSessions, p),
+  listBackups: () => ipcRenderer.invoke(INVOKE.listBackups),
+  importSession: (p) => ipcRenderer.invoke(INVOKE.importSession, p),
+  importSessionContent: (content, name) => ipcRenderer.invoke(INVOKE.importSessionContent, content, name),
+  exportAllMarkdown: () => ipcRenderer.invoke(INVOKE.exportAllMarkdown),
+  dataHealth: () => ipcRenderer.invoke(INVOKE.dataHealth),
+  sessionsDir: () => ipcRenderer.invoke(INVOKE.sessionsDir),
   pinSession: (path, pinned) => ipcRenderer.invoke(INVOKE.sessionPin, path, pinned),
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
   shareStatsCard: (base64Png, kind, ext) => ipcRenderer.invoke(INVOKE.statsShare, base64Png, kind, ext),

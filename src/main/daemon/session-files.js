@@ -5104,6 +5104,188 @@ const handlers = {
     const empties = sessions.filter((s) => s.isTempTask === true && (s.messageCount ?? 0) === 0 && s.archived !== true);
     return { count: empties.length, paths: empties.map((s) => s.path) };
   },
+  /* #390 第二十三轮 F1/F2/F7：会话数据备份与恢复。
+     归档格式 .zwbackups = JSON Lines（每行 {name, content}），零依赖、纯文本可读。
+     写入 tmp + rename 原子落盘；恢复同名跳过（不覆盖磁盘现状）。 */
+  [INVOKE.backupSessions]: async () => {
+    const dir = getSessionsDir();
+    const files = readdirSync(dir).filter((n) => n.endsWith(".jsonl"));
+    const backupsDir = join(getConfigDir(), "backups");
+    mkdirSync(backupsDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const archivePath = join(backupsDir, `sessions-${stamp}.zwbackups`);
+    const outLines = [];
+    for (const name of files) {
+      try {
+        const content = readFileSync(join(dir, name), "utf8");
+        outLines.push(JSON.stringify({ name, content }));
+      } catch {
+        /* 单个读不了的（损坏/权限）跳过——备份尽量多保 */
+      }
+    }
+    const tmpPath = `${archivePath}.tmp`;
+    writeFileSync(tmpPath, outLines.join("\n") + "\n", "utf8");
+    renameSync(tmpPath, archivePath);
+    return { archivePath, count: outLines.length };
+  },
+  [INVOKE.listBackups]: async () => {
+    const backupsDir = join(getConfigDir(), "backups");
+    if (!existsSync(backupsDir)) return [];
+    return readdirSync(backupsDir).filter((n) => n.endsWith(".zwbackups")).map((n) => {
+      const full = join(backupsDir, n);
+      const st = statSync(full);
+      return { name: n, path: full, size: st.size, mtime: st.mtimeMs };
+    }).sort((a, b) => b.mtime - a.mtime);
+  },
+  [INVOKE.restoreSessions]: async ([archivePath]) => {
+    if (typeof archivePath !== "string" || archivePath === "") throw new Error("恢复需要归档路径");
+    const resolved = resolve(archivePath);
+    if (!resolved.startsWith(join(getConfigDir(), "backups"))) throw new Error("只允许从 backups/ 目录恢复（防止任意路径读）");
+    const lines = readFileSync(resolved, "utf8").split("\n").filter((l) => l.trim() !== "");
+    const dir = getSessionsDir();
+    let restored = 0;
+    let skipped = 0;
+    for (const line of lines) {
+      let entry;
+      try {
+        entry = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (typeof entry?.name !== "string" || typeof entry?.content !== "string") continue;
+      const target = join(dir, entry.name);
+      if (existsSync(target)) {
+        skipped += 1;
+        continue;
+      }
+      writeFileSync(target, entry.content, "utf8");
+      restored += 1;
+    }
+    if (restored > 0) pushTaskListChanged();
+    return { restored, skipped };
+  },
+  /* #390 第二十三轮 F3：导入外部会话 jsonl。header.type==="session" 才收；
+     文件名与现有冲突时加时间戳后缀。 */
+  /* #390 F3 变体：内容直传导入（渲染层 file.text() 读到文本后直传——
+     避免渲染层把文件落盘到临时路径再传路径的绕路）。校验同 importSession。 */
+  [INVOKE.importSessionContent]: async ([content, name]) => {
+    if (typeof content !== "string" || content === "") throw new Error("导入内容为空");
+    const lines = content.split("\n").filter((l) => l.trim() !== "");
+    if (lines.length === 0) throw new Error("文件是空的");
+    let header;
+    try {
+      header = JSON.parse(lines[0]);
+    } catch {
+      throw new Error("文件头不是 JSON");
+    }
+    if (header?.type !== "session") throw new Error("不是 ZeroWork 会话文件（header.type !== session）");
+    const newId = randomUUID();
+    header.id = newId;
+    lines[0] = JSON.stringify(header);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const safeName = typeof name === "string" && name !== "" ? name.replace(/[\\/]/g, "_").slice(0, 60) : "imported";
+    const targetPath = join(getSessionsDir(), `${stamp}_imported-${newId.slice(0, 8)}-${safeName.endsWith(".jsonl") ? safeName.slice(0, -6) : safeName}.jsonl`);
+    writeFileSync(targetPath, lines.join("\n") + "\n", "utf8");
+    const title = typeof header.title === "string" && header.title !== "" ? header.title : "导入的会话";
+    await setSessionName(targetPath, title);
+    pushTaskListChanged();
+    return { path: targetPath, title };
+  },
+  [INVOKE.importSession]: async ([sourcePath]) => {
+    if (typeof sourcePath !== "string" || sourcePath === "") throw new Error("导入需要源文件路径");
+    const lines = readFileSync(resolve(sourcePath), "utf8").split("\n").filter((l) => l.trim() !== "");
+    if (lines.length === 0) throw new Error("文件是空的");
+    let header;
+    try {
+      header = JSON.parse(lines[0]);
+    } catch {
+      throw new Error("文件头不是 JSON");
+    }
+    if (header?.type !== "session") throw new Error("不是 ZeroWork 会话文件（header.type !== session）");
+    const newId = randomUUID();
+    header.id = newId;
+    lines[0] = JSON.stringify(header);
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const targetPath = join(getSessionsDir(), `${stamp}_imported-${newId.slice(0, 8)}.jsonl`);
+    writeFileSync(targetPath, lines.join("\n") + "\n", "utf8");
+    const title = typeof header.title === "string" && header.title !== "" ? header.title : "导入的会话";
+    await setSessionName(targetPath, title);
+    pushTaskListChanged();
+    return { path: targetPath, title };
+  },
+  /* #390 第二十三轮 F4：全量 Markdown 导出。逐个复用 exportMarkdown 纯函数，
+     全部落 exports/；失败计数不阻塞其余。 */
+  [INVOKE.exportAllMarkdown]: async () => {
+    const sessions = await listSessions();
+    let ok = 0;
+    let failed = 0;
+    const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
+    mkdirSync(exportsDir, { recursive: true });
+    const now = /* @__PURE__ */ new Date();
+    for (const s of sessions) {
+      try {
+        const target = s.path;
+        const bucket = findBucketByFile(target);
+        const resolvedTarget = resolve(target);
+        let entries2;
+        const hostPromise = bucket?.hostPromise;
+        if (hostPromise !== void 0) {
+          const host = await hostPromise;
+          entries2 = host.branchEntries();
+        } else {
+          const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+          const manager = SessionManager.open(target, getSessionsDir());
+          entries2 = manager.getBranch();
+        }
+        if (!hasExportableContent(entries2)) continue;
+        const outputPath = buildExportPath(exportsDir, s.title ?? "", now, ".md");
+        writeFileSync(outputPath, renderSessionMarkdown({ title: s.title ?? "", header: { cwd: s.cwd ?? "" }, entries: entries2, now }), "utf8");
+        ok += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    return { ok, failed, dir: exportsDir };
+  },
+  /* #390 第二十三轮 F5：数据体检。损坏 = JSON 解析失败；空 = 无消息条目；
+     超大 = 文件 >5MB；未命名 = 标题派生后仍为空。 */
+  [INVOKE.dataHealth]: async () => {
+    const dir = getSessionsDir();
+    const files = readdirSync(dir).filter((n) => n.endsWith(".jsonl"));
+    let corrupt = 0;
+    let empty = 0;
+    let oversized = 0;
+    let unnamed = 0;
+    let total = files.length;
+    for (const name of files) {
+      const full = join(dir, name);
+      const st = statSync(full);
+      if (st.size > 5 * 1024 * 1024) oversized += 1;
+      try {
+        const lines = readFileSync(full, "utf8").split("\n").filter((l) => l.trim() !== "");
+        if (lines.length <= 1) {
+          empty += 1;
+          continue;
+        }
+        JSON.parse(lines[0]);
+        const hasMessage = lines.slice(1).some((l) => {
+          try {
+            return JSON.parse(l)?.type === "message";
+          } catch {
+            return false;
+          }
+        });
+        if (!hasMessage) empty += 1;
+        const header = JSON.parse(lines[0]);
+        if (typeof header?.title !== "string" || header.title.trim() === "") unnamed += 1;
+      } catch {
+        corrupt += 1;
+      }
+    }
+    return { total, empty, oversized, corrupt, unnamed };
+  },
+  /* #390 第二十三轮 F6：sessions/ 绝对路径（数据管理页显示）。 */
+  [INVOKE.sessionsDir]: async () => getSessionsDir(),
   [INVOKE.purgeEmptySessions]: async ([paths]) => {
     if (!Array.isArray(paths) || paths.length === 0) return { removed: 0 };
     const sessions = await listSessions();
