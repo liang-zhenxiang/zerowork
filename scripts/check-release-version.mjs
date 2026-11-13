@@ -2,11 +2,17 @@
 /**
  * check-release-version.mjs —— 发布版本号一致性检查
  *
- * 发布流程里有三个地方各写了一份版本号，它们**必须对得上**：
+ * 发布流程里有四个地方各写了一份版本号，它们**必须对得上**：
  *
  *   ① git tag            `v0.2.0`        —— 触发 release 工作流
  *   ② CHANGELOG.md       `## [0.2.0]`    —— 发布说明的正文来源
  *   ③ package.json       `"version"`     —— 应用自身的版本
+ *   ④ package-lock.json  `"version"`     —— 锁文件的根版本（两处：顶层与 packages[""]）
+ *
+ * ④ 是 2026-11-13 补上的：v0.21.0 发布时只改了三处，锁文件仍写着 0.20.0，
+ * 而 `npm ci` / `npm install` 会以 package.json 为准改写它 —— 下一次安装就产生
+ * 一个与发布无关的 diff（真实发生过，由 Dependabot 的 PR 顺带暴露）。
+ * 它不影响发布说明，所以**没有任何一处会报错**，只能靠这个检查。
  *
  * 对不上时的表现是**静默的**：`release.yml` 从 CHANGELOG 提取版本段时
  * 一段都提不到，发布说明只剩 PR 清单，维护者要等看到 Release 才发现。
@@ -18,14 +24,21 @@
  *   node scripts/check-release-version.mjs v0.2.0
  *   TAG=v0.2.0 node scripts/check-release-version.mjs      # CI 里更方便
  *
- * 退出码：0 三者一致，1 不一致（或 tag 形态不合法）。
+ * 退出码：0 四者一致，1 不一致（或 tag 形态不合法）。
  */
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+/*
+ * `CHECK_RELEASE_ROOT` 只给单测用：让脚本在一份临时夹具目录里跑，
+ * 而不是永远读仓库根（测试见 tests/unit/check-release-version.test.mjs）。
+ * 正常使用时不要设置它 —— 发布检查必须读真实的仓库。
+ */
+const ROOT = process.env.CHECK_RELEASE_ROOT
+	? path.resolve(process.env.CHECK_RELEASE_ROOT)
+	: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const USE_COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, text) => (USE_COLOR ? `\u001b[${code}m${text}\u001b[0m` : text);
@@ -86,7 +99,39 @@ if (!consistent) {
 	process.exit(1);
 }
 
+// ---- ④ package-lock.json ----
+/*
+ * 锁文件的根版本必须跟随 package.json（不是 tag）：预发布 tag 不改 package.json，
+ * 锁文件也不该改。两处都查 —— 顶层 `version` 与 `packages[""]` 各写了一份，
+ * 只改一处会留下「看起来同步了」的假象。
+ */
+let lock;
+try {
+	lock = JSON.parse(readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8'));
+} catch (error) {
+	process.stdout.write(
+		`\n${red('package-lock.json 读不到或不是合法 JSON。')}\n` + dim(`  ${error.message}\n`),
+	);
+	process.exit(1);
+}
+const lockVersion = typeof lock.version === 'string' ? lock.version : '';
+const lockRootVersion = typeof lock.packages?.['']?.version === 'string' ? lock.packages[''].version : '';
+const lockConsistent = lockVersion === pkgVersion && lockRootVersion === pkgVersion;
+
 process.stdout.write(
-	`  ${green('✓')} 三者一致${isPrerelease ? dim('（预发布版本，不会标记为 latest）') : ''}\n`,
+	`  package-lock.json: ${lockVersion === '' ? '（缺 version）' : lockVersion} ${lockConsistent ? green('✓') : red('✗')}\n`,
+);
+
+if (!lockConsistent) {
+	process.stdout.write(
+		`\n${red('package-lock.json 的根版本与 package.json 对不上。')}\n` +
+			dim(`  期望 ${pkgVersion}（顶层与 packages[""] 都要改）\n`) +
+			dim('  改法：npm install --package-lock-only（或手动同步这两处）\n'),
+	);
+	process.exit(1);
+}
+
+process.stdout.write(
+	`  ${green('✓')} 四者一致${isPrerelease ? dim('（预发布版本，不会标记为 latest）') : ''}\n`,
 );
 process.exit(0);
