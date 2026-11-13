@@ -62,6 +62,15 @@ writeFileSync(
 );
 const denyCommand = `"${process.execPath}" "${denyFixture}"`;
 
+/*
+ * 导出 / 导入（#387）：导出的内容由第一条新用例捕获并写到这个路径，
+ * 后面的用例用它驱动真实的 file input（setInputFiles），走完整读取路径。
+ */
+const exportedPath = join(h.WORKSPACE_DIR, "exported-hooks.json");
+const invalidPath = join(h.WORKSPACE_DIR, "invalid-hooks.json");
+/** 导出形状的现场证据，供回读用例比对「导入后与导出前逐字段一致」。 */
+let exportedHooks;
+
 await h.launch();
 const win = h.window();
 
@@ -207,6 +216,59 @@ async function clickHookAction(titleText, actionText) {
 		},
 		{ title: titleText, action: actionText },
 	);
+}
+
+/** Hooks 分组里「导出 / 导入」按钮的状态（找不到返回 null）。 */
+const hooksIoButton = (label) =>
+	win.evaluate((text) => {
+		const section = [...document.querySelectorAll(".settings-section")].find(
+			(node) => node.querySelector("h2")?.textContent.trim() === "Hooks",
+		);
+		const button = [...(section?.querySelectorAll(".hooks-io .starter-action") ?? [])].find(
+			(node) => (node.textContent ?? "").trim() === text,
+		);
+		return button === undefined ? null : { disabled: button.disabled };
+	}, label);
+
+/** 用真实的 file input 注入文件（常驻隐藏节点，setInputFiles 不要求可见）。 */
+async function pickImportFile(path) {
+	await win.locator('input[aria-label="选择 hooks 导入文件"]').setInputFiles(path);
+}
+
+/** 等导入预览弹窗出现且包含指定文案，返回弹窗全文（不等就是超时）。 */
+const waitImportPreview = (needle) =>
+	waitUntil(
+		() =>
+			win.evaluate((text) => {
+				const card = document.querySelector(".hooks-import-card");
+				if (card === null) return false;
+				const content = card.textContent ?? "";
+				return content.includes(text) ? content : null;
+			}, needle),
+		{ timeout: 15_000, interval: 200, desc: `导入预览弹窗出现且包含「${needle}」` },
+	);
+
+/** 预览弹窗里「导入 N 条」按钮的禁用状态（弹窗不在时返回 null）。 */
+const importButtonDisabled = () =>
+	win.evaluate(() => {
+		const card = document.querySelector(".hooks-import-card");
+		if (card === null) return null;
+		const button = [...card.querySelectorAll("button")].find((node) =>
+			(node.textContent ?? "").trim().startsWith("导入"),
+		);
+		return button === undefined ? null : button.disabled;
+	});
+
+async function closeImportPreview() {
+	await win.evaluate(() => {
+		const card = document.querySelector(".hooks-import-card");
+		const button = [...(card?.querySelectorAll("button") ?? [])].find((node) => node.textContent.trim() === "取消");
+		button?.click();
+	});
+	await waitUntil(() => win.evaluate(() => document.querySelector(".hooks-import-card") === null), {
+		timeout: 10_000,
+		desc: "导入预览弹窗关闭",
+	});
 }
 
 /** 把「最近运行」滚进视口中央：截图要拍到这一块（分组很长，滚到顶端只会拍到列表）。 */
@@ -553,6 +615,142 @@ await h.check("信任工作区 hooks → 状态变为已信任并落盘", async 
 	await h.shoot("settings-hooks-trusted-light");
 });
 
+await h.check("导出 hooks：形状与配置文件同构，且不含工作区信任列表", async () => {
+	/*
+	 * 覆写 createObjectURL 捕获 Blob；同时拦掉 anchor.click —— Electron 在没有
+	 * will-download 处理器时会弹系统保存对话框，测试会卡在那一步。捕获到 Blob
+	 * 与 download 名，就足以断言「导出了什么」。
+	 */
+	await win.evaluate(() => {
+		window.__zwExport = {};
+		const originalCreate = URL.createObjectURL.bind(URL);
+		URL.createObjectURL = (blob) => {
+			window.__zwExport.blob = blob;
+			return originalCreate(blob);
+		};
+		const originalClick = window.HTMLAnchorElement.prototype.click;
+		window.__zwRestoreAnchorClick = () => {
+			window.HTMLAnchorElement.prototype.click = originalClick;
+		};
+		window.HTMLAnchorElement.prototype.click = function () {
+			window.__zwExport.download = this.download;
+			window.__zwExport.href = this.href;
+		};
+	});
+	try {
+		const button = await hooksIoButton("导出");
+		assert.notEqual(button, null, "Hooks 分组里应有「导出」按钮");
+		assert.equal(button.disabled, false, "「导出」按钮应可用");
+		await clickInSection("Hooks", ".hooks-io .starter-action");
+		await waitUntil(() => win.evaluate(() => window.__zwExport.blob !== void 0), {
+			timeout: 10_000,
+			desc: "点「导出」后捕获到 Blob",
+		});
+	} finally {
+		// 无论断言是否失败都还原原型：锚点在别处也用。
+		await win.evaluate(() => window.__zwRestoreAnchorClick?.());
+	}
+	const exported = await win.evaluate(async () => ({
+		download: window.__zwExport.download,
+		text: await window.__zwExport.blob.text(),
+	}));
+	assert.equal(exported.download, "zerowork-hooks.json", "导出文件名");
+	const parsed = JSON.parse(exported.text);
+	assert.equal(parsed.version, 1, `导出文件应带 version：${exported.text}`);
+	assert.equal(Array.isArray(parsed.hooks), true, "导出文件里应是 hooks 数组");
+	assert.equal(parsed.hooks.length, 2, `导出应含当前 2 条用户级 hook：${exported.text}`);
+	// 信任列表是本机绝对路径：带出去既不安全也无意义。
+	assert.equal("trustedWorkspaceHooks" in parsed, false, `导出不得包含本机信任列表：${exported.text}`);
+	for (const hook of parsed.hooks) {
+		assert.equal(typeof hook.id, "string", `每条 hook 应带 id：${JSON.stringify(hook)}`);
+		assert.equal(typeof hook.event, "string", `每条 hook 应带 event：${JSON.stringify(hook)}`);
+		assert.equal(typeof hook.command, "string", `每条 hook 应带 command：${JSON.stringify(hook)}`);
+		assert.equal(typeof hook.timeoutMs, "number", `每条 hook 应带 timeoutMs：${JSON.stringify(hook)}`);
+	}
+	exportedHooks = parsed.hooks;
+	writeFileSync(exportedPath, exported.text, "utf8");
+});
+
+await h.check("清空用户级列表后导入导出文件 → 预览 → 确认 → 条目恢复", async () => {
+	// 清空走 daemon 通道（等价于逐条删完，但不依赖删除按钮的顺序）。
+	await win.evaluate(() => window.kami.setHooksUser([]));
+	// HooksSection 只在挂载时读一次配置：关掉再打开，拿到的才是清空后的真实状态。
+	await win.evaluate(() => document.querySelector('[aria-label="关闭设置"]')?.click());
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="关闭设置"]') === null), {
+		timeout: 10_000,
+		desc: "设置对话框关闭",
+	});
+	await openSettings();
+	assert.equal(await sectionReady("Hooks", ".hooks-empty"), true, "清空后应显示空态");
+
+	await pickImportFile(exportedPath);
+	const text = await waitImportPreview(`导入预览 · ${exportedHooks.length} 条`);
+	assert.ok(text.includes("工具调用前"), `预览应逐条显示事件：${text}`);
+	assert.ok(text.includes("会话开始"), `预览应逐条显示事件：${text}`);
+	assert.ok(text.includes(exportedHooks[0].id), `预览应显示 hook id：${text}`);
+	assert.equal(await importButtonDisabled(), false, "合法文件下「导入」按钮应可用");
+	await settleAnimations(".hooks-import-card");
+	await h.shoot("settings-hooks-import-preview-light");
+
+	await win.evaluate(() => {
+		const card = document.querySelector(".hooks-import-card");
+		const button = [...(card?.querySelectorAll("button") ?? [])].find((node) =>
+			(node.textContent ?? "").trim().startsWith("导入"),
+		);
+		if (button === undefined) throw new Error("预览弹窗里没有「导入」按钮");
+		button.click();
+	});
+	await waitUntil(() => win.evaluate(() => document.querySelector(".hooks-import-card") === null), {
+		timeout: 15_000,
+		desc: "导入完成后预览弹窗关闭",
+	});
+	await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const section = [...document.querySelectorAll(".settings-section")].find(
+					(node) => node.querySelector("h2")?.textContent.trim() === "Hooks",
+				);
+				const userList = section?.querySelector("ul.starter-list");
+				if (userList === null || userList === undefined) return false;
+				return userList.querySelectorAll(".starter-item").length === 2;
+			}),
+		{ timeout: 15_000, interval: 200, desc: "导入后用户级列表恢复 2 条（refresh 生效）" },
+	);
+	const saved = JSON.parse(readFileSync(join(h.CONFIG_DIR, "preferences.json"), "utf8"));
+	assert.deepEqual(saved.hooks, exportedHooks, "导入后落盘的 hooks 应与导出前逐字段一致");
+});
+
+await h.check("非法条目在预览里标出第几条与原因，并禁用导入", async () => {
+	writeFileSync(
+		invalidPath,
+		JSON.stringify(
+			{
+				version: 1,
+				hooks: [
+					{ id: "bad-1", event: "Nope", command: "echo 1" },
+					{ id: "ok-1", event: "PreToolUse", command: "echo 2" },
+				],
+			},
+			null,
+			2,
+		),
+		"utf8",
+	);
+	await pickImportFile(invalidPath);
+	const text = await waitImportPreview("第 1 条：");
+	assert.ok(text.includes("导入预览 · 1 条"), `预览只应计入合法条目：${text}`);
+	assert.ok(text.includes("有 1 条非法条目"), `应说明非法条目数：${text}`);
+	assert.equal(await importButtonDisabled(), true, "有非法条目时「导入」按钮必须禁用");
+	try {
+		await h.shoot("settings-hooks-import-error-light");
+	} finally {
+		await closeImportPreview();
+	}
+	// 取消不写盘：列表与文件都保持导入前的两条。
+	const saved = JSON.parse(readFileSync(join(h.CONFIG_DIR, "preferences.json"), "utf8"));
+	assert.equal(saved.hooks.length, 2, `取消导入不应写盘：${JSON.stringify(saved.hooks)}`);
+});
+
 await h.check("暗色下 hooks 分组与试运行卡片可读", async () => {
 	const pickDark = async () => {
 		await win.evaluate(() => document.querySelector('[aria-label="外观"]').click());
@@ -577,6 +775,14 @@ await h.check("暗色下 hooks 分组与试运行卡片可读", async () => {
 	// 「最近运行」在分组底部：滚到那里再拍一张，确认它不靠浅色背景才可读。
 	await scrollToRecentRuns();
 	await h.shoot("settings-hooks-recent-runs-dark");
+});
+
+await h.check("暗色下导入预览可读", async () => {
+	await pickImportFile(exportedPath);
+	await waitImportPreview(`导入预览 · ${exportedHooks.length} 条`);
+	await settleAnimations(".hooks-import-card");
+	await h.shoot("settings-hooks-import-preview-dark");
+	await closeImportPreview();
 });
 
 await h.finish();
