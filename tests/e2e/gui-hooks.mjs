@@ -428,7 +428,7 @@ await h.check("试运行留下 hook 审计（这条通道不该无痕）", async
 	);
 });
 
-await h.check("事件下拉出现三个生命周期事件；选中后 matcher 被禁用并给出说明", async () => {
+await h.check("事件下拉出现四个生命周期事件；选中后 matcher 被禁用并给出说明", async () => {
 	await clickInSection("Hooks", ".starter-add");
 	await waitUntil(() => sectionReady("Hooks", ".starter-editor"), { timeout: 10_000, desc: "hook 编辑区展开" });
 	await win.evaluate(() => {
@@ -443,7 +443,7 @@ await h.check("事件下拉出现三个生命周期事件；选中后 matcher �
 	const labels = await win.evaluate(() =>
 		[...document.querySelectorAll('[role="listbox"] [role="option"]')].map((node) => node.textContent ?? ""),
 	);
-	for (const event of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+	for (const event of ["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]) {
 		assert.ok(
 			labels.some((text) => text.includes(event)),
 			`事件下拉里应有 ${event}：${labels.join(" / ")}`,
@@ -465,6 +465,11 @@ await h.check("事件下拉出现三个生命周期事件；选中后 matcher �
 		hints.some((text) => text.includes("该事件没有工具名")),
 		`应提示「该事件没有工具名」：${hints.join(" / ")}`,
 	);
+	// 新事件 SessionEnd 单独走一遍：它也必须是「生命周期」—— matcher 同样被禁用。
+	await pickHookEvent("SessionEnd");
+	const endState = await waitMatcherDisabled();
+	assert.equal(endState.value, "", "SessionEnd 下 matcher 不应显示工具名");
+	assert.equal(endState.disabled, true, "SessionEnd 下 matcher 输入框应被禁用");
 	await win.evaluate(() => {
 		const button = [...document.querySelectorAll(".starter-editor-actions button")].find((node) => node.textContent.trim() === "取消");
 		if (button === undefined) throw new Error("编辑区里没有「取消」按钮");
