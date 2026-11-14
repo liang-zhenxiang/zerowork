@@ -67267,21 +67267,23 @@ const HOOK_EVENT_OPTIONS = [
   { value: "PostToolUse", label: "工具调用后（只审计）" },
   { value: "SessionStart", label: "会话开始（SessionStart）" },
   { value: "UserPromptSubmit", label: "发送消息前（UserPromptSubmit）" },
-  { value: "Stop", label: "一轮结束（Stop）" }
+  { value: "Stop", label: "一轮结束（Stop）" },
+  { value: "SessionEnd", label: "会话结束（SessionEnd）" }
 ];
 const HOOK_EVENT_LABELS = {
   PreToolUse: "工具调用前",
   PostToolUse: "工具调用后",
   SessionStart: "会话开始",
   UserPromptSubmit: "发送消息前",
-  Stop: "一轮结束"
+  Stop: "一轮结束",
+  SessionEnd: "会话结束"
 };
 /*
  * 生命周期事件没有工具名可比：daemon 保存时只接受缺省 / "" / "*"，写工具名会被拒绝。
  * 这里镜像同一张表（判据的单一事实源在 hooks.js），用于禁用输入框、给提示，
  * 以及保存时**省略 matcher 字段** —— 不写 "*"，因为 "匹配一切" 不是这里的语义。
  */
-const HOOK_LIFECYCLE_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "Stop"]);
+const HOOK_LIFECYCLE_EVENTS = new Set(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]);
 /* 只有 PreToolUse 能真的拦下调用（与 hooks.js 的 BLOCKING_EVENTS 一致）。 */
 const HOOK_BLOCKING_EVENTS = new Set(["PreToolUse"]);
 /*
@@ -67688,7 +67690,7 @@ function HooksSection({ busy }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: formatAuditTime(run.ts) })
       ] }, `${run.ts}-${index2}`)) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（工具事件下同样阻止调用；会话开始 / 发送消息前 / 一轮结束这三类只记审计，不阻断）。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。hook 的输出只进审计与试运行，不会进入提示词。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（工具事件下同样阻止调用；会话开始 / 发送消息前 / 一轮结束 / 会话结束这四类只记审计，不阻断）。会话结束事件在退出时最多等 2 秒：配置的超时再长也不会把应用退出拖久，超出预算的 hook 不再启动并记一条失败审计。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。hook 的输出只进审计与试运行，不会进入提示词。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
     ] }),
     testing !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookTestModal, {
       hook: testing,

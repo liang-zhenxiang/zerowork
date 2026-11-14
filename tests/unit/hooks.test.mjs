@@ -27,6 +27,7 @@ import {
 	HOOK_EVENTS,
 	HOOK_IMPORT_MAX_BYTES,
 	HOOK_OUTPUT_MAX,
+	HOOK_SHUTDOWN_BUDGET_MS,
 	HOOK_TIMEOUT_DEFAULT,
 	HOOK_TIMEOUT_MAX,
 	HOOK_TIMEOUT_MIN,
@@ -50,6 +51,7 @@ import {
 	parseHookImportText,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
+	payloadForSessionEnd,
 	payloadForSessionStart,
 	payloadForStop,
 	payloadForUserPromptSubmit,
@@ -59,6 +61,7 @@ import {
 	resolveSavedHook,
 	runHook,
 	runHooks,
+	runHooksWithinBudget,
 	shellInvocation,
 	workspaceHooksPath,
 } from "../../src/main/daemon/hooks.js";
@@ -167,20 +170,27 @@ describe("matchesEvent —— matcher 只作用于工具事件", () => {
  * 写死断言而不是 `toContain` 是有意的：多一个/少一个事件都必须被人看见 ——
  * 少一个 = 用户配了却永不触发；多一个 = 可能悄悄改变安全边界。
  */
-describe("事件表 —— 五个事件、三类生命周期、只有一个可阻断", () => {
-	it("HOOK_EVENTS 含三个生命周期事件（顺序即设置页下拉顺序）", () => {
-		expect(HOOK_EVENTS).toEqual(["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop"]);
+describe("事件表 —— 六个事件、四个生命周期、只有一个可阻断", () => {
+	it("HOOK_EVENTS 含四个生命周期事件（顺序即设置页下拉顺序）", () => {
+		expect(HOOK_EVENTS).toEqual([
+			"PreToolUse",
+			"PostToolUse",
+			"SessionStart",
+			"UserPromptSubmit",
+			"Stop",
+			"SessionEnd",
+		]);
 	});
 
 	it("TOOL_EVENTS / LIFECYCLE_EVENTS 覆盖全部事件且互斥", () => {
 		expect([...TOOL_EVENTS]).toEqual(["PreToolUse", "PostToolUse"]);
-		expect([...LIFECYCLE_EVENTS]).toEqual(["SessionStart", "UserPromptSubmit", "Stop"]);
+		expect([...LIFECYCLE_EVENTS]).toEqual(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]);
 		const union = new Set([...TOOL_EVENTS, ...LIFECYCLE_EVENTS]);
 		expect([...union].sort()).toEqual([...HOOK_EVENTS].sort());
 		for (const event of TOOL_EVENTS) expect(LIFECYCLE_EVENTS.has(event)).toBe(false);
 	});
 
-	it("BLOCKING_EVENTS 只有 PreToolUse —— 三个生命周期事件都不可阻断", () => {
+	it("BLOCKING_EVENTS 只有 PreToolUse —— 四个生命周期事件都不可阻断", () => {
 		expect([...BLOCKING_EVENTS]).toEqual(["PreToolUse"]);
 		for (const event of LIFECYCLE_EVENTS) expect(BLOCKING_EVENTS.has(event)).toBe(false);
 		expect(BLOCKING_EVENTS.has("PostToolUse")).toBe(false);
@@ -545,11 +555,28 @@ describe("生命周期载荷 —— 形状与工具事件一致，只有各自�
 		expect(payloadForStop({ aborted: undefined }).aborted).toBe(false);
 	});
 
-	it("三个载荷都不含 tool 字段（没有工具名可比）", () => {
+	it("SessionEnd 带 reason（只接受 pi 的五个取值，其余折成 quit）", () => {
+		expect(payloadForSessionEnd({ sessionId: "s", cwd: "/w", reason: "resume", now: () => 3 })).toEqual({
+			event: "SessionEnd",
+			session: { id: "s", cwd: "/w" },
+			reason: "resume",
+			timestamp: 3,
+		});
+		for (const reason of ["quit", "reload", "new", "resume", "fork"]) {
+			expect(payloadForSessionEnd({ reason }).reason).toBe(reason);
+		}
+		// 缺省 / 非字符串 / pi 没有的值都折成 quit —— 如实但保守（design §六）。
+		expect(payloadForSessionEnd({}).reason).toBe("quit");
+		expect(payloadForSessionEnd({ reason: "shutdown" }).reason).toBe("quit");
+		expect(payloadForSessionEnd({ reason: 42 }).reason).toBe("quit");
+	});
+
+	it("四个载荷都不含 tool 字段（没有工具名可比）", () => {
 		for (const payload of [
 			payloadForSessionStart({}),
 			payloadForUserPromptSubmit({}),
 			payloadForStop({}),
+			payloadForSessionEnd({}),
 		]) {
 			expect("tool" in payload).toBe(false);
 		}
@@ -916,10 +943,15 @@ describe("生命周期扩展 —— 非阻断、全部跑完、fatal 不刷审�
 		return { fake, deps: { spawn: fake.spawn, platform: "linux", now: () => 0 } };
 	};
 
-	it("三个 pi 事件各自注册一个 handler", () => {
+	it("四个 pi 事件各自注册一个 handler", () => {
 		const fake = fakeDeps([]);
 		const handlers = mountLifecycle(setOf(), fake.deps, []);
-		expect([...handlers.keys()].sort()).toEqual(["agent_settled", "before_agent_start", "session_start"]);
+		expect([...handlers.keys()].sort()).toEqual([
+			"agent_settled",
+			"before_agent_start",
+			"session_shutdown",
+			"session_start",
+		]);
 	});
 
 	it("无命中不 spawn、不写审计（空配置零成本）", async () => {
@@ -1043,6 +1075,61 @@ describe("生命周期扩展 —— 非阻断、全部跑完、fatal 不刷审�
 		await handlers.get("agent_settled")({ aborted: false });
 		expect(fake.calls).toHaveLength(3);
 		expect(audits.map((record) => record.detail.split(" ")[0])).toEqual(["SessionStart", "UserPromptSubmit", "Stop"]);
+	});
+
+	it("session_shutdown 触发 SessionEnd：载荷带 reason，返回值恒为 undefined", async () => {
+		const payloads = [];
+		const deps = { spawn: spawnCapturingPayloads(payloads), platform: "linux", now: () => 0 };
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "end", event: "SessionEnd", command: "x" })),
+			deps,
+			audits,
+		);
+		expect(await handlers.get("session_shutdown")({ reason: "resume" })).toBeUndefined();
+		expect(payloads).toHaveLength(1);
+		expect(payloads[0]).toMatchObject({ event: "SessionEnd", reason: "resume" });
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("allowed");
+	});
+
+	it("SessionEnd 失败只记「失败（未阻断）」—— 收尾不改变关闭结果", async () => {
+		const { fake, deps } = fakeDeps([{ closeCode: 1, stderr: "收尾脚本炸了" }]);
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(normalizeHook({ id: "end", event: "SessionEnd", command: "x" })),
+			deps,
+			audits,
+		);
+		expect(await handlers.get("session_shutdown")({ reason: "quit" })).toBeUndefined();
+		expect(fake.calls).toHaveLength(1);
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("failed");
+		expect(audits[0].detail).toMatch(/SessionEnd 失败（未阻断）/u);
+	});
+
+	it("SessionEnd 的预算耗尽：剩余 hook 不 spawn，审计写明超出预算", async () => {
+		let clock = 0;
+		const calls = [];
+		const spawn = () => {
+			calls.push(1);
+			clock += 5000; // 第一条把 2s 预算吃光
+			return createFakeChild({ closeCode: 0 });
+		};
+		const audits = [];
+		const handlers = mountLifecycle(
+			setOf(
+				normalizeHook({ id: "first", event: "SessionEnd", command: "x" }),
+				normalizeHook({ id: "second", event: "SessionEnd", command: "y" }),
+			),
+			{ spawn, platform: "linux", now: () => clock },
+			audits,
+		);
+		await handlers.get("session_shutdown")({ reason: "quit" });
+		expect(calls).toHaveLength(1);
+		expect(audits).toHaveLength(2);
+		expect(audits[1].outcome).toBe("failed");
+		expect(audits[1].detail).toContain("超出关闭等待预算");
 	});
 
 	it("SessionStart 的 session.id：装配点为空时回落到 pi 的 ctx.sessionManager", async () => {
@@ -1171,6 +1258,91 @@ describe("runHooks —— 顺序与短路", () => {
 		const results = await runHooks(hooks, {}, "PostToolUse", d);
 		expect(results).toHaveLength(2);
 		expect(fake.calls).toHaveLength(2);
+	});
+});
+
+/*
+ * 关闭路径的硬预算。这些断言要钉住的是「退出不能被 hook 拖住」这一条产品性质，
+ * 所以每条都对准一个具体的时间判据，而不是只数调用次数：
+ *   · 配置 30s 的单条，实际在 2s 内被掐断（否则退出会被拖成 30s）；
+ *   · 预算耗光后**不再 spawn**（不是「起一个再杀」，那仍有进程创建开销）；
+ *   · 配置值比剩余预算小时用配置值（不会替用户延长）。
+ */
+describe("runHooksWithinBudget —— 关闭路径的硬预算", () => {
+	const hookOf = (id, timeoutMs = 5000) => ({
+		...normalizeHook({ id, event: "SessionEnd", command: "x" }),
+		timeoutMs,
+	});
+
+	it("预算充足：按顺序跑完，结果与 runHooks 同形", async () => {
+		const fake = fakeSpawn([{ closeCode: 0 }, { closeCode: 1, stderr: "no" }]);
+		const results = await runHooksWithinBudget([hookOf("a"), hookOf("b")], {}, "SessionEnd", 2000, {
+			spawn: fake.spawn,
+			platform: "linux",
+			now: () => 0,
+		});
+		expect(results.map((entry) => entry.result.verdict)).toEqual(["allow", "fail"]);
+		expect(fake.calls).toHaveLength(2);
+	});
+
+	it("剩余预算耗尽后不再 spawn，记一条「超出关闭等待预算」的合成失败", async () => {
+		let clock = 0;
+		const calls = [];
+		const spawn = () => {
+			calls.push(1);
+			clock += 5000; // 第一条就把预算吃光
+			return createFakeChild({ closeCode: 0 });
+		};
+		const results = await runHooksWithinBudget([hookOf("a"), hookOf("b")], {}, "SessionEnd", 2000, {
+			spawn,
+			platform: "linux",
+			now: () => clock,
+		});
+		expect(calls).toHaveLength(1);
+		expect(results).toHaveLength(2);
+		expect(results[1].result).toMatchObject({ verdict: "fail", timedOut: true, durationMs: 0 });
+		expect(results[1].result.stderr).toContain("超出关闭等待预算");
+	});
+
+	it("单条配置 30s 也不能突破预算：有效超时被压到剩余时间", async () => {
+		vi.useFakeTimers();
+		const fake = fakeSpawn([{ hang: true }]);
+		const promise = runHooksWithinBudget(
+			[hookOf("slow", HOOK_TIMEOUT_MAX)],
+			{},
+			"SessionEnd",
+			Date.now() + HOOK_SHUTDOWN_BUDGET_MS,
+			// win32 分支走注入的 taskkill，避免真的 process.kill(-pid)。
+			{ spawn: fake.spawn, platform: "win32" },
+		);
+		let settled = false;
+		void promise.then(() => {
+			settled = true;
+		});
+		await vi.advanceTimersByTimeAsync(HOOK_SHUTDOWN_BUDGET_MS - 100);
+		expect(settled, `不到预算就结束了（说明用的是配置里的 30s？）`).toBe(false);
+		await vi.advanceTimersByTimeAsync(200);
+		const results = await promise;
+		expect(results[0].result.timedOut).toBe(true);
+	});
+
+	it("配置值小于剩余预算时用配置值（不会替用户延长）", async () => {
+		vi.useFakeTimers();
+		const fake = fakeSpawn([{ hang: true }]);
+		const promise = runHooksWithinBudget([hookOf("short", 1000)], {}, "SessionEnd", Date.now() + HOOK_SHUTDOWN_BUDGET_MS, {
+			spawn: fake.spawn,
+			platform: "win32",
+		});
+		let settled = false;
+		void promise.then(() => {
+			settled = true;
+		});
+		await vi.advanceTimersByTimeAsync(900);
+		expect(settled, `配置的 1000ms 没有被采纳`).toBe(false);
+		await vi.advanceTimersByTimeAsync(200);
+		const results = await promise;
+		expect(results[0].result.timedOut).toBe(true);
+		expect(results[0].result.durationMs).toBe(1000);
 	});
 });
 

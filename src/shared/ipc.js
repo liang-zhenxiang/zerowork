@@ -31,6 +31,16 @@ const INVOKE = {
    */
   daemonStatus: "daemon:status",
   /**
+   * 应用退出前的统一收尾（**只由 main 的 `before-quit` 调用**）。
+   *
+   * daemon 并行地对每个活会话跑一次 `SessionEnd` hooks（每会话 2s 预算），
+   * 返回 `{ closed }`。main 随后 kill daemon —— 于是退出不会被 hook 拖住。
+   *
+   * **不暴露给渲染层**：preload 不提供对应方法，main 也不为它注册 IPC handler。
+   * 渲染层没有理由触发批量关闭会话。
+   */
+  daemonShutdown: "daemon:shutdown",
+  /**
    * 拉取完整会话状态。渲染进程挂载、或 HMR 之后调用。
    * sessionId 缺省 = 当前活动会话（保持既有调用方语义）；
    * 指定 id 时拉取对应会话的快照——多任务并发后 renderer 按 id 缓存

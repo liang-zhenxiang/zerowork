@@ -469,6 +469,30 @@ class SessionHost {
     this.session.dispose();
   }
   /**
+   * 会话收尾：先发 pi 的 `session_shutdown`（SessionEnd hooks，带 2s 硬预算），
+   * 再释放底层会话。
+   *
+   * **为什么不改 dispose 的语义**：很多路径在瞬态清理里调用 dispose（宿主重建、
+   * 分支切换失败兜底等），把它改成异步会扩大改动面；只有「这个会话真的要结束」
+   * 的调用点才需要给 hook 一次确定性机会。dispose 保持同步、立即释放。
+   *
+   * **收尾永远不改变关闭结果**：emit 的异常一律吞掉 —— hook 是本地脚本，它的
+   * 失败不该让删除会话 / 应用退出失败。预算由 hooks.js 的
+   * `runHooksWithinBudget` 强制，最坏 2s 后一定返回。
+   *
+   * @param {"quit"|"reload"|"new"|"resume"|"fork"} reason
+   *   `quit` —— 删除 / 驱逐 / 应用退出；`resume` —— 重启或分支切换重建宿主。
+   */
+  async shutdown(reason = "quit") {
+    try {
+      await this.session.extensionRunner.emit({ type: "session_shutdown", reason });
+    } catch {
+      /* 见上：收尾不改变关闭结果 */
+    } finally {
+      this.dispose();
+    }
+  }
+  /**
    * 重命名当前会话（写入 pi 的 session_info 条目）。
    *
    * 必须走本实例持有的活 SessionManager：pi 的 SessionManager 各自缓存
