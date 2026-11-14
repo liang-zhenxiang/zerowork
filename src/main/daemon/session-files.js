@@ -118,6 +118,7 @@ import {
 	parseHookImportText,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
+	payloadForSessionEnd,
 	payloadForSessionStart,
 	payloadForStop,
 	payloadForUserPromptSubmit,
@@ -1163,7 +1164,8 @@ function createAutomationRunExecutor(deps) {
         boundary
       };
     } finally {
-      host?.dispose();
+      // 无人值守 run 结束即会话结束：给 SessionEnd hooks 一次收尾机会（2s 预算）。
+      await shutdownHost(host, "quit");
     }
   };
 }
@@ -1303,6 +1305,40 @@ function hookSetForRoot(root) {
  */
 function hookSetForCwd(cwd, worktree) {
   return hookSetForRoot(hooksRootFor(cwd, worktree));
+}
+
+/**
+ * 结束一个宿主，并给它一次收尾机会（`SessionEnd` hooks）。
+ *
+ * 新形态的宿主有 `shutdown(reason)`：先发 `session_shutdown`（2s 预算），再释放。
+ * 只有 `dispose` 的老形态、以及 shutdown 自己抛错的情况都**退回立即释放** ——
+ * 关闭路径不能因为收尾失败而漏释放或卡住。
+ *
+ * 非 await 的调用点写 `void shutdownHost(...)`：daemon 还活着，后台完成即可。
+ * 失败进 event-log：收尾是个不该静默消失的动作（排查「退出时我的脚本为什么没跑」
+ * 需要知道它到底是被跳过、还是自己失败了）。
+ */
+function shutdownHost(host, reason = "quit") {
+  if (host === void 0 || host === null) return Promise.resolve();
+  if (typeof host.shutdown !== "function") {
+    try {
+      host.dispose();
+    } catch {
+      /* 已经释放过 */
+    }
+    return Promise.resolve();
+  }
+  return host.shutdown(reason).catch((error) => {
+    eventLog.append({
+      kind: "session_shutdown_failed",
+      message: error instanceof Error ? error.message : String(error)
+    });
+    try {
+      host.dispose();
+    } catch {
+      /* session_shutdown 失败后 dispose 也失败：没有更多可做的了 */
+    }
+  });
 }
 
 function buildRunExtensions(deps, cwd, getHost2, watch) {
@@ -2123,7 +2159,8 @@ function evictIdleHosts() {
     const hostPromise = bucket.hostPromise;
     if (hostPromise === void 0) continue;
     eventLog.append({ kind: "session_evicted", sessionId: bucket.sessionId });
-    void hostPromise.then((host) => host.dispose());
+    // 容量淘汰也是一次真实的会话结束：收尾在后台完成（调用点是同步的）。
+    void hostPromise.then((host) => shutdownHost(host, "quit"));
   }
 }
 
@@ -2867,7 +2904,8 @@ async function disbandTeamOf(leaderSessionId) {
     if (handle !== void 0) {
       await handle.abort().catch(() => {
       });
-      handle.dispose();
+      // 团队成员关闭 = 该会话结束（reason quit）；成员句柄的 shutdown 委托给宿主。
+      await shutdownHost(handle, "quit");
       memberHandlesBySession.delete(member.sessionId);
     }
   }
@@ -3628,7 +3666,8 @@ async function createHost(bucket, sessionManager) {
                     if (wasClosing) {
                       const closingSession = teamRegistry.getTeam(leaderId)?.members.get(name)?.sessionId;
                       if (closingSession !== void 0) {
-                        memberHandlesBySession.get(closingSession)?.dispose();
+                        // onComplete 是同步回调：收尾在后台完成，daemon 还活着。
+                        void shutdownHost(memberHandlesBySession.get(closingSession), "quit");
                         memberHandlesBySession.delete(closingSession);
                       }
                     }
@@ -3794,7 +3833,7 @@ ${feedback ?? ""}
           if (force) {
             await handle.abort().catch(() => {
             });
-            handle.dispose();
+            await shutdownHost(handle, "quit");
             memberHandlesBySession.delete(memberSessionId);
             teamRegistry.markStatus(leaderId, to, "closed", "已强制关闭");
             emitTeamProgress(leaderId);
@@ -4292,7 +4331,11 @@ async function restartSession(path, userIndex, options) {
       eventLog.append({ kind: "ipc_error", channel: INVOKE.sessionRestart, message: detail });
       return branchFail("write-failed");
     }
-    anchor.host.dispose();
+    /*
+     * 重启 / 回退会重建宿主：旧宿主手上的会话到此为止，reason 用 `resume`
+     * —— 它马上会以一个回退后的状态重新打开（不是用户把会话删了）。
+     */
+    await shutdownHost(anchor.host, "resume");
     try {
       let truncated = true;
       if (anchor.parentId === null) truncateSessionToStart(target);
@@ -4465,6 +4508,38 @@ async function keepCompareColumn(runId, columnId) {
 const runtimeInstalls = /* @__PURE__ */ new Map();
 
 const handlers = {
+  /*
+   * 应用退出前的统一收尾：main 的 `before-quit` 调它，等 daemon 把每个活会话
+   * 的 SessionEnd hooks 跑完（每会话 2s 预算），再 kill daemon。
+   *
+   * **不暴露给渲染层**（preload 不提供对应方法，main 也不为它注册 IPC）——
+   * 渲染层没有理由触发批量关闭会话。
+   *
+   * 多个会话**并行**收尾（`Promise.allSettled`）：总时长仍是 ~2s，而不是
+   * 「会话数 × 2s」—— 否则开十个任务的应用退出会从 2 秒变成 20 秒。
+   * 单个会话失败不影响其它会话，也不改变退出结果（返回值里的 `closed`
+   * 只用于日志/诊断）。
+   */
+  [INVOKE.daemonShutdown]: async () => {
+    const candidates = [];
+    for (const bucket of bucketsById.values()) {
+      if (bucket.hostPromise !== void 0) candidates.push(bucket.hostPromise);
+    }
+    for (const handle of memberHandlesBySession.values()) candidates.push(Promise.resolve(handle));
+    // 同一个宿主可能同时挂在桶与成员表上：按解析后的对象去重，避免收尾两次。
+    const seen = new Set();
+    const settled = await Promise.allSettled(
+      candidates.map(async (promise) => {
+        const host = await promise;
+        if (host === void 0 || host === null || seen.has(host)) return false;
+        seen.add(host);
+        await shutdownHost(host, "quit");
+        return true;
+      })
+    );
+    const closed = settled.filter((entry) => entry.status === "fulfilled" && entry.value === true).length;
+    return { closed };
+  },
   // 返回折叠后的真实历史。ConversationView 与 SessionSnapshot 结构一致。
   // sessionId 缺省 = 当前会话；指定 id 时按注册表查桶 —— 未注册
   //（被 LRU 回收 / 从没打开）响亮报错，renderer 用自己的事件缓存兜底。
@@ -5229,7 +5304,8 @@ const handlers = {
       void disbandTeamOf(bucket.sessionId);
       await backgroundJobs.killAllForSession(bucket.sessionId);
       const hostPromise = bucket.hostPromise;
-      if (hostPromise !== void 0) (await hostPromise).dispose();
+      // 用户删除会话：这是最典型的 SessionEnd 时机（reason quit）。
+      if (hostPromise !== void 0) await shutdownHost(await hostPromise, "quit");
     }
     const pathError = validateSessionFilePath(target, getSessionsDir());
     if (pathError !== void 0) throw new Error(pathError);
@@ -5943,18 +6019,21 @@ const handlers = {
           ? payloadForUserPromptSubmit({ ...common, prompt: "这是试运行载荷" })
           : hook.event === "Stop"
             ? payloadForStop({ ...common, aborted: false })
-            : hook.event === "PostToolUse"
-              ? payloadForPostToolUse({
-                  toolName: "write",
-                  input: { path: "示例.txt", content: "这是试运行载荷" },
-                  ok: true,
-                  ...common
-                })
-              : payloadForPreToolUse({
-                  toolName: "write",
-                  input: { path: "示例.txt", content: "这是试运行载荷" },
-                  ...common
-                });
+            : hook.event === "SessionEnd"
+              ? // 试运行是手动触发，最贴近的语义就是「退出时的收尾」。
+                payloadForSessionEnd({ ...common, reason: "quit" })
+              : hook.event === "PostToolUse"
+                ? payloadForPostToolUse({
+                    toolName: "write",
+                    input: { path: "示例.txt", content: "这是试运行载荷" },
+                    ok: true,
+                    ...common
+                  })
+                : payloadForPreToolUse({
+                    toolName: "write",
+                    input: { path: "示例.txt", content: "这是试运行载荷" },
+                    ...common
+                  });
     const result = await runHook(hook, payload);
     writeAuditRecord({
       category: "hook",

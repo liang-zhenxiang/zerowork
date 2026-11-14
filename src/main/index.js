@@ -140,6 +140,12 @@ class GlobalToggleShortcutController {
 const MAIN_HANDLED = [
   INVOKE.daemonStatus,
   INVOKE.globalShortcutStatus,
+  /*
+   * daemon:shutdown 只由 main 自己在 before-quit 里调（`callDaemon`），
+   * **不注册给渲染层**：它在 MAIN_HANDLED 里是为了从批量转发表跳过，
+   * 而不是因为 main 会应答它。preload 也没有对应方法。
+   */
+  INVOKE.daemonShutdown,
   /* #342 F6：lastExit 由 main 本地应答（读 last-exit.json），不转发 daemon。 */
   INVOKE.lastExit,
   INVOKE.openArtifact,
@@ -172,6 +178,14 @@ const MAIN_HANDLED = [
 ];
 let window;
 let daemon;
+/*
+ * 退出流程的两道闸（都只置位、不复位 —— 一次进程生命周期只退一次）：
+ *   quitStarted  —— 收尾流程已启动；此刻再来的退出请求要继续拦，否则会绕过等待。
+ *   quitFinished —— kill / 写标记 / 再 quit 这一套已经执行；计时器与 daemon 回包
+ *                   谁先到都不会重复执行，`app.quit()` 那次才真正放行。
+ */
+let quitStarted = false;
+let quitFinished = false;
 let daemonStatus = { kind: "starting" };
 let globalShortcutStatus;
 let toggleShortcut;
@@ -778,12 +792,50 @@ if (!app.requestSingleInstanceLock()) {
   app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
   });
-  app.on("before-quit", () => {
+  /*
+   * 退出先请 daemon 收尾（每个会话的 SessionEnd hooks，daemon 内部 2s 预算），
+   * 最多再等 2.5s 兜底，然后无条件 kill 并真正退出。
+   *
+   * 为什么必须 `preventDefault` 再自己 `app.quit()`：`before-quit` 是同步事件，
+   * 原来直接 `daemon.kill()` 意味着 daemon **一毫秒收尾机会都没有** ——
+   * 用户配的收尾脚本永远不跑。改成「先拦一下、等收尾、再放行」，
+   * 而 `quitStarted` 保证收尾只启动一次。
+   *
+   * 三条硬性质：
+   *   · daemon 没起来 / 已经退出 → callDaemon 立刻 reject → 立即继续，不阻塞；
+   *   · daemon 卡住不回应 → 2.5s 计时器到点照样 kill 并退出；
+   *   · 收尾请求失败一律吞掉 —— 退出路径不能因为 daemon 出错而失败。
+   *
+   * 第二次进入要**继续拦**（而不是放行）：那一瞬间收尾还没跑完，
+   * 放行等于绕过等待、且 `writeCleanExitMarker` 来不及执行 ——
+   * 下次启动会误报「上次未正常关闭」。重复按退出最多再等 2.5s 的兜底。
+   */
+  app.on("before-quit", (event) => {
+    if (quitFinished) return;
+    if (quitStarted) {
+      event.preventDefault();
+      return;
+    }
+    quitStarted = true;
+    event.preventDefault();
     disposeUpdates();
-    daemon?.kill();
-    /* #342 第十七轮 F6：正常退出路径写 clean 标记。崩溃/强杀不会走到这里，
-       下次启动读到 clean!==true 即判定「上次未正常关闭」。 */
-    writeCleanExitMarker();
+    const finish = () => {
+      if (quitFinished) return;
+      quitFinished = true;
+      daemon?.kill();
+      /* #342 第十七轮 F6：正常退出路径写 clean 标记。崩溃/强杀不会走到这里，
+         下次启动读到 clean!==true 即判定「上次未正常关闭」。 */
+      writeCleanExitMarker();
+      app.quit();
+    };
+    // 兜底优先于「等 daemon 回包」：daemon 卡死也必须退出。
+    const timer = setTimeout(finish, 2500);
+    callDaemon(INVOKE.daemonShutdown, [])
+      .catch(() => {})
+      .finally(() => {
+        clearTimeout(timer);
+        finish();
+      });
   });
   app.on("will-quit", () => {
     toggleShortcut?.dispose();

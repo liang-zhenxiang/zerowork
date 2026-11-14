@@ -172,6 +172,15 @@ macOS / Linux 上受限档直接拒绝执行 —— 这也是本项目不发 Lin
    嵌 SDK 的 —— 所以 `SessionHost.create` 末尾自己调了一次（不调就等于该事件
    永远不触发）。
 
+6. **收尾事件在退出路径上，等待预算有硬上限（2026-11-14，SessionEnd）。**
+   `session_shutdown` 同样只由 pi 的 runtime 层发出，daemon 要在 `SessionHost.shutdown()`
+   里自己 emit；它与 `dispose()` 是两种语义（前者可等待、后者立即释放），不要把瞬态清理
+   路径改成 `shutdown`。每个会话的收尾预算 ≤2s：逐条超时取「配置值与剩余预算的较小者」，
+   耗尽后不再 spawn；被超时杀掉的那条最多再等 1s 回收（`HOOK_KILL_GRACE_MS`）。
+   应用退出由 `before-quit` 先请 daemon 收尾（并行），另有 2.5s 兜底
+   计时器 —— 任何情况下退出都必须发生。**重复的退出请求要继续 `preventDefault`**
+   （收尾没跑完就放行，会漏写 clean 标记，下次启动误报「上次未正常关闭」）。
+
 ---
 
 ## 相关

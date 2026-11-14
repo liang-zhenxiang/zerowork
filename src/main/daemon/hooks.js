@@ -40,6 +40,11 @@
  *   - `SessionStart`     ← pi 的 `session_start`（startup / reload / new / resume / fork）
  *   - `UserPromptSubmit` ← pi 的 `before_agent_start`，且 `messageType === "user"`
  *   - `Stop`             ← pi 的 `agent_settled`（无自动重试 / 压缩 / 排队续跑之后）
+ *   - `SessionEnd`       ← pi 的 `session_shutdown`（quit / reload / new / resume / fork）
+ *
+ * `SessionEnd` 是唯一走在**关闭路径**上的事件：它必须在一个有限窗口内结束，
+ * 否则会把应用退出 / 会话删除一起拖住。它的单次执行预算见
+ * `HOOK_SHUTDOWN_BUDGET_MS`，由 `runHooksWithinBudget` 强制。
  *
  * 生命周期事件**永不改变会话结果**：hook 的 exit 2 也只是「拒绝（未阻断）」，
  * stdout **不进入提示词**（不做上下文注入，见 SECURITY.md 与 design §二）——
@@ -54,7 +59,7 @@ import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 /** 支持的事件。顺序即设置页下拉的顺序。 */
-const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop"];
+const HOOK_EVENTS = ["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"];
 
 /** 按工具名匹配的事件。matcher 只对这两类有意义。 */
 const TOOL_EVENTS = /* @__PURE__ */ new Set(["PreToolUse", "PostToolUse"]);
@@ -63,7 +68,7 @@ const TOOL_EVENTS = /* @__PURE__ */ new Set(["PreToolUse", "PostToolUse"]);
  * 生命周期事件。**都不可阻断**（`BLOCKING_EVENTS` 只含 PreToolUse），
  * 且没有工具名 —— matcher 必须是缺省 / `""` / `"*"`（见 normalizeHook）。
  */
-const LIFECYCLE_EVENTS = /* @__PURE__ */ new Set(["SessionStart", "UserPromptSubmit", "Stop"]);
+const LIFECYCLE_EVENTS = /* @__PURE__ */ new Set(["SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"]);
 
 /** 可阻断的事件。只有这一类会把 hook 的拒绝变成工具调用的终局。 */
 const BLOCKING_EVENTS = /* @__PURE__ */ new Set(["PreToolUse"]);
@@ -76,6 +81,18 @@ const HOOK_TIMEOUT_MIN = 1000;
 
 /** 超时上限 —— 再长就不该是「工具调用前的门」，而是后台任务。 */
 const HOOK_TIMEOUT_MAX = 30000;
+
+/**
+ * `SessionEnd` 的**总等待预算**（毫秒，硬上限）。
+ *
+ * 与单条超时是两件事：一条 hook 可以配 30s（对工具事件合理），但退出路径只有
+ * 一个有限的窗口 —— 同一会话里 N 条各配 30s 会把应用退出拖成 N×30s。
+ * 预算按**剩余时间**逐条压缩，耗尽后不再 spawn（见 runHooksWithinBudget）。
+ *
+ * 选 2s 的依据：关机 / 退出这类操作，用户对「点了一下却没反应」的容忍度
+ * 大约就在 1–3 秒；再长就该把工作挪到后台，而不是拖住关闭。
+ */
+const HOOK_SHUTDOWN_BUDGET_MS = 2000;
 
 /** 单份配置最多几条 hook（与 watch-policy 的 WATCH_MAX_* 同族）。 */
 const HOOKS_MAX_COUNT = 32;
@@ -817,6 +834,49 @@ async function runHooks(hooks, payload, event, deps = {}) {
 	return results;
 }
 
+/**
+ * **关闭路径**上的顺序执行：所有 hook 共享一个 deadline，逐条把超时压到剩余预算。
+ *
+ * 与 `runHooks` 的三条差别，每一条都是为了「关闭不能被 hook 拖住」：
+ *  1. 单条有效超时 = `min(hook.timeoutMs, deadlineAt - now)` —— 配置值只能让
+ *     这一条**更早**结束，不能突破总预算；
+ *  2. 预算耗尽后**不再 spawn**，直接记一条合成失败（`timedOut: true`，
+ *     stderr 写明原因）。合成结果沿用既有 `stderrSummary`，审计里显示为
+ *     「超出关闭等待预算（2s），已跳过」—— 用户能一眼看出是预算而不是命令坏了；
+ *  3. 不因任何结果提前结束：SessionEnd 不可阻断，每条都要有交代（也便于用户
+ *     看清哪几条其实没跑到）。
+ *
+ * `now` 走 `deps.now`：单测用假时钟就能覆盖「预算耗尽」，不必真的等两秒。
+ *
+ * `_event` 与 `runHooks` 同签名（调用方按同一形状传参）；预算路径不按事件分流 ——
+ * 今天只有 `SessionEnd` 走这里。
+ */
+async function runHooksWithinBudget(hooks, payload, _event, deadlineAt, deps = {}) {
+	const now = deps.now ?? Date.now;
+	const results = [];
+	for (const hook of hooks) {
+		const remaining = deadlineAt - now();
+		if (remaining <= 0) {
+			results.push({
+				hook,
+				result: {
+					verdict: "fail",
+					exitCode: void 0,
+					timedOut: true,
+					spawnError: void 0,
+					stdout: "",
+					stderr: `超出关闭等待预算（${Math.round(HOOK_SHUTDOWN_BUDGET_MS / 1000)}s），已跳过`,
+					durationMs: 0
+				}
+			});
+			continue;
+		}
+		const result = await runHook({ ...hook, timeoutMs: Math.min(hook.timeoutMs, remaining) }, payload, deps);
+		results.push({ hook, result });
+	}
+	return results;
+}
+
 /** PreToolUse 载荷。**不含密钥**：只有事件、工具名/入参、会话 id/cwd、时间。 */
 function payloadForPreToolUse({ toolName, input, sessionId, cwd, now = Date.now }) {
 	return {
@@ -850,11 +910,11 @@ function payloadForPostToolUse({ toolName, input, sessionId, cwd, ok, error, now
 }
 
 /**
- * 生命周期事件的三个载荷。形状与工具事件一致（`event` / `session` / `timestamp`），
+ * 生命周期事件的四个载荷。形状与工具事件一致（`event` / `session` / `timestamp`），
  * 只是把「工具」换成各自的事实。
  *
  * `prompt` **不截断**：hook 的常见用法就是看用户到底说了什么，截断会造成
- * 「只检查了前半段就放行」。它由用户本地代码消费，不上传。三个载荷都不含密钥。
+ * 「只检查了前半段就放行」。它由用户本地代码消费，不上传。四个载荷都不含密钥。
  */
 function payloadForSessionStart({ sessionId, cwd, reason, now = Date.now }) {
 	return {
@@ -879,6 +939,25 @@ function payloadForStop({ sessionId, cwd, aborted, now = Date.now }) {
 		event: "Stop",
 		session: { id: sessionId ?? "", cwd: cwd ?? "" },
 		aborted: aborted === true,
+		timestamp: now()
+	};
+}
+
+/** pi 的 `session_shutdown.reason` 取值集合。 */
+const SESSION_END_REASONS = /* @__PURE__ */ new Set(["quit", "reload", "new", "resume", "fork"]);
+
+/**
+ * `SessionEnd` 载荷。除 `reason` 外与其它生命周期事件同形状。
+ *
+ * `reason` 只接受 pi 的五个取值，其余（含缺省 / 非字符串）一律折成 `"quit"`：
+ * 让载荷里出现 pi 没有的值，hook 作者就得猜它是什么意思；而「会话要结束了」
+ * 最保守的语义就是 quit —— 如实但保守，与 design §六 同一条取舍。
+ */
+function payloadForSessionEnd({ sessionId, cwd, reason, now = Date.now }) {
+	return {
+		event: "SessionEnd",
+		session: { id: sessionId ?? "", cwd: cwd ?? "" },
+		reason: SESSION_END_REASONS.has(reason) ? reason : "quit",
 		timestamp: now()
 	};
 }
@@ -1083,10 +1162,11 @@ function createPostToolUseHookExtension(options) {
 }
 
 /**
- * 生命周期扩展：`SessionStart` / `UserPromptSubmit` / `Stop`，**全部不可阻断**。
+ * 生命周期扩展：`SessionStart` / `UserPromptSubmit` / `Stop` / `SessionEnd`，
+ * **全部不可阻断**。
  *
  * 这个工厂刻意**不返回任何东西**：即使手滑改成 `{ block }` / `{ message }` /
- * `{ systemPrompt }`，pi 的那三个事件也不消费它 —— 但这里连写都不写，
+ * `{ systemPrompt }`，pi 的那四个事件也不消费它 —— 但这里连写都不写，
  * 让「非阻断事件永远不能改变会话结果」是代码形状而不是约定
  *（PRD 的硬约束）。
  *
@@ -1130,12 +1210,27 @@ function createLifecycleHookExtension(options) {
 				return "";
 			}
 		};
-		const run = async (event, buildPayload, ctx) => {
+		/**
+		 * 跑一组事件。`budgetMs` 只有关闭路径（`SessionEnd`）传 —— 它把这一组的
+		 * **总时长**压到预算内，而不是给每条 hook 各自一份预算。
+		 */
+		const run = async (event, buildPayload, ctx, budgetMs) => {
 			if (set.fatal.length > 0) return void 0;
 			const hooks = set.hooks.filter((hook) => matchesEvent(hook, event));
 			if (hooks.length === 0) return void 0;
 			try {
-				const results = await runHooks(hooks, buildPayload(sessionIdOf(ctx)), event, options.deps);
+				const payload = buildPayload(sessionIdOf(ctx));
+				const results =
+					budgetMs === void 0
+						? await runHooks(hooks, payload, event, options.deps)
+						: // deadline 也走 `deps.now`：与 runHooksWithinBudget 内的判定同一个时钟。
+							await runHooksWithinBudget(
+								hooks,
+								payload,
+								event,
+								(options.deps?.now ?? Date.now)() + budgetMs,
+								options.deps
+							);
 				for (const { hook, result } of results) {
 					options.onAudit?.({
 						category: "hook",
@@ -1182,6 +1277,23 @@ function createLifecycleHookExtension(options) {
 				ctx
 			)
 		);
+		/*
+		 * 关闭路径。**唯一带预算的生命周期事件**：它发生在会话删除 / 切换 /
+		 * 应用退出时，等太久会把整个关闭拖住（见 HOOK_SHUTDOWN_BUDGET_MS）。
+		 *
+		 * 为什么由 daemon 自己发：pi 只在自己的 runtime 层（`AgentSessionRuntime`）
+		 * teardown 时 emit `session_shutdown`，而 daemon 直嵌 `AgentSession`、
+		 * 从不经那一层 —— 同 `session_start` 缺 `bindExtensions()` 的缺口。
+		 * 发射点收在 `SessionHost.shutdown()`（先 emit 再 dispose）。
+		 */
+		pi.on("session_shutdown", (event, ctx) =>
+			run(
+				"SessionEnd",
+				(sessionId) => payloadForSessionEnd({ sessionId, cwd: options.cwd, reason: event?.reason }),
+				ctx,
+				HOOK_SHUTDOWN_BUDGET_MS
+			)
+		);
 	};
 }
 
@@ -1204,6 +1316,7 @@ export {
 	HOOK_KILL_GRACE_MS,
 	HOOK_MATCHER_MAX,
 	HOOK_OUTPUT_MAX,
+	HOOK_SHUTDOWN_BUDGET_MS,
 	HOOK_TIMEOUT_DEFAULT,
 	HOOK_TIMEOUT_MAX,
 	HOOK_TIMEOUT_MIN,
@@ -1231,6 +1344,7 @@ export {
 	parseHookImportText,
 	payloadForPostToolUse,
 	payloadForPreToolUse,
+	payloadForSessionEnd,
 	payloadForSessionStart,
 	payloadForStop,
 	payloadForUserPromptSubmit,
@@ -1241,6 +1355,7 @@ export {
 	resolveSavedHook,
 	runHook,
 	runHooks,
+	runHooksWithinBudget,
 	shellInvocation,
 	workspaceHooksPath
 };

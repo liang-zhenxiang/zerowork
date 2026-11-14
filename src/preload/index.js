@@ -10,6 +10,12 @@ const INVOKE = {
    */
   daemonStatus: "daemon:status",
   /**
+   * 应用退出前的统一收尾。**只是与 shared/ipc.js 保持逐条一致的表项**
+   * （两份手工副本由单测钉住）；这里**不提供 API 方法** —— 它只由 main 的
+   * `before-quit` 直接调用，渲染层不该能触发批量关闭会话。
+   */
+  daemonShutdown: "daemon:shutdown",
+  /**
    * 拉取完整会话状态。渲染进程挂载、或 HMR 之后调用。
    * sessionId 缺省 = 当前活动会话（保持既有调用方语义）；
    * 指定 id 时拉取对应会话的快照——多任务并发后 renderer 按 id 缓存

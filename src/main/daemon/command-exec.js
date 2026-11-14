@@ -1962,6 +1962,26 @@ const OUTPUT_MAX_CHARS = 24e3;
 
 const MAX_CONCURRENT = 4;
 
+/**
+ * 结束子代理 / 团队成员宿主，并给它一次收尾机会（`SessionEnd` hooks）。
+ *
+ * 与 session-files 的 `shutdownHost` 同一姿态：优先 `shutdown`（带 2s 预算），
+ * 没有就退回 `dispose`，shutdown 抛错时也保证释放 —— 这是后台会话，
+ * 失败不该留下一个活句柄。预算由 hooks.js 强制，不会把委派路径拖住。
+ */
+async function shutdownSessionHost(host, reason = "quit") {
+  if (host === void 0 || host === null) return;
+  if (typeof host.shutdown !== "function") {
+    host.dispose();
+    return;
+  }
+  try {
+    await host.shutdown(reason);
+  } catch {
+    host.dispose();
+  }
+}
+
 function createSubagentRunner(deps) {
   let running = 0;
   const queue = [];
@@ -2069,7 +2089,8 @@ function createSubagentRunner(deps) {
       return { output: finalizeOutput(lastText), turns };
     } finally {
       if (host !== void 0) activeHosts.delete(host);
-      host?.dispose();
+      // 子代理的会话到此结束：给它一次 SessionEnd 收尾机会（reason quit）。
+      await shutdownSessionHost(host, "quit");
     }
   }
   return {
@@ -2452,7 +2473,13 @@ async function spawnMember(deps, input, hooks) {
       await settleRound(queued);
     },
     abort: () => host.abort(),
-    dispose: () => host.dispose()
+    dispose: () => host.dispose(),
+    /*
+     * 收尾（SessionEnd hooks）。团队解散 / 成员被关闭 / 应用退出都走这里：
+     * 成员宿主是真实会话，它的结束同样该触发一次用户配的收尾脚本。
+     * 句柄层只做转发 —— 预算与「不阻断」都在 SessionHost.shutdown 与 hooks.js。
+     */
+    shutdown: (reason = "quit") => host.shutdown(reason)
   };
 }
 
