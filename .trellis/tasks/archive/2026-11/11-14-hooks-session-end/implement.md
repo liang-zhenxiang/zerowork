@@ -27,7 +27,7 @@
 - [x] `tests/e2e/gui-hooks.mjs`：新选项 + matcher 禁用
 - [x] `SECURITY.md`、`.trellis/spec/daemon/index.md` §七、`CHANGELOG.md`
 - [x] `lint:all`、`npm test`、`npm run build && check:renderer-assets`、三个 hooks e2e
-- [ ] PR（Closes #386）→ CI 绿 → squash 合并
+- [x] PR（Closes #386）→ CI 绿 → squash 合并（#392，提交 4163f0b）
 
 ## 回滚
 
