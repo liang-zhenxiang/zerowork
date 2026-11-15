@@ -181,6 +181,12 @@ macOS / Linux 上受限档直接拒绝执行 —— 这也是本项目不发 Lin
    计时器 —— 任何情况下退出都必须发生。**重复的退出请求要继续 `preventDefault`**
    （收尾没跑完就放行，会漏写 clean 标记，下次启动误报「上次未正常关闭」）。
 
+7. **hooks 的上下文注入必须可见（2026-11-15）。** `SessionStart` / `UserPromptSubmit`
+   的 stdout 用 `before_agent_start` 的 `message` 返回值进入上下文（`role:"custom"`）。
+   它必须同时出现在视图投影（`session-view.js`）与 live 事件（`session-host.js` 的
+   `message_start`）里，渲染成带来源的卡片 —— `display:false` 的「模型收到、用户看不到」
+   是静默提示注入，不允许。只有 exit 0 的输出可注入；单条 4KB、合计 8KB。
+
 ---
 
 ## 相关

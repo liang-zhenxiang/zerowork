@@ -3230,8 +3230,10 @@ async function createHost(bucket, sessionManager) {
        * 与 Pre 共用同一个 hookSet（一次会话读一次配置）—— 于是「拦住工具」
        * 与「记下会话开始」永远是同一份配置。
        *
-       * 不做上下文注入：hook 的 stdout 不进提示词
-       * （理由见 hooks.js 文件头与 SECURITY.md）。
+       * 它**会**做可见的上下文注入（#385）：两者 stdout 在 exit 0 时经
+       * `before_agent_start` 的 `message` 进上下文，并投影成时间线卡片
+       * （`session-host.js` 的 `message_start` 与 `session-view.js` 各一处；
+       * 边界见 hooks.js 文件头与 SECURITY.md）。
        */
       createLifecycleHookExtension({
         cwd,
