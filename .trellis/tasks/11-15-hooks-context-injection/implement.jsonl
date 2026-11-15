@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 子进程/事件/审计惯例"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/GUI 分层与等待纪律"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "时间线渲染与 token 纪律"}
+{"file": ".trellis/tasks/11-15-hooks-context-injection/research/injection-channel.md", "reason": "注入通道、live/投影缺口"}

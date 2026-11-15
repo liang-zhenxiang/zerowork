@@ -534,6 +534,16 @@ function conversationReducer(view, action) {
         }),
         retry: void 0
       };
+    case "hook_context":
+      /*
+       * hooks 注入的上下文（#385）。它不进 turn / turnTimings：那是一轮用户消息的
+       * 计时锚点，注入卡片只是本轮的一条可见记录。镜像渲染层的同一分支 ——
+       * 两条路径不一致时，运行期快照会丢掉这张卡（历史投影仍是对的，更难查）。
+       */
+      return {
+        ...view,
+        entries: [...view.entries, taggedWithRun(event.message, view.activeRunId)]
+      };
     case "assistant_started":
       return {
         ...view,

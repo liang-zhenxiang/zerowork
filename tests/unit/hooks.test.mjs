@@ -16,6 +16,12 @@
  *    「未信任的工作区不进入可执行集合」那条变红。
  * 3) 把 `runHooks` 的 `if (blockable && result.verdict !== "allow") break`
  *    删掉：「任一拒绝即停」那条变红（spawn 次数从 1 变 2）。
+ * 4) 把 `injectableText` 的 `if (result.verdict !== "allow") return ""` 删掉：
+ *    「exit 1 / exit 2 的输出都不注入」与「超时被杀掉的 stdout 同样不注入」
+ *    两条变红 —— 这正是「不可信输出不能进上下文」的唯一守卫。
+ * 5) 把 `clipUtf8` 的 `maxBytes - markerBytes` 改回 `maxBytes`（标记不再预留）：
+ *    clipUtf8 与 buildHookInjection 的 4 条上限用例 + 审计的「（已截断）」变红。
+ * 6) 把 `sessionStartEntries = []` 删掉：SessionStart 的输出会在每条消息里重复注入。
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,6 +32,9 @@ import {
 	BLOCKING_EVENTS,
 	HOOK_EVENTS,
 	HOOK_IMPORT_MAX_BYTES,
+	HOOK_INJECT_PER_HOOK_BYTES,
+	HOOK_INJECT_TOTAL_BYTES,
+	HOOK_INJECT_TRUNC_MARK,
 	HOOK_OUTPUT_MAX,
 	HOOK_SHUTDOWN_BUDGET_MS,
 	HOOK_TIMEOUT_DEFAULT,
@@ -34,7 +43,9 @@ import {
 	LIFECYCLE_EVENTS,
 	TOOL_EVENTS,
 	assertHookConfig,
+	buildHookInjection,
 	chooseWorkspaceRoot,
+	clipUtf8,
 	createLifecycleHookExtension,
 	createPostToolUseHookExtension,
 	createPreToolUseHookExtension,
@@ -1496,5 +1507,274 @@ describe("previewHookImport（导入预览）", () => {
 		expect(preview.merged[0].command).toBe("updated");
 		// 入参没有被改写：预览是只读操作。
 		expect(existing[0].event).toBe("PreToolUse");
+	});
+});
+
+/*
+ * ── 上下文注入（#385） ──────────────────────────────────────────────
+ *
+ * 这一层最危险的失败形态是**静默注入**：模型收到了、用户看不到。所以断言都落在
+ * 「返回值的形状」与「哪些输出**没有**进来」上：
+ *   · 只有 allow 且非空的 stdout 才参与注入；
+ *   · 单条 4KB / 合计 8KB，按字节切在码点边界（不切出 U+FFFD）；
+ *   · SessionStart 的输出暂存到第一条用户消息，且只投递一次；
+ *   · 审计只写字节数，不写正文。
+ */
+describe("clipUtf8（按 UTF-8 字节截断到码点边界）", () => {
+	const bytes = (text) => Buffer.byteLength(text, "utf8");
+
+	it("没超上限时原样返回（不白加标记）", () => {
+		expect(clipUtf8("hello", 5)).toBe("hello");
+		expect(clipUtf8("", 0)).toBe("");
+		expect(clipUtf8("国国", 6)).toBe("国国");
+	});
+
+	it("截断时追加标记，且标记计入上限", () => {
+		const out = clipUtf8("国".repeat(10), 25);
+		// 25 - 19（标记的字节数）= 6 字节 = 两个汉字。
+		expect(out).toBe(`国国${HOOK_INJECT_TRUNC_MARK}`);
+		expect(bytes(out)).toBe(25);
+	});
+
+	it("中文不会被切成半个字符（按字节切，不按字符数）", () => {
+		// 按字符数判会放过 30 字节；按字节判只能留 1 个汉字（预算 20-19=1 → 0 个？）
+		const out = clipUtf8("国".repeat(10), 20);
+		expect(bytes(out)).toBeLessThanOrEqual(20);
+		expect(out.endsWith(HOOK_INJECT_TRUNC_MARK)).toBe(true);
+		// 预算 1 字节放不下汉字 → 正文为空，但**不出现** U+FFFD。
+		expect(out).toBe(HOOK_INJECT_TRUNC_MARK);
+	});
+
+	it("emoji（4 字节码点）同样不切出半个", () => {
+		const out = clipUtf8("😀".repeat(10), 25);
+		expect(bytes(out)).toBeLessThanOrEqual(25);
+		expect(out.includes("\ufffd")).toBe(false);
+		// 预算 25-19=6 字节：第一个 emoji 占 4 字节，第二个会切到一半 → 回退到边界。
+		expect(out.slice(0, -HOOK_INJECT_TRUNC_MARK.length)).toBe("😀");
+	});
+
+	it("上限连标记都放不下时也不超上限（宁可不加标记）", () => {
+		const out = clipUtf8("hello world", 10);
+		expect(bytes(out)).toBeLessThanOrEqual(10);
+		expect(out.includes(HOOK_INJECT_TRUNC_MARK)).toBe(false);
+	});
+});
+
+describe("buildHookInjection（拼接 / 上限 / 逐条记账）", () => {
+	const hookOf = (id, event = "UserPromptSubmit") => normalizeHook({ id, event, command: "x" });
+
+	it("空文本被跳过，顺序与配置一致，每条前带来源标签", () => {
+		const built = buildHookInjection([
+			{ hook: hookOf("a", "SessionStart"), event: "SessionStart", text: "甲" },
+			{ hook: hookOf("b"), event: "UserPromptSubmit", text: "   " },
+			{ hook: hookOf("c"), event: "UserPromptSubmit", text: "乙" }
+		]);
+		expect(built.hooks.map((info) => info.id)).toEqual(["a", "c"]);
+		expect(built.text).toBe("[hook a]\n甲\n\n[hook c]\n乙");
+		expect(built.hooks[0]).toMatchObject({ id: "a", event: "SessionStart", bytes: 3, truncated: false });
+	});
+
+	it("没有任何可注入内容时返回 undefined（不产生空消息）", () => {
+		expect(buildHookInjection([])).toBeUndefined();
+		expect(buildHookInjection(undefined)).toBeUndefined();
+		expect(buildHookInjection([{ hook: hookOf("a"), event: "UserPromptSubmit", text: " " }])).toBeUndefined();
+	});
+
+	it("单条超过 4KB 时截断，bytes 恰好是上限且标记在内", () => {
+		const built = buildHookInjection([{ hook: hookOf("big"), event: "UserPromptSubmit", text: "a".repeat(5000) }]);
+		expect(built.hooks[0].bytes).toBe(HOOK_INJECT_PER_HOOK_BYTES);
+		expect(built.hooks[0].truncated).toBe(true);
+		expect(built.text.endsWith(HOOK_INJECT_TRUNC_MARK)).toBe(true);
+	});
+
+	it("合计超过 8KB 时按顺序累加截断，超出的条目不再注入", () => {
+		const built = buildHookInjection([
+			{ hook: hookOf("a"), event: "UserPromptSubmit", text: "a".repeat(5000) },
+			{ hook: hookOf("b"), event: "UserPromptSubmit", text: "b".repeat(5000) },
+			{ hook: hookOf("c"), event: "UserPromptSubmit", text: "c".repeat(10) }
+		]);
+		expect(built.hooks.map((info) => info.id)).toEqual(["a", "b"]);
+		const total = built.hooks.reduce((sum, info) => sum + info.bytes, 0);
+		expect(total).toBe(HOOK_INJECT_TOTAL_BYTES);
+		expect(built.hooks[1].truncated).toBe(true);
+	});
+
+	it("入参的 truncated 会被保留（上游已截断时不能报成未截断）", () => {
+		const built = buildHookInjection([{ hook: hookOf("a"), event: "UserPromptSubmit", text: "短", truncated: true }]);
+		expect(built.hooks[0].truncated).toBe(true);
+	});
+});
+
+describe("上下文注入 —— 只有 allow 输出、SessionStart 只投递一次", () => {
+	const mount = (hookSet, deps, audits, getSessionId = () => "s-1") => {
+		const handlers = new Map();
+		createLifecycleHookExtension({
+			cwd: "/w",
+			hookSet,
+			getSessionId,
+			onAudit: (record) => audits.push(record),
+			deps
+		})({ on: (name, fn) => handlers.set(name, fn) });
+		return handlers;
+	};
+	const setOf = (...hooks) => ({ hooks, fatal: [], skippedWorkspace: false, workspace: {} });
+	const depsOf = (behaviors) => {
+		const fake = fakeSpawn(behaviors);
+		return { fake, deps: { spawn: fake.spawn, platform: "linux", now: () => 0 } };
+	};
+
+	it("UserPromptSubmit 的 allow 输出 → 返回可见的自定义消息", async () => {
+		const line = "当前分支：main";
+		const { deps } = depsOf([{ closeCode: 0, stdout: line }]);
+		const audits = [];
+		const handlers = mount(setOf(normalizeHook({ id: "branch", event: "UserPromptSubmit", command: "x" })), deps, audits);
+		const result = await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		expect(result).toEqual({
+			message: {
+				customType: "hook_context",
+				content: `[hook branch]\n${line}`,
+				// display 必须为 true：false 等于「模型收到了、用户看不到」。
+				display: true,
+				details: {
+					hooks: [
+						{ id: "branch", event: "UserPromptSubmit", bytes: Buffer.byteLength(line, "utf8"), truncated: false }
+					]
+				}
+			}
+		});
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("allowed");
+		expect(audits[0].detail).toMatch(/注入 \d+ 字节/u);
+		// 审计不写正文：正文可能带项目状态（分支名、外部系统摘要）。
+		expect(audits[0].detail).not.toContain(line);
+	});
+
+	it("SessionStart 的输出暂存到第一条用户消息，同会话只投递一次", async () => {
+		const { deps } = depsOf([
+			{ closeCode: 0, stdout: "今天是 2026-11-15" },
+			{ closeCode: 0, stdout: "分支：main" }
+		]);
+		const audits = [];
+		const handlers = mount(
+			setOf(
+				normalizeHook({ id: "today", event: "SessionStart", command: "x" }),
+				normalizeHook({ id: "branch", event: "UserPromptSubmit", command: "y" })
+			),
+			deps,
+			audits
+		);
+		// SessionStart 本身不投递（此刻还没有「本轮用户消息」）。
+		expect(await handlers.get("session_start")({ reason: "startup" })).toBeUndefined();
+		expect(audits[0].detail).toMatch(/暂存 \d+ 字节/u);
+
+		const first = await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		expect(first.message.content).toBe("[hook today]\n今天是 2026-11-15\n\n[hook branch]\n分支：main");
+		expect(first.message.details.hooks.map((info) => info.event)).toEqual(["SessionStart", "UserPromptSubmit"]);
+
+		// 第二个用户消息：暂存已清空，只剩本轮的 UserPromptSubmit 输出。
+		const second = await handlers.get("before_agent_start")({ messageType: "user", prompt: "再来一条" });
+		expect(second.message.content).toBe("[hook branch]\n分支：main");
+		expect(second.message.content).not.toContain("今天是");
+	});
+
+	it("exit 1 / exit 2 的输出都不注入（不可信输出不能进上下文）", async () => {
+		const { deps } = depsOf([
+			{ closeCode: 1, stdout: "半截输出-1", stderr: "炸了" },
+			{ closeCode: 2, stdout: "半截输出-2", stderr: "不同意" }
+		]);
+		const audits = [];
+		const handlers = mount(
+			setOf(
+				normalizeHook({ id: "fail", event: "UserPromptSubmit", command: "x" }),
+				normalizeHook({ id: "deny", event: "UserPromptSubmit", command: "y" })
+			),
+			deps,
+			audits
+		);
+		const result = await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		expect(result).toBeUndefined();
+		expect(audits.map((record) => record.outcome)).toEqual(["failed", "failed"]);
+		// 失败 / 拒绝的审计里不该出现任何注入字样。
+		for (const record of audits) expect(record.detail).not.toMatch(/注入|暂存/u);
+	});
+
+	it("超时被杀掉的 stdout 同样不注入", async () => {
+		vi.useFakeTimers();
+		const { deps } = depsOf([{ closeCode: 0, stdout: "太慢了", hang: true }]);
+		deps.platform = "win32"; // 走注入的 taskkill 分支，避免真的 process.kill(-pid)
+		const audits = [];
+		const handlers = mount(setOf(normalizeHook({ id: "slow", event: "UserPromptSubmit", command: "x" })), deps, audits);
+		const promise = handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		await vi.advanceTimersByTimeAsync(6000);
+		expect(await promise).toBeUndefined();
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("failed");
+		expect(audits[0].detail).toMatch(/超时/u);
+	});
+
+	it("空输出不产生消息，审计里也不虚构字节数", async () => {
+		const { deps } = depsOf([{ closeCode: 0 }]);
+		const audits = [];
+		const handlers = mount(setOf(normalizeHook({ id: "quiet", event: "UserPromptSubmit", command: "x" })), deps, audits);
+		expect(await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" })).toBeUndefined();
+		expect(audits).toHaveLength(1);
+		expect(audits[0].outcome).toBe("allowed");
+		expect(audits[0].detail).not.toMatch(/注入|暂存/u);
+	});
+
+	it("配置 fatal → 不注入（与不 spawn、不写审计同一条路）", async () => {
+		const { fake, deps } = depsOf([{ closeCode: 0, stdout: "不该出现" }]);
+		const audits = [];
+		const handlers = mount(
+			{
+				hooks: [normalizeHook({ id: "u", event: "UserPromptSubmit", command: "x" })],
+				fatal: [{ source: "user", message: "配置坏了" }],
+				skippedWorkspace: false,
+				workspace: {}
+			},
+			deps,
+			audits
+		);
+		expect(await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" })).toBeUndefined();
+		expect(fake.calls).toHaveLength(0);
+		expect(audits).toHaveLength(0);
+	});
+
+	it("单条超过 4KB：注入被截断，审计标「注入 N 字节（已截断）」", async () => {
+		const { deps } = depsOf([{ closeCode: 0, stdout: "a".repeat(5000) }]);
+		const audits = [];
+		const handlers = mount(setOf(normalizeHook({ id: "big", event: "UserPromptSubmit", command: "x" })), deps, audits);
+		const result = await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		expect(result.message.details.hooks[0]).toMatchObject({
+			bytes: HOOK_INJECT_PER_HOOK_BYTES,
+			truncated: true
+		});
+		expect(audits[0].detail).toMatch(new RegExp(`注入 ${HOOK_INJECT_PER_HOOK_BYTES} 字节（已截断）`, "u"));
+	});
+
+	it("SessionStart 的暂存被本轮输出挤出合计上限时，它不算「注入」", async () => {
+		// 两个 SessionStart 各 4KB → 暂存已占满 8KB；本轮 UserPromptSubmit 只剩 0 字节。
+		const { deps } = depsOf([
+			{ closeCode: 0, stdout: "s".repeat(4096) },
+			{ closeCode: 0, stdout: "t".repeat(4096) },
+			{ closeCode: 0, stdout: "本轮内容" }
+		]);
+		const audits = [];
+		const handlers = mount(
+			setOf(
+				normalizeHook({ id: "s1", event: "SessionStart", command: "x" }),
+				normalizeHook({ id: "s2", event: "SessionStart", command: "y" }),
+				normalizeHook({ id: "p", event: "UserPromptSubmit", command: "z" })
+			),
+			deps,
+			audits
+		);
+		await handlers.get("session_start")({ reason: "startup" });
+		const result = await handlers.get("before_agent_start")({ messageType: "user", prompt: "hi" });
+		expect(result.message.details.hooks.map((info) => info.id)).toEqual(["s1", "s2"]);
+		expect(result.message.content).not.toContain("本轮内容");
+		// 最后一条审计是 UserPromptSubmit 的那条：它没有真的注入，就不该写字节数。
+		expect(audits.at(-1).detail).toMatch(/^UserPromptSubmit /u);
+		expect(audits.at(-1).detail).not.toMatch(/注入 \d+ 字节/u);
 	});
 });

@@ -729,6 +729,25 @@ function buildConversationEntries(entries, resolveToolLabel) {
   }
   const out = [];
   for (const entry of entries) {
+    /*
+     * hooks 上下文注入（#385）：落盘形态是 `type:"custom_message"`，
+     * 不是 `role:"custom"` 的 message 条目 —— 后者只存在于交给模型的运行时消息里。
+     * 只认 `display === true` 的 `hook_context`：`display:false` 是「模型收到了、
+     * 用户看不到」的静默注入面，本项目不允许它存在，这里也不做任何兜底展示。
+     */
+    if (entry.type === "custom_message") {
+      if (entry.customType !== "hook_context" || entry.display !== true) continue;
+      const text = textOf(entry.content);
+      if (text === "") continue;
+      out.push({
+        id: entry.id,
+        role: "hook_context",
+        text,
+        hooks: Array.isArray(entry.details?.hooks) ? entry.details.hooks : [],
+        at: Date.parse(entry.timestamp)
+      });
+      continue;
+    }
     if (entry.type !== "message") continue;
     const message = entry.message;
     const at = Date.parse(entry.timestamp);

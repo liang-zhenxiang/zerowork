@@ -46,10 +46,18 @@
  * 否则会把应用退出 / 会话删除一起拖住。它的单次执行预算见
  * `HOOK_SHUTDOWN_BUDGET_MS`，由 `runHooksWithinBudget` 强制。
  *
- * 生命周期事件**永不改变会话结果**：hook 的 exit 2 也只是「拒绝（未阻断）」，
- * stdout **不进入提示词**（不做上下文注入，见 SECURITY.md 与 design §二）——
- * 本地脚本的输出静默进入提示词等于新增一条提示注入面，且与「只是跑了个脚本」
- * 的心智不符。
+ * 生命周期事件**永不改变会话结果**：hook 的 exit 2 也只是「拒绝（未阻断）」。
+ *
+ * 唯一一处「输出进入上下文」是**可见的上下文注入**（#385）：
+ * `SessionStart` / `UserPromptSubmit` 的 **allow** 输出被拼成一条
+ * `role:"custom"`、`customType:"hook_context"`、`display:true` 的消息，在本轮
+ * 用户消息之后交给模型 —— 界面上有独立卡片，重新打开会话仍在。四条边界：
+ *
+ *  - 失败 / 超时 / exit 2 的输出**一律不注入**：不可信的输出不能进上下文；
+ *  - `display:false` 这条路径不允许存在 —— 那是「模型收到了、用户看不到」的
+ *    静默提示注入面（与 SECURITY.md 的「上下文注入」同一条约束）；
+ *  - `Stop` / `SessionEnd` 没有「下一条请求」，不注入；
+ *  - 空输出不注入，`SessionStart` 的输出暂存到本会话第一条用户消息一起投递。
  *
  * 注意 `Stop` 用 `agent_settled` 而不是 `agent_end`：当前 pi 的 `AgentEndEvent`
  * 没有 `willRetry`，一次模型失败的重试也会先发 `agent_end` —— 那不是「一轮结束」。
@@ -105,6 +113,24 @@ const HOOK_MATCHER_MAX = 200;
 
 /** stdout / stderr 各自保留的字符数（审计另按 240 字截断）。 */
 const HOOK_OUTPUT_MAX = 8 * 1024;
+
+/**
+ * 上下文注入的字节上限：单条 4KB、单次合计 8KB。
+ *
+ * 按 **UTF-8 字节**算，不是字符数 —— 中文按字符数判会放过三倍体积（与
+ * `parseHookImportText` 同一条判据）。
+ *
+ * 上限不是为了省 token，而是给「hook 输出悄悄涨到几十 KB」这件事一个确定的
+ * 边界：一次塞满上下文的表现是模型从此答非所问，而那几乎无法归因到 hook。
+ */
+const HOOK_INJECT_PER_HOOK_BYTES = 4096;
+const HOOK_INJECT_TOTAL_BYTES = 8192;
+
+/**
+ * 截断标记。它**计入上限**（先留出它的字节数），并写清「是截断而不是输出为空」——
+ * 少一个标记，用户会以为 hook 只输出了前半段。
+ */
+const HOOK_INJECT_TRUNC_MARK = "\n…（已截断）";
 
 /** 工作区 hooks 文件大小上限：配置文件不该长到读起来有成本。 */
 const HOOK_CONFIG_MAX_BYTES = 256 * 1024;
@@ -712,6 +738,89 @@ function appendCapped(current, chunk) {
 }
 
 /**
+ * 取前 `maxBytes` 个 UTF-8 字节；末尾若落在多字节序列中间，回退到码点边界。
+ *
+ * 直接 `buffer.subarray(0, n).toString("utf8")` 会在尾部解出一个 U+FFFD ——
+ * 那是**不可逆**的损坏：写坏的字节是合法的替换字符，原文从此消失
+ *（与 check-unicode 记的那次 `app.css` 事故同族）。
+ */
+function sliceUtf8Bytes(text, maxBytes) {
+	const buffer = Buffer.from(text, "utf8");
+	const budget = Math.max(0, Math.floor(maxBytes));
+	if (buffer.length <= budget) return text;
+	let end = budget;
+	// 0b10xxxxxx = 续字节：说明切点在某条多字节序列内部。
+	while (end > 0 && (buffer[end] & 0xc0) === 0x80) end -= 1;
+	return buffer.subarray(0, end).toString("utf8");
+}
+
+/**
+ * 按 **UTF-8 字节**截断到码点边界，并追加 `…（已截断）`。
+ *
+ * 标记本身计入上限：先留出标记的字节数，再截正文。这样调用方可以信任
+ * 「返回值永远不超过 maxBytes」，多个调用点拼在一起时合计上限也才成立。
+ * 上限连标记都放不下时（只有单测会走到）宁可不加标记，也不超上限。
+ */
+function clipUtf8(text, maxBytes) {
+	const value = typeof text === "string" ? text : String(text ?? "");
+	if (Buffer.byteLength(value, "utf8") <= maxBytes) return value;
+	const markerBytes = Buffer.byteLength(HOOK_INJECT_TRUNC_MARK, "utf8");
+	const head = sliceUtf8Bytes(value, Math.max(0, maxBytes - markerBytes));
+	return head + (markerBytes <= maxBytes ? HOOK_INJECT_TRUNC_MARK : "");
+}
+
+/**
+ * 一组 hook 输出 → 一条注入正文。
+ *
+ * `entries` 只应包含**可注入**的条目（allow 且非空）—— 过滤在扩展层做，
+ * 这里只负责拼接、限长与逐条记账。`hooks[]` 同时是消息 `details` 与审计
+ * （「注入 N 字节」）的**同一份**数字，不另算一遍。
+ *
+ * 每条前加 `[hook <id>]` 一行：读的人要知道这段文字是谁写的。这一行是结构性
+ * 标签，**不计入** 4KB / 8KB 上限 —— 否则「4KB」的含义会随 id 长度漂移。
+ *
+ * 顺序即入参顺序（配置顺序），逐条压到 4KB 与剩余合计预算的较小者；
+ * 合计耗尽后不再追加，被截断的那条带 `truncated`。
+ *
+ * @param {{hook?: {id?: string}, event?: string, text?: string, truncated?: boolean}[]} entries
+ * @returns {{text: string, hooks: {id: string, event: string, bytes: number, truncated: boolean}[]}|undefined}
+ *   没有任何可注入内容时返回 undefined（调用方据此**不产生**消息）。
+ */
+function buildHookInjection(entries) {
+	if (!Array.isArray(entries)) return void 0;
+	let remaining = HOOK_INJECT_TOTAL_BYTES;
+	const hooks = [];
+	/*
+	 * `sources` 与被采纳的 `hooks[]` **逐个对齐**：调用方按它把「注入字节数」
+	 * 记回对应的 hook。不要让调用方自己再过滤一遍 entries —— 那条对齐依赖
+	 * 「跳过空文本、其余一律 break」的隐式契约，改一次跳过语义就会静默错位。
+	 */
+	const sources = [];
+	const parts = [];
+	for (const entry of entries) {
+		const text = typeof entry?.text === "string" ? entry.text.trim() : "";
+		if (text === "") continue;
+		if (remaining <= 0) break;
+		const id = typeof entry?.hook?.id === "string" ? entry.hook.id : "auto";
+		const clipped = clipUtf8(text, Math.min(HOOK_INJECT_PER_HOOK_BYTES, remaining));
+		// 剩余预算连截断标记都放不下：后续条目只会更差，停止。
+		if (clipped === "") break;
+		const bytes = Buffer.byteLength(clipped, "utf8");
+		hooks.push({
+			id,
+			event: typeof entry?.event === "string" ? entry.event : "",
+			bytes,
+			truncated: entry?.truncated === true || clipped !== text
+		});
+		sources.push(entry);
+		parts.push(`[hook ${id}]\n${clipped}`);
+		remaining -= bytes;
+	}
+	if (hooks.length === 0) return void 0;
+	return { text: parts.join("\n\n"), hooks, sources };
+}
+
+/**
  * 执行一条 hook。**判定与 spawn 分离**：单测注入假的 `deps.spawn`
  * 就能覆盖超时 / 启动失败 / 退出码 / 输出截断，不依赖 bash / PowerShell 存在
  * （单测在 ubuntu 与 windows 两个 job 上跑）。
@@ -985,8 +1094,12 @@ function stderrSummary(result) {
  *
  * `toolName` 对生命周期事件**不存在**，此时省略这一段（写成 `undefined`
  * 会把审计变成一条读不懂的记录）。
+ *
+ * `injection` 只给参与上下文注入的结果（`{bytes, truncated, verb}`）：
+ * 追加「注入 / 暂存 N 字节」与「（已截断）」。**只写字节数，不写正文** ——
+ * 审计会落盘并长期保留，注入正文可能带项目状态（分支名、外部系统摘要）。
  */
-function auditDetail({ event, hook, toolName, result, blockable = true }) {
+function auditDetail({ event, hook, toolName, result, blockable = true, injection }) {
 	const verdictText =
 		result.verdict === "allow"
 			? "放行"
@@ -998,8 +1111,12 @@ function auditDetail({ event, hook, toolName, result, blockable = true }) {
 					? "失败"
 					: "失败（未阻断）";
 	const subject = typeof toolName === "string" && toolName !== "" ? ` ${toolName}` : "";
+	const note =
+		injection === void 0 || typeof injection.bytes !== "number"
+			? ""
+			: `，${injection.verb ?? "注入"} ${injection.bytes} 字节${injection.truncated === true ? "（已截断）" : ""}`;
 	return clip(
-		`${event} ${verdictText}${subject}（hook ${hook.id}，${result.durationMs}ms，${stderrSummary(result)}）`
+		`${event} ${verdictText}${subject}（hook ${hook.id}，${result.durationMs}ms，${stderrSummary(result)}${note}）`
 	);
 }
 
@@ -1162,13 +1279,18 @@ function createPostToolUseHookExtension(options) {
 }
 
 /**
- * 生命周期扩展：`SessionStart` / `UserPromptSubmit` / `Stop` / `SessionEnd`，
- * **全部不可阻断**。
+ * 生命周期扩展：`SessionStart` / `UserPromptSubmit` / `Stop` / `SessionEnd`。
  *
- * 这个工厂刻意**不返回任何东西**：即使手滑改成 `{ block }` / `{ message }` /
- * `{ systemPrompt }`，pi 的那四个事件也不消费它 —— 但这里连写都不写，
- * 让「非阻断事件永远不能改变会话结果」是代码形状而不是约定
- *（PRD 的硬约束）。
+ * 四个事件都**不可阻断**：handler **永不返回** `{ block }` / `throw`，pi 也不会
+ * 因为它们的失败改变会话结果（PRD 的硬约束）。
+ *
+ * 唯一会改变「模型看到什么」的是**可见的上下文注入**（#385）：
+ * `before_agent_start` 返回 `{ message }`，形状是 pi 的
+ * `Pick<CustomMessage, "customType"|"content"|"display"|"details">`。
+ * 这条返回值被 pi 放在**本轮用户消息之后**（`_prepareRun` 的 `result.messages`），
+ * 所以它是「附加的一段上下文」，不是对用户原文的改写，也不碰 systemPrompt。
+ * `display: true` 是硬性的：`display: false` 等于「模型收到了、用户看不到」，
+ * 那是静默提示注入面，本仓库不允许存在这条路径。
  *
  * 三条执行纪律：
  *  1. `hookSet.fatal.length > 0` → **直接返回，不写审计**。工具事件已被
@@ -1186,6 +1308,18 @@ function createPostToolUseHookExtension(options) {
 function createLifecycleHookExtension(options) {
 	return (pi) => {
 		const set = options.hookSet;
+		/**
+		 * `SessionStart` 的 allow 输出暂存区。
+		 *
+		 * 为什么不能就地投递：`session_start` 发生时还没有「本轮用户消息」，
+		 * 而 pi 的注入通道（`before_agent_start` 的 `message`）只在本轮存在。
+		 * 所以先暂存**原始条目**、随本会话**第一条**用户消息一起投递，投递后清空
+		 *（同会话只投递一次；那一轮失败重试也不重复注入）。
+		 *
+		 * 暂存时就按 4KB / 8KB 截断一次：审计里写下的「暂存 N 字节」必须就是
+		 * 将来会被投递的东西，而不是一个随后被合计上限吃掉的数字。
+		 */
+		let sessionStartEntries = [];
 		/*
 		 * 会话 id：先问装配点（主会话 / 子代理在 adopt 之后都能读到真值），
 		 * 空时回落到 pi 的 `ctx.sessionManager`。
@@ -1211,72 +1345,146 @@ function createLifecycleHookExtension(options) {
 			}
 		};
 		/**
-		 * 跑一组事件。`budgetMs` 只有关闭路径（`SessionEnd`）传 —— 它把这一组的
-		 * **总时长**压到预算内，而不是给每条 hook 各自一份预算。
+		 * 跑一组事件并写审计。`budgetMs` 只有关闭路径（`SessionEnd`）传 —— 它把
+		 * 这一组的**总时长**压到预算内，而不是给每条 hook 各自一份预算。
+		 *
+		 * 返回结果数组（`[{hook, result}]`）：注入要用它，`[]` 表示 fatal / 无命中 /
+		 * 执行异常 —— 三种情况调用方都应「什么都不做」。
+		 *
+		 * `injectionOf` 在**跑完之后**才算得出来（合计上限取决于这一批的全部输出），
+		 * 所以审计由 `auditResults` 在拿到记账后统一写，而不是在这里边跑边写。
 		 */
 		const run = async (event, buildPayload, ctx, budgetMs) => {
-			if (set.fatal.length > 0) return void 0;
+			if (set.fatal.length > 0) return [];
 			const hooks = set.hooks.filter((hook) => matchesEvent(hook, event));
-			if (hooks.length === 0) return void 0;
+			if (hooks.length === 0) return [];
 			try {
 				const payload = buildPayload(sessionIdOf(ctx));
-				const results =
-					budgetMs === void 0
-						? await runHooks(hooks, payload, event, options.deps)
-						: // deadline 也走 `deps.now`：与 runHooksWithinBudget 内的判定同一个时钟。
-							await runHooksWithinBudget(
-								hooks,
-								payload,
-								event,
-								(options.deps?.now ?? Date.now)() + budgetMs,
-								options.deps
-							);
-				for (const { hook, result } of results) {
-					options.onAudit?.({
-						category: "hook",
-						// 非阻断事件**只有** allowed / failed 两种结果：exit 2 也只说明
-						// 这个 hook 不同意，并没有真的拦下会话或消息。
-						outcome: result.verdict === "allow" ? "allowed" : "failed",
-						detail: auditDetail({ event, hook, result, blockable: false })
-					});
-				}
+				return budgetMs === void 0
+					? await runHooks(hooks, payload, event, options.deps)
+					: // deadline 也走 `deps.now`：与 runHooksWithinBudget 内的判定同一个时钟。
+						await runHooksWithinBudget(
+							hooks,
+							payload,
+							event,
+							(options.deps?.now ?? Date.now)() + budgetMs,
+							options.deps
+						);
 			} catch (error) {
 				options.onAudit?.({
 					category: "hook",
 					outcome: "failed",
 					detail: clip(`${event} 执行异常（未阻断）：${errorText(error)}`)
 				});
+				return [];
 			}
-			return void 0;
+		};
+		/**
+		 * 逐条写审计（非阻断事件**只有** allowed / failed 两种结果：exit 2 也只说明
+		 * 这个 hook 不同意，并没有真的拦下会话或消息）。
+		 *
+		 * `injectionOf(hook)` 给出这条 hook 的注入记账；没参与注入的（拒绝、失败、
+		 * 空输出）返回 undefined，审计里就不追加任何字样。
+		 */
+		const auditResults = (event, results, injectionOf) => {
+			for (const { hook, result } of results) {
+				options.onAudit?.({
+					category: "hook",
+					outcome: result.verdict === "allow" ? "allowed" : "failed",
+					detail: auditDetail({
+						event,
+						hook,
+						result,
+						blockable: false,
+						injection: injectionOf?.(hook)
+					})
+				});
+			}
 		};
 
-		pi.on("session_start", (event, ctx) =>
-			run(
+		pi.on("session_start", async (event, ctx) => {
+			const results = await run(
 				"SessionStart",
 				(sessionId) => payloadForSessionStart({ sessionId, cwd: options.cwd, reason: event?.reason }),
 				ctx
-			)
-		);
-		pi.on("before_agent_start", (event, ctx) => {
+			);
+			const buffered = new Map();
+			let remaining = HOOK_INJECT_TOTAL_BYTES;
+			for (const entry of sessionStartEntries) remaining -= Buffer.byteLength(entry.text, "utf8");
+			for (const { hook, result } of results) {
+				const text = injectableText(result);
+				if (text === "" || remaining <= 0) continue;
+				const clipped = clipUtf8(text, Math.min(HOOK_INJECT_PER_HOOK_BYTES, remaining));
+				if (clipped === "") continue;
+				const bytes = Buffer.byteLength(clipped, "utf8");
+				const truncated = clipped !== text;
+				sessionStartEntries.push({ hook, event: "SessionStart", text: clipped, truncated });
+				// 措辞用「暂存」：此刻它还没进上下文，本会话可能一条用户消息都没有。
+				buffered.set(hook, { bytes, truncated, verb: "暂存" });
+				remaining -= bytes;
+			}
+			auditResults("SessionStart", results, (hook) => buffered.get(hook));
+			return void 0;
+		});
+		pi.on("before_agent_start", async (event, ctx) => {
 			/*
 			 * 只认用户提交。`custom`（`sendMessage({triggerTurn})` 唤醒）不是
 			 * 「用户提交了一条消息」—— 把它算进来会让系统自发的一轮也触发
 			 * 用户的 pre-message hook，语义就对不上了。
 			 */
 			if (event?.messageType !== "user") return void 0;
-			return run(
+			const results = await run(
 				"UserPromptSubmit",
 				(sessionId) => payloadForUserPromptSubmit({ sessionId, cwd: options.cwd, prompt: event.prompt }),
 				ctx
 			);
+			const promptEntries = [];
+			for (const { hook, result } of results) {
+				const text = injectableText(result);
+				if (text === "") continue;
+				promptEntries.push({ hook, event: "UserPromptSubmit", text });
+			}
+			/*
+			 * 投递即清空，**先取走再拼**：拼的过程中无论发生什么，暂存都不该在
+			 * 下一条消息里再出现一次（「同会话只投递一次」）。
+			 */
+			const pending = sessionStartEntries;
+			sessionStartEntries = [];
+			const entries = [...pending, ...promptEntries];
+			const built = buildHookInjection(entries);
+			/*
+			 * 记账按**最终交付**算，而不是按各自跑完时的样子：SessionStart 的暂存
+			 * 可能被本轮的 UserPromptSubmit 挤出合计上限，那时它就没有真的注入。
+			 * 用 hook 对象做键而不是 id —— 读侧配置可能带重复 id（写侧才查重）。
+			 */
+			const contributed = new Map();
+			if (built !== void 0) {
+				built.sources.forEach((entry, index) => {
+					const info = built.hooks[index];
+					if (info !== void 0) contributed.set(entry.hook, { ...info, verb: "注入" });
+				});
+			}
+			auditResults("UserPromptSubmit", results, (hook) => contributed.get(hook));
+			if (built === void 0) return void 0;
+			return {
+				message: {
+					customType: "hook_context",
+					content: built.text,
+					// 必须为 true：false 会让这条消息只进上下文、不进界面（静默注入）。
+					display: true,
+					details: { hooks: built.hooks }
+				}
+			};
 		});
-		pi.on("agent_settled", (event, ctx) =>
-			run(
+		pi.on("agent_settled", async (event, ctx) => {
+			const results = await run(
 				"Stop",
 				(sessionId) => payloadForStop({ sessionId, cwd: options.cwd, aborted: event?.aborted === true }),
 				ctx
-			)
-		);
+			);
+			auditResults("Stop", results);
+			return void 0;
+		});
 		/*
 		 * 关闭路径。**唯一带预算的生命周期事件**：它发生在会话删除 / 切换 /
 		 * 应用退出时，等太久会把整个关闭拖住（见 HOOK_SHUTDOWN_BUDGET_MS）。
@@ -1286,15 +1494,29 @@ function createLifecycleHookExtension(options) {
 		 * 从不经那一层 —— 同 `session_start` 缺 `bindExtensions()` 的缺口。
 		 * 发射点收在 `SessionHost.shutdown()`（先 emit 再 dispose）。
 		 */
-		pi.on("session_shutdown", (event, ctx) =>
-			run(
+		pi.on("session_shutdown", async (event, ctx) => {
+			const results = await run(
 				"SessionEnd",
 				(sessionId) => payloadForSessionEnd({ sessionId, cwd: options.cwd, reason: event?.reason }),
 				ctx,
 				HOOK_SHUTDOWN_BUDGET_MS
-			)
-		);
+			);
+			auditResults("SessionEnd", results);
+			return void 0;
+		});
 	};
+}
+
+/**
+ * 一条 hook 结果能否参与注入：**只有 allow 且 stdout 非空**。
+ *
+ * deny / fail / 超时 / 启动失败的输出一律丢弃（仍按既有规则写审计）——
+ * 一个自己都没跑成功的脚本，它的半截输出不该成为模型的事实来源。
+ */
+function injectableText(result) {
+	if (result === null || typeof result !== "object") return "";
+	if (result.verdict !== "allow") return "";
+	return typeof result.stdout === "string" ? result.stdout.trim() : "";
 }
 
 /** 工具结果里的纯文本（PostToolUse 的 error 字段用），失败返回空串。 */
@@ -1313,6 +1535,9 @@ export {
 	HOOK_CONFIG_MAX_BYTES,
 	HOOK_EVENTS,
 	HOOK_IMPORT_MAX_BYTES,
+	HOOK_INJECT_PER_HOOK_BYTES,
+	HOOK_INJECT_TOTAL_BYTES,
+	HOOK_INJECT_TRUNC_MARK,
 	HOOK_KILL_GRACE_MS,
 	HOOK_MATCHER_MAX,
 	HOOK_OUTPUT_MAX,
@@ -1325,8 +1550,10 @@ export {
 	TRUSTED_WORKSPACES_MAX,
 	assertHookConfig,
 	auditDetail,
+	buildHookInjection,
 	chooseWorkspaceRoot,
 	clip,
+	clipUtf8,
 	contentText,
 	createLifecycleHookExtension,
 	createPostToolUseHookExtension,

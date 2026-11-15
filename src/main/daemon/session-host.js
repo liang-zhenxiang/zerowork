@@ -989,6 +989,25 @@ class SessionHost {
           });
           return;
         }
+        if (message.role === "custom") {
+          /*
+           * hooks 上下文注入（#385）：只把「显式可见」的 hook_context 送进时间线。
+           * `display:false` 的 custom 消息只进模型上下文 —— 那条路径就是静默提示
+           * 注入面，本项目不允许，所以这里既不显示也不做任何替代渲染。
+           */
+          if (message.display !== true || message.customType !== "hook_context") return;
+          emit({
+            type: "hook_context",
+            message: {
+              id: this.nextId("hook"),
+              role: "hook_context",
+              text: textOf(message.content),
+              hooks: Array.isArray(message.details?.hooks) ? message.details.hooks : [],
+              at: message.timestamp
+            }
+          });
+          return;
+        }
         if (message.role === "assistant") {
           const id = this.nextId("assistant");
           this.currentAssistantId = id;

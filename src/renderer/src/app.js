@@ -12763,6 +12763,15 @@ function conversationReducer(view, action) {
         }),
         retry: void 0
       };
+    case "hook_context":
+      /*
+       * hooks 注入的上下文（#385）：本轮用户消息之后的一条可见记录。
+       * 不动 turn —— 轮次与计时仍以开轮的 user 消息为锚点。
+       */
+      return {
+        ...view,
+        entries: [...view.entries, taggedWithRun(event.message, view.activeRunId)]
+      };
     case "assistant_started":
       return {
         ...view,
@@ -18950,6 +18959,9 @@ function classify(entry) {
       return entry.text.trim().length > 0 ? "text" : "foldable";
     case "tool":
       return entry.toolName === "show_widget" || entry.toolName === "todo_write" ? "exempt" : "foldable";
+    /* 注入卡片是「这一轮怎么来的」的过程记录，随工具轨迹一起折叠；它不是回答正文。 */
+    case "hook_context":
+      return "foldable";
     case "error":
     case "artifacts_presented":
       return "exempt";
@@ -36657,6 +36669,9 @@ function ChatView({
         },
         entry.id
       );
+    }
+    if (entry.role === "hook_context") {
+      return /* @__PURE__ */ jsxRuntimeExports.jsx(HookContextCard, { card: entry }, entry.id);
     }
     if (entry.role === "artifacts_presented") {
       return null;
@@ -67297,6 +67312,31 @@ function hookRowTitle(item) {
   const label = HOOK_EVENT_LABELS[item.event] ?? item.event;
   return HOOK_LIFECYCLE_EVENTS.has(item.event) ? `${label} · 超时 ${item.timeoutMs}ms` : `${label} · ${item.matcher ?? "*"} · 超时 ${item.timeoutMs}ms`;
 }
+/**
+ * 时间线里的一条「hooks 注入的上下文」（#385）。
+ *
+ * 它显示的文字与模型收到的是同一段（`[hook id]` 来源行由 daemon 拼好）。
+ * **不能套 Markdown**：hook 输出是用户自己脚本的纯文本，按 Markdown 解释会
+ * 产生用户没预期的格式（加粗、列表、链接）。正文放原生 `<details>`，默认折叠。
+ *
+ * `display` 恒为 true（daemon 侧拒绝产生 display:false 的注入），所以这张卡
+ * 是「模型收到 = 用户看到」这条约束的界面一侧。
+ */
+function HookContextCard({ card }) {
+  const hooks = Array.isArray(card.hooks) ? card.hooks : [];
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("details", { className: "hook-context-card", "data-entry-id": card.id, children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("summary", { className: "hook-context-head", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-title", children: "hooks 注入的上下文" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-hooks", children: hooks.map((hook, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "hook-context-chip", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-event", children: HOOK_EVENT_LABELS[hook?.event] ?? hook?.event ?? "hook" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-id", children: hook?.id ?? "auto" }),
+        hook?.truncated === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-truncated", children: "已截断" })
+      ] }, `${hook?.id ?? "auto"}-${index}`)) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "hook-context-body", children: card.text }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "hook-context-note", children: "由本地 hook 生成，不改写用户消息" })
+  ] });
+}
 const HOOK_TIMEOUT_MIN = 1000;
 const HOOK_TIMEOUT_MAX = 30000;
 const HOOK_TIMEOUT_DEFAULT = 5000;
@@ -67344,7 +67384,7 @@ function HookTestModal({ hook, result, error, onClose }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: `${result.durationMs}ms` }),
         result.timedOut === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag hooks-tag-warn", children: "超时" })
       ] }),
-      !blockable && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot hooks-test-note", children: "这类事件不参与判定：退出码只记入审计（未阻断），不会拦下消息或一轮对话；输出也不会进入提示词。" }),
+      !blockable && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot hooks-test-note", children: "这类事件不参与判定：退出码只记入审计（未阻断），不会拦下消息或一轮对话；SessionStart / UserPromptSubmit 的放行输出会作为可见的上下文注入（Stop / SessionEnd 不注入）。" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "载荷（stdin）" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "hooks-test-pre", children: JSON.stringify(result.payload, null, 2) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "settings-subhead", children: "stdout" }),
@@ -67690,7 +67730,7 @@ function HooksSection({ busy }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: formatAuditTime(run.ts) })
       ] }, `${run.ts}-${index2}`)) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（工具事件下同样阻止调用；会话开始 / 发送消息前 / 一轮结束 / 会话结束这四类只记审计，不阻断）。会话结束事件在退出时最多等 2 秒：配置的超时再长也不会把应用退出拖久，超出预算的 hook 不再启动并记一条失败审计。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。hook 的输出只进审计与试运行，不会进入提示词。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（工具事件下同样阻止调用；会话开始 / 发送消息前 / 一轮结束 / 会话结束这四类不阻断：结果只影响审计，其中前两类的放行输出还会注入上下文）。会话结束事件在退出时最多等 2 秒：配置的超时再长也不会把应用退出拖久，超出预算的 hook 不再启动并记一条失败审计。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。会话开始 / 发送消息前 的放行输出会作为一条可见的「hooks 注入的上下文」进入本轮上下文（时间线里能看到那张卡，单条上限 4KB、单次合计 8KB）；失败 / 超时 / exit 2 的输出只进审计与试运行，不注入。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
     ] }),
     testing !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookTestModal, {
       hook: testing,
