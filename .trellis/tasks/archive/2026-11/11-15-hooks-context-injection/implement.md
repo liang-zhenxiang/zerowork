@@ -20,7 +20,7 @@
 - [x] `tests/e2e/hooks-inject.mjs`：mock 请求体断言 + 失败输出不在上下文 + 卡片截图 + 重开仍在
 - [x] `SECURITY.md`、spec §七、`CHANGELOG.md`
 - [x] `lint:all`、`npm test`、`npm run build && check:renderer-assets`、hooks 相关全部 e2e
-- [ ] PR（Closes #385）→ CI 绿 → squash 合并
+- [x] PR（Closes #385）→ CI 绿 → squash 合并（#394，提交 5e85e27）
 
 ## 回滚
 
