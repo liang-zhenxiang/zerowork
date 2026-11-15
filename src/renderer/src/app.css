@@ -19305,3 +19305,95 @@ html[data-sidebar-density='compact'] .space-group-header {
 	border-radius: var(--radius-sm);
 	padding: var(--space-2);
 }
+
+/* ── §49 hooks 上下文注入卡片（#385） ───────────────────────────── */
+/* 时间线里的一条独立记录：标题与来源胶囊常在，正文默认折叠。
+   正文是 hook 输出的纯文本（不是 Markdown），因此用 pre 保留空白与折行。
+   颜色 / 间距 / 圆角全部走既有 token；无动画，reduced-motion 无需额外块。 */
+.hook-context-card {
+	margin: var(--space-2) 0;
+	padding: var(--space-3) var(--space-4);
+	background: var(--bg-sidebar);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	font-size: var(--text-meta);
+}
+
+.hook-context-head {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-3);
+	cursor: pointer;
+	list-style: none;
+}
+
+.hook-context-head::-webkit-details-marker {
+	display: none;
+}
+
+.hook-context-title {
+	color: var(--text-secondary);
+	font-weight: 500;
+}
+
+/* 四态：可折叠标题在 hover 时提一档文字色（与其它可点行同一反馈口径）。 */
+.hook-context-head:hover .hook-context-title {
+	color: var(--text);
+}
+
+/* 来源胶囊：事件 + hook id。truncated 只在这一条上多一枚弱警示标记。 */
+.hook-context-hooks {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-1);
+}
+
+.hook-context-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 0 var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-full);
+	background: var(--bg-chip);
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+.hook-context-id {
+	color: var(--text-faint);
+	font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+	overflow-wrap: anywhere;
+}
+
+.hook-context-truncated {
+	color: var(--warning);
+}
+
+/* 正文：等宽、保留空白、长行折行（与 .hooks-test-pre 同一条口径）。 */
+.hook-context-body {
+	margin: var(--space-3) 0 0;
+	padding: var(--space-3) var(--space-4);
+	max-height: 220px;
+	overflow: auto;
+	background: var(--bg-raised);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.hook-context-note {
+	margin: var(--space-2) 0 0;
+	color: var(--text-faint);
+	font-size: var(--text-meta);
+}
+
+@media (max-width: 899px) {
+	.hook-context-head {
+		align-items: flex-start;
+	}
+}
