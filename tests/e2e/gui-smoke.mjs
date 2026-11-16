@@ -18,7 +18,7 @@
  * docs/DESIGN.md §3.8 记载的事故：分组变了而间距没跟着分。
  */
 import assert from "node:assert/strict";
-import { createHarness } from "./lib/harness.mjs";
+import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 const h = createHarness({ name: "smoke" });
 await h.launch();
@@ -26,6 +26,20 @@ const win = h.window();
 
 // ── 断言 ─────────────────────────────────────────────
 await h.check("窗口标题为 ZeroWork", async () => assert.equal(await win.title(), "ZeroWork"));
+
+/*
+ * 首页的场景标签与案例区来自 daemon 异步加载的资源：launch 后立刻快照会在冷启动
+ * （尤其 CI）上偶尔早于数据返回，表现为「缺少场景标签 / 案例区」的假红
+ * （2026-11-16，#409）。先等真实文本就位再取快照；超时把当前文本片段带出来。
+ */
+await waitUntil(
+	() =>
+		win.evaluate(() => {
+			const text = document.body.innerText || "";
+			return text.includes("日常办公") && text.includes("最佳实践");
+		}),
+	{ timeout: 30_000, desc: "首页场景标签与案例区就位" },
+);
 
 const probe = await win.evaluate(() => {
 	const sideNav = document.querySelector("aside, nav, [class*='sidebar'], [class*='sider']");
