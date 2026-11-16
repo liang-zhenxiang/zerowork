@@ -67745,7 +67745,18 @@ function HooksSection({ busy }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", children: formatAuditTime(run.ts) })
       ] }, `${run.ts}-${index2}`)) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "hook 是本地子进程：stdin 收到 JSON 载荷，退出码 0 放行、2 拒绝、其它按失败处理（工具事件下同样阻止调用；会话开始 / 发送消息前 / 一轮结束 / 会话结束这四类不阻断：结果只影响审计，其中前两类的放行输出还会注入上下文）。会话结束事件在退出时最多等 2 秒：配置的超时再长也不会把应用退出拖久，超出预算的 hook 不再启动并记一条失败审计。命令按平台用 cmd 或 /bin/sh 执行；不支持完整正则，匹配只接受精确工具名、* 或 write* 这类前缀。会话开始 / 发送消息前 的放行输出会作为一条可见的「hooks 注入的上下文」进入本轮上下文（时间线里能看到那张卡，单条上限 4KB、单次合计 8KB）；失败 / 超时 / exit 2 的输出只进审计与试运行，不注入。保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
+      /* 规则说明折进 <details>：设置页要能扫读，规范细节不该占 9 行。
+       每条一句话；完整解释在 docs/TROUBLESHOOTING.md 与 SECURITY.md。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("details", { className: "settings-foot hooks-rules", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("summary", { children: "规则说明（放行 / 拒绝 / 超时 / 匹配 / 注入）" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("ul", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "退出码 0 放行、2 拒绝、其它按失败处理；工具事件下失败同样阻止调用。" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "会话开始 / 发送消息前 / 一轮结束 / 会话结束四类不阻断，只记审计；会话结束在退出时最多等 2 秒。" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "会话开始 / 发送消息前的放行输出会作为可见的上下文注入（时间线卡片）：单条 4KB、合计 8KB；失败 / 超时 / exit 2 的输出不注入。" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "命令按平台用 cmd 或 /bin/sh 执行；匹配只接受精确工具名、* 或 write* 这类前缀。" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: "保存后对新创建的会话与之后派生的子代理生效；已创建的会话沿用创建时的规则。" })
+        ] })
+      ] })
     ] }),
     testing !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(HookTestModal, {
       hook: testing,
@@ -70141,7 +70152,7 @@ function DataOpsCard() {
     ] }),
     dir !== "" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-ops-row", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", style: { wordBreak: "break-all" }, children: `存储位置：${dir}` }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: openSessionsDir, children: "在 Finder 打开" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: openSessionsDir, children: "在文件夹中显示" })
     ] }),
     /* #390 第二十三轮 F9：片段库 JSON 导出（与短语导出同形态，跨设备迁移）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx("button", {

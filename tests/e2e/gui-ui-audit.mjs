@@ -725,6 +725,67 @@ await h.check("⑤ 回复长度：重复的历史标记会被全量清理，读�
 	await win.evaluate(() => document.querySelector('[aria-label="关闭设置"]')?.click());
 });
 
+// ══ 收尾三项：平台文案、Hooks 规则折叠（计划书暗色在 gui-plan-book 里）════
+await h.check("设置页：存储位置用平台中立文案；Hooks 规则说明默认折叠", async () => {
+	await win.evaluate(() => document.querySelector('[aria-label="设置"]')?.click());
+	await waitUntil(() => win.evaluate(() => document.querySelector(".settings-card") !== null), {
+		timeout: 15_000,
+		desc: "设置对话框挂上",
+	});
+	const clickNav = (label) =>
+		win.evaluate((text) => {
+			const item = [...document.querySelectorAll(".settings-nav-item")].find(
+				(n) => (n.textContent ?? "").trim() === text,
+			);
+			item?.click();
+		}, label);
+
+	await clickNav("数据管理");
+	const row = await waitUntil(
+		async () => {
+			const value = await win.evaluate(() => {
+				// 页面里有多条 .data-ops-row（备份 / 体检 / 存储位置），按文案锁定。
+				const node = [...document.querySelectorAll(".data-ops-row")].find((n) =>
+					(n.textContent ?? "").includes("存储位置"),
+				);
+				return node === undefined ? null : (node.textContent ?? "").trim();
+			});
+			return value === null ? null : value;
+		},
+		{ timeout: 15_000, desc: "数据管理渲染出存储位置行" },
+	);
+	assert.ok(row.includes("在文件夹中显示"), `存储位置按钮应是平台中立文案：${row}`);
+	assert.ok(!row.includes("Finder"), `macOS 专属文案「Finder」不该出现在跨平台界面：${row}`);
+
+	await clickNav("通用");
+	const folded = await waitUntil(
+		async () => {
+			const value = await win.evaluate(() => {
+				const details = document.querySelector(".hooks-rules");
+				if (details === null) return null;
+				const summary = details.querySelector("summary");
+				return {
+					open: details.open === true,
+					summary: (summary?.textContent ?? "").trim(),
+					summaryDisplay: summary === null ? "" : getComputedStyle(summary).display,
+				};
+			});
+			return value === null ? null : value;
+		},
+		{ timeout: 20_000, desc: "Hooks 分组出现规则说明" },
+	);
+	assert.equal(folded.open, false, "Hooks 规则说明应默认折叠（设置页要能扫读）");
+	assert.ok(folded.summary.includes("规则说明"), `折叠标题应含「规则说明」：${folded.summary}`);
+	await win.evaluate(() => document.querySelector(".hooks-rules summary")?.click());
+	const opened = await waitUntil(
+		async () =>
+			(await win.evaluate(() => document.querySelector(".hooks-rules")?.open === true)) ? true : null,
+		{ timeout: 10_000, desc: "规则说明可展开" },
+	);
+	assert.equal(opened, true, "点击后规则说明应展开");
+	await win.evaluate(() => document.querySelector('[aria-label="关闭设置"]')?.click());
+});
+
 await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
 
 await h.finish();
