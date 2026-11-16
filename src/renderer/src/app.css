@@ -18392,6 +18392,30 @@ html[data-sidebar-density='compact'] .space-group-header {
 	background: var(--bg-chip);
 }
 
+/* Hooks 规则说明：折叠后只占一行，展开给出可扫读的短句。 */
+.hooks-rules summary {
+	cursor: pointer;
+	color: var(--text-secondary);
+}
+
+.hooks-rules summary:focus-visible {
+	outline: 2px solid var(--ring);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+
+.hooks-rules ul {
+	margin: var(--space-2) 0 0;
+	padding-left: var(--space-4);
+	display: grid;
+	gap: var(--space-1);
+	color: var(--text-secondary);
+}
+
+.hooks-rules li {
+	font-size: var(--text-meta);
+}
+
 /* ── 进度：条形 + 「N / M 完成 · HH:mm 更新」 ────────────────────── */
 .plan-book-progress {
 	flex: 0 0 auto;
@@ -18451,7 +18475,9 @@ html[data-sidebar-density='compact'] .space-group-header {
 	gap: var(--space-3);
 	padding: var(--space-3);
 	border-radius: var(--radius-md);
-	background: var(--bg-raised);
+	/* 用 surface-2 而不是 bg-raised：暗色下 --bg-raised 与抽屉面（surface-1）
+	   同为 #0e1624，步骤行会失去容器；surface-2 比表面再亮一档（2026-11-16 评审）。 */
+	background: var(--surface-2);
 	border: 1px solid transparent;
 	transition:
 		background var(--dur-fast) var(--ease-standard),
