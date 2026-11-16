@@ -223,11 +223,18 @@ await h.check("④ 资料库空态：统计块与空态卡上下排列，空态�
 		`统计块应排在空态卡之前（上）：overview.top=${rects.overview.top.toFixed(1)}，` +
 			`empty.top=${rects.empty.top.toFixed(1)}`,
 	);
-	const leftGap = rects.empty.left - rects.body.left;
-	const rightGap = rects.body.right - rects.empty.right;
+	/*
+	 * 居中判据用**同级统计块的内容轴**，不用 body 的左右边界：body 带内边距
+	 * 与滚动条 gutter，两端留白天然不对称（CI 上实测差 11px，本机差 0），
+	 * 拿它判「居中」会把正确布局判红。统计块与空态卡是同一内容列里的兄弟，
+	 * 两者中心对齐才是用户看到的「居中」。
+	 */
+	const overviewCenter = (rects.overview.left + rects.overview.right) / 2;
+	const emptyCenter = (rects.empty.left + rects.empty.right) / 2;
 	assert.ok(
-		Math.abs(leftGap - rightGap) <= 8,
-		`空态卡没有水平居中：左留白 ${leftGap.toFixed(1)}px，右留白 ${rightGap.toFixed(1)}px`,
+		Math.abs(overviewCenter - emptyCenter) <= 8,
+		`空态卡没有与统计块同一内容轴居中：统计块中心 ${overviewCenter.toFixed(1)}px，` +
+			`空态卡中心 ${emptyCenter.toFixed(1)}px`,
 	);
 
 	await setTheme("dark");
