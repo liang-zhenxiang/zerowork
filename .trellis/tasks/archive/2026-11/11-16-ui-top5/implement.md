@@ -30,7 +30,7 @@
 - [x] `tests/e2e/gui-ui-audit.mjs` + 挂进 `test:gui` + 浅/暗截图
 - [x] `CHANGELOG.md`、`.trellis/spec/renderer/index.md`
 - [x] `lint:all`、`npm test`、`build`、相关 GUI 套件
-- [ ] PR → CI 绿 → squash 合并
+- [x] PR → CI 绿 → squash 合并（#402，提交 58c34cf）
 
 ## 回滚
 
