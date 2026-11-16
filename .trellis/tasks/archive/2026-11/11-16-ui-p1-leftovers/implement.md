@@ -6,4 +6,4 @@
 - [x] GUI 断言：文案（含旧值反向验证）、折叠/展开、暗色步骤与抽屉不同色
 - [x] `npm test` / `lint:all` / `check:unicode`
 - [x] CHANGELOG 记「修复」
-- [ ] PR → CI 绿 → squash 合并
+- [x] PR → CI 绿 → squash 合并（#408；#410 先合并修复 smoke 竞态）
