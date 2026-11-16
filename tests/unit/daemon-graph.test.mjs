@@ -86,7 +86,14 @@ function copyModuleGraph(tmpRoot) {
 }
 
 describe("check-daemon-graph —— 模块边界守卫本身", () => {
-	it("在当前仓库状态下通过，且两条性质都真的跑过（不是提前 return）", () => {
+	/*
+	 * 显式超时：这条会起真子进程遍历 40+ 模块，全量并行时 CPU 争抢会让它
+	 * 超过 vitest 默认的 5s（2026-11-16 实测 5.6s/5.9s 的假红）。正常耗时约 1s，
+	 * 20s 是负载余量，不是放宽断言 —— 断言本身一条没动。
+	 */
+	it(
+		"在当前仓库状态下通过，且两条性质都真的跑过（不是提前 return）",
+		() => {
 		const { ok, stdout, stderr, reason } = runCheck();
 		expect(ok, `检查脚本没跑通：${reason || stderr}`).toBe(true);
 		// 两行成功输出缺一不可：只看「有没有报错」无法区分
@@ -97,7 +104,9 @@ describe("check-daemon-graph —— 模块边界守卫本身", () => {
 		const matched = /daemon 模块：(\d+) 个/.exec(stdout);
 		expect(matched).not.toBeNull();
 		expect(Number(matched[1])).toBeGreaterThan(40);
-	});
+	},
+		20_000,
+	);
 });
 
 describe("check-daemon-graph —— 自由变量（反向验证的自动化版）", () => {
@@ -154,7 +163,9 @@ describe("check-daemon-graph —— 自由变量（反向验证的自动化版�
 		// 超时是假红，不是缺陷；按最坏合法耗时放宽，并保留足够余量。
 	}, 60_000);
 
-	it("不误报 import.meta 与 URI 内建全局", () => {
+	it(
+		"不误报 import.meta 与 URI 内建全局",
+		() => {
 		// 这两类曾经各造成一批误报：`import.meta` 被拆成标识符 `import` + `meta`，
 		// 而 encodeURIComponent 之类没进内建名单。它们现在都必须沉默。
 		const { ok, stderr, reason } = runCheck();
@@ -162,7 +173,9 @@ describe("check-daemon-graph —— 自由变量（反向验证的自动化版�
 		expect(stderr).not.toContain("import");
 		expect(stderr).not.toContain("encodeURIComponent");
 		expect(stderr).not.toContain("DOMException");
-	});
+	},
+		20_000,
+	);
 });
 
 describe("check-daemon-graph —— 既有两条性质（模块不存在 / 导出对不上）", () => {
