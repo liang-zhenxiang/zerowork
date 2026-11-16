@@ -13367,10 +13367,10 @@ function ErrorState({
 }
 const NAV_ITEMS$1 = [
   { icon: IconAssistant, label: "助理", ready: false },
-  { icon: IconProject, label: "项目", ready: true },
-  { icon: IconSkill, label: "专家·技能·连接器", ready: true },
-  { icon: IconAutomation, label: "自动化", ready: true },
-  { icon: IconLibrary, label: "资料库", ready: true },
+  { icon: IconProject, label: "项目", ready: true, view: "projects" },
+  { icon: IconSkill, label: "专家·技能·连接器", ready: true, view: "skills" },
+  { icon: IconAutomation, label: "自动化", ready: true, view: "automations" },
+  { icon: IconLibrary, label: "资料库", ready: true, view: "library" },
   { icon: IconMore, label: "更多", ready: false }
 ];
 /** 「规划中」分组的成员。默认折叠：这两项不可点，展开后才有意义；
@@ -13482,6 +13482,7 @@ function Sidebar({
   unreadIds,
   sessionHealth,
   pendingConfirmIds,
+  activeView,
   onNewTask,
   onResumeTask,
   onRenameTask,
@@ -14746,12 +14747,21 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
    * —— 看着是灰的、摸起来是按钮，点下去才弹「待做」，正是 DESIGN.md §7.6
    * 说的「状态只靠颜色」。disabled 一并让它退出 Tab 焦点序列。
    */
-  const renderNavItem = ({ icon: Icon, label, ready }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+  /**
+   * 当前页标记：视觉（.nav-item-current 抬升面）与读屏（aria-current="page"）
+   * 两个通道一起给。未就绪项没有 view id，永远不算当前页。
+   */
+  const isCurrentView = (viewId) => viewId !== void 0 && activeView === viewId;
+  const navClassName = (viewId) => isCurrentView(viewId) ? "nav-item nav-item-current" : "nav-item";
+  const navAriaCurrent = (viewId) => isCurrentView(viewId) ? "page" : void 0;
+
+  const renderNavItem = ({ icon: Icon, label, ready, view: viewId }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "button",
     {
       type: "button",
-      className: ready ? "nav-item" : "nav-item nav-item-pending",
+      className: ready ? navClassName(viewId) : "nav-item nav-item-pending",
       title: ready ? void 0 : "随版本迭代开放",
+      "aria-current": ready ? navAriaCurrent(viewId) : void 0,
       disabled: !ready,
       onClick: () => {
         if (label === "专家·技能·连接器") onOpenSkills();
@@ -14818,7 +14828,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       // 「会话检索」与「文件历史」「诊断」「统计」同款：独立页面、独立 .nav-item，
       // 不进 NAV_ITEMS$1 数组。它排在文件历史之前 —— 找回旧内容的第一动作是「搜」，
       // 不是「翻」。
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenSearch, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: navClassName("search"), "aria-current": navAriaCurrent("search"), onClick: onOpenSearch, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconChatSearch, { size: 16 }),
         "会话检索"
       ] }),
@@ -14829,16 +14839,16 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       // 入口放在该页页头；把待审阅数做成这里的角标，既不增加侧栏高度，也不丢发现性。
       // 为什么在意高度：600px 高的窗口里侧栏本来就紧，多一行 nav 会把任务行的 ⋯ 菜单
       // 推出可视区（tests/e2e/session-pin.mjs ⑬ 会当场变红 —— 那是真实可达性，不是脆断言）。
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenFileHistory, "aria-label": reviewPending > 0 ? `文件历史，另有 ${reviewPending} 项变更待审阅` : "文件历史", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: navClassName("file-history"), onClick: onOpenFileHistory, "aria-current": navAriaCurrent("file-history"), "aria-label": reviewPending > 0 ? `文件历史，另有 ${reviewPending} 项变更待审阅` : "文件历史", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconHistory, { size: 16 }),
         "文件历史",
         reviewBadgeText(reviewPending) !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "nav-badge", children: reviewBadgeText(reviewPending) })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenDiagnostics, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: navClassName("diagnostics"), "aria-current": navAriaCurrent("diagnostics"), onClick: onOpenDiagnostics, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconChart, { size: 16 }),
         "诊断"
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "nav-item", onClick: onOpenStats, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: navClassName("stats"), "aria-current": navAriaCurrent("stats"), onClick: onOpenStats, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconStats, { size: 16 }),
         "统计"
       ] }),
@@ -67327,6 +67337,11 @@ function HookContextCard({ card }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("details", { className: "hook-context-card", "data-entry-id": card.id, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("summary", { className: "hook-context-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-title", children: "hooks 注入的上下文" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "hook-context-toggle", "aria-hidden": "true", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "when-closed", children: "查看内容" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "when-open", children: "收起" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 12, className: "hook-context-chevron" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-hooks", children: hooks.map((hook, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "hook-context-chip", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-event", children: HOOK_EVENT_LABELS[hook?.event] ?? hook?.event ?? "hook" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hook-context-id", children: hook?.id ?? "auto" }),
@@ -67888,12 +67903,21 @@ const REPLY_LENGTH_PRESETS = [
   { id: "balanced", label: "平衡", rule: "回答详略均衡：结论先行，关键步骤展开，可选细节从简。" },
   { id: "detailed", label: "详细", rule: "回答尽量详尽：给出完整推理与背景，主动补充相关注意事项。" }
 ];
-const REPLY_LENGTH_MARKER = /\n?<!-- zw:reply-length: (concise|balanced|detailed) -->/;
+/* 标记行写入时是「id + 一句规则文本」（见下面的 ruleLine），所以解析必须容许
+   id 之后跟着任意非换行文本 —— 原正则写成 `(concise|...) -->`，只认「id 紧跟
+   -->」，**匹配不上自己写出去的行**，于是三枚胶囊的选中态从来不出现，重复点击
+   还会不断追加新标记行。2026-11-16 UI 一致性 Top 5 一并修掉。 */
+const REPLY_LENGTH_MARKER = /\n?<!-- zw:reply-length: (concise|balanced|detailed)[^\n]*? -->/;
+/* 旧版本的解析正则匹配不上自己写出的标记行，用户每点一次就追加一行；这些历史
+   残留今天仍可能存在于偏好里。清理与改写必须**全量**处理，否则模型会收到互相
+   冲突的长度规则；读取也以**最后一条**为准（写入始终追加在末尾）。 */
+const REPLY_LENGTH_MARKER_ALL = new RegExp(REPLY_LENGTH_MARKER.source, "g");
 function applyReplyLength(text2, presetId) {
   const preset = REPLY_LENGTH_PRESETS.find((p) => p.id === presetId);
-  if (preset === void 0) return text2.replace(REPLY_LENGTH_MARKER, "").trim();
+  const stripped = text2.replace(REPLY_LENGTH_MARKER_ALL, "").trim();
+  if (preset === void 0) return stripped;
   const ruleLine = `<!-- zw:reply-length: ${preset.id} ${preset.rule} -->`;
-  return REPLY_LENGTH_MARKER.test(text2) ? text2.replace(REPLY_LENGTH_MARKER, ruleLine) : `${text2.trim()}${text2.trim() === "" ? "" : "\n\n"}${ruleLine}`;
+  return stripped === "" ? ruleLine : `${stripped}\n\n${ruleLine}`;
 }
 function CustomInstructionsSection({
   busy,
@@ -67909,8 +67933,8 @@ function CustomInstructionsSection({
   };
   /* F4：当前选中档从 saved 里的标记行解析。 */
   const lengthPreset = (() => {
-    const m2 = (saved ?? "").match(REPLY_LENGTH_MARKER);
-    return m2 === null ? void 0 : m2[1];
+    const matches = [...(saved ?? "").matchAll(new RegExp(REPLY_LENGTH_MARKER.source, "g"))];
+    return matches.length === 0 ? void 0 : matches[matches.length - 1][1];
   })();
   const pickLength = (presetId) => {
     const next = applyReplyLength(draft, lengthPreset === presetId ? void 0 : presetId);
@@ -67933,18 +67957,21 @@ function CustomInstructionsSection({
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "reply-length-row", role: "group", "aria-label": "回复长度偏好", children: REPLY_LENGTH_PRESETS.map((p) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-      "button",
-      {
-        type: "button",
-        className: `mini-btn reply-length-btn${lengthPreset === p.id ? " saved" : ""}`,
-        "aria-pressed": lengthPreset === p.id,
-        title: p.rule,
-        onClick: () => pickLength(p.id),
-        children: p.label
-      },
-      p.id
-    )) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "reply-length-row", role: "group", "aria-label": "回复长度偏好", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "reply-length-label", children: "回复长度" }),
+      REPLY_LENGTH_PRESETS.map((p) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: `mini-btn reply-length-btn${lengthPreset === p.id ? " is-selected" : ""}`,
+          "aria-pressed": lengthPreset === p.id,
+          title: p.rule,
+          onClick: () => pickLength(p.id),
+          children: p.label
+        },
+        p.id
+      ))
+    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "textarea",
       {
@@ -70452,6 +70479,7 @@ function AuditSection() {
         {
           type: "button",
           className: `mini-btn${category === void 0 ? " active" : ""}`,
+          "aria-pressed": category === void 0,
           onClick: () => select(void 0),
           children: "全部"
         }
@@ -70461,6 +70489,7 @@ function AuditSection() {
         {
           type: "button",
           className: `mini-btn${category === item ? " active" : ""}`,
+          "aria-pressed": category === item,
           onClick: () => select(item),
           children: AUDIT_CATEGORY_LABELS[item]
         },
@@ -71527,6 +71556,7 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
           {
             type: "button",
             className: `ex-cat${selectedTag === void 0 ? " active" : ""}`,
+            "aria-pressed": selectedTag === void 0,
             onClick: () => setSelectedTag(void 0),
             children: "全部"
           }
@@ -71536,6 +71566,7 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
           {
             type: "button",
             className: `ex-cat${selectedTag === tag ? " active" : ""}`,
+            "aria-pressed": selectedTag === tag,
             onClick: () => setSelectedTag(selectedTag === tag ? void 0 : tag),
             children: tag
           },
@@ -78431,6 +78462,7 @@ function App() {
         unreadIds,
         sessionHealth,
         pendingConfirmIds,
+        activeView: view,
         onNewTask: newTask,
         onResumeTask: resumeTask,
         onRenameTask: renameTask,
