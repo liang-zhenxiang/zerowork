@@ -721,7 +721,13 @@
 
 	--text: #0a1220;
 	--text-secondary: rgba(10, 18, 32, 0.68);
-	--text-faint: rgba(10, 18, 32, 0.44);
+	/* 弱文：2026-11-16 UI 评审——0.44 在 --bg / --surface-1 上仅 2.94:1、
+	   在 --surface-2 上 2.92:1，低于 WCAG AA 正文 4.5:1，却承载「3 个模板」
+	   「1 会话」「由本地 hook 生成」这类必须读到的信息。提到 0.59 后
+	   --bg / --surface-1 / --surface-2 / --bg-raised 四面分别为
+	   4.75 / 4.75 / 4.69 / 4.63:1；层级仍明显弱于 secondary(0.68)。
+	   回归防线：tests/unit/theme-contrast.test.mjs。 */
+	--text-faint: rgba(10, 18, 32, 0.59);
 
 	--bg: #ffffff;
 	--bg-sidebar: rgba(255, 255, 255, 0.55); /* 侧栏走玻璃，透过它看见极光 */
@@ -919,7 +925,10 @@
 	--text: #eaf0f8;
 	--text-secondary: rgba(234, 240, 248, 0.6);
 	--accent-contrast-strong-bg: #0a1220; /* 暗色覆盖块 accent 为亮色系时深字 */
-	--text-faint: rgba(234, 240, 248, 0.45); /* #370 F4 对比体检 */
+	/* 弱文：0.45 在暗色 --surface-2 上仅 4.04:1（低于 AA 正文），提到 0.52 后
+	   --bg / --surface-1 / --surface-2 三面分别为 5.10 / 5.03 / 4.96:1。
+	   回归防线：tests/unit/theme-contrast.test.mjs。 */
+	--text-faint: rgba(234, 240, 248, 0.52);
 
 	--bg: #070b14;
 	--bg-sidebar: rgba(12, 18, 30, 0.55);
@@ -931,7 +940,7 @@
 
 	--primary: #14b8a6;
 	--primary-hover: #2dd4bf;
-	--primary-active: #0f766e;
+	--primary-active: #14b8a6; /* 选中态用亮青：深青底 + 深字只有 ~3.4:1 */
 	--primary-text: #04121a;
 	--accent-contrast: #0a1220; /* 此主题 accent 亮青，需深字 */
 
@@ -9737,11 +9746,15 @@ textarea:focus-visible {
 	background: var(--bg-hover);
 }
 
-/* 选中态深底白字（主按钮色反白，与 mode-tab.active 同一选中语言）。 */
+/* 选中态统一到 --primary-active + --primary-text（与 .mode-tab.active /
+   .mini-btn.active 同一语言）：亮色下是青底白字、暗色下是青底深字，
+   同一控件不会因为 --primary 换色而翻转。 */
 .ex-cat.active,
 .ex-cat.active:hover {
-	background: var(--primary);
+	background: var(--primary-active);
+	border-color: var(--primary-active);
 	color: var(--primary-text);
+	font-weight: 600;
 }
 
 /* 卡片网格。 */
@@ -10581,8 +10594,9 @@ textarea:focus-visible {
 	max-width: 640px;
 }
 
-/* 调度类型与星期 toggle 组：选中态给 mini-btn 加 active 反色
-   （主按钮黑 90% 的 CTA 色，同 mode-tab.active 的选中语言）。 */
+/* 调度类型与星期 toggle 组，以及审计类别筛选：选中态统一到
+   --primary-active + --primary-text + 600（与 .mode-tab.active / .ex-cat.active
+   同一语言），不再直接吃 --primary，暗色下同一控件不会翻色。 */
 .auto-toggle-row {
 	display: flex;
 	flex-wrap: wrap;
@@ -10590,9 +10604,21 @@ textarea:focus-visible {
 }
 
 .mini-btn.active {
-	background: var(--primary);
+	background: var(--primary-active);
 	color: var(--primary-text);
-	border-color: var(--primary);
+	border-color: var(--primary-active);
+	font-weight: 600;
+}
+
+/* 选中态在 hover 下也必须保持「选中」。`.mini-btn:hover:not(:disabled)` 的特异性
+   是 (0,3,0)，高于 `.mini-btn.active` 的 (0,2,0)：只补一条裸 .active 规则，鼠标
+   一移上去底就掉回 --bg-hover，而字仍是 --primary-text 反白 —— 实测亮色下
+   rgb(255,255,255) 落在 rgba(13,148,136,.08) 上，等于这枚按钮的文字消失。
+   底色不加深（与 .ex-cat.active:hover 同口径），保证「选中的那一个」始终可读。 */
+.mini-btn.active:hover:not(:disabled) {
+	background: var(--primary-active);
+	border-color: var(--primary-active);
+	color: var(--primary-text);
 }
 
 /* .field 的输入档位只覆盖了 text/password/number，表单还用到
@@ -13900,6 +13926,7 @@ body {
    很像是生效了。这里用同特异性的选择器列表 + 排在文件末尾，才能真正覆盖。 */
 button:focus-visible,
 a:focus-visible,
+summary:focus-visible,
 [role="button"]:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
@@ -13994,6 +14021,19 @@ select:focus-visible,
 .nav-item:active:not(:disabled),
 .new-task:active {
 	transform: translateX(1px) scale(0.99);
+}
+
+/* 当前页：抬升面（与 .settings-nav-item.active 同一手法：不引入新颜色），
+   未就绪项仍走 .nav-item-pending 的 --text-secondary。
+   字重在这批导航里**基线已经是 500**（见上面 .nav-item 那段），所以视觉通道
+   实际由抬升面承担；语义通道是 aria-current="page"。想靠加粗再区分一档会撞上
+   docs/DESIGN.md §3.6 的两档限制（400 / 500），不要改成 600。
+   特异性提到 (0,4,0) 才能压过上面的 .nav-item:hover —— 否则鼠标一移到
+   当前页，抬升面就被 hover 底顶掉，反而看不出「这是当前页」。 */
+.nav-item-current,
+.nav-item.nav-item-current:hover:not(:disabled) {
+	background: var(--bg-raised);
+	font-weight: 500;
 }
 
 /* 分组标题：大写字距小标签（typography 检索给出的 label 规则） */
@@ -14684,12 +14724,21 @@ select:focus-visible,
 }
 
 /* 整页只有空态时，把它放到视觉重心上：否则一句「还没有…」贴着页头、
-   下面留一整屏空白，像是页面没加载完。:has() 在 Electron 44 上可用。 */
-.app> main.settings .settings-body:has(> .state-empty) {
+   下面留一整屏空白，像是页面没加载完。:has() 在 Electron 44 上可用。
+   **必须排除「有统计块」的场景**：flex 容器会把 .data-overview 与空态卡
+   拉成左右并排（#363 F10 要求数据区不管空不空都显示，两者是上下关系）。 */
+.app> main.settings .settings-body:has(> .state-empty):not(:has(> .data-overview)) {
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	min-height: calc(100% - 2 * var(--space-5));
+}
+
+/* 有统计块时：统计在上、空态卡在下方居中。空态卡自身的 max-width 与
+   auto 左右外边距已经完成水平居中（见上面的 .state-empty 规则）。 */
+.app> main.settings .settings-body:has(> .data-overview) > .state-empty {
+	margin-top: var(--space-6);
+	align-self: center;
 }
 
 /* ── 主按钮统一到极光墨的强调色 ────────────────────────────────────
@@ -17966,14 +18015,35 @@ html[data-accent='graphite'] { --accent: var(--accent-choice-graphite); --accent
 .home-greeting-nick {
 	color: var(--text-faint);
 }
-/* F4 回复长度三档：mini-btn 家族复用，行内 gap */
+/* F4 回复长度三档：mini-btn 家族复用，行内 gap。左侧「回复长度」是可见组标签
+   （不靠 aria-label 才能看见这组按钮在选什么）。 */
 .reply-length-row {
 	display: flex;
+	align-items: center;
 	gap: var(--space-2);
 	padding: var(--space-2) var(--space-4) 0;
 }
+.reply-length-label {
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
 .reply-length-btn {
 	flex: none;
+}
+/* 选中态与 .mini-btn.active 同一语言（--primary-active 底 + --primary-text 反白 +
+   600），与「保存成功闪一下」的 .saved 解耦。 */
+.reply-length-btn.is-selected {
+	background: var(--primary-active);
+	border-color: var(--primary-active);
+	color: var(--primary-text);
+	font-weight: 600;
+}
+/* 同 .mini-btn.active:hover：.mini-btn:hover 会把选中底顶成 --bg-hover，
+   而字还是反白 —— 悬停时这枚按钮会变成「近白底 + 白字」。 */
+.reply-length-btn.is-selected:hover:not(:disabled) {
+	background: var(--primary-active);
+	border-color: var(--primary-active);
+	color: var(--primary-text);
 }
 /* F6 chips 组角标：短语前的弱色小标签 */
 .quick-chip-group {
@@ -19309,7 +19379,10 @@ html[data-sidebar-density='compact'] .space-group-header {
 /* ── §49 hooks 上下文注入卡片（#385） ───────────────────────────── */
 /* 时间线里的一条独立记录：标题与来源胶囊常在，正文默认折叠。
    正文是 hook 输出的纯文本（不是 Markdown），因此用 pre 保留空白与折行。
-   颜色 / 间距 / 圆角全部走既有 token；无动画，reduced-motion 无需额外块。 */
+   颜色 / 间距 / 圆角全部走既有 token；chevron 只用 --dur-fast 旋转，
+   reduced-motion 由**文件末尾**的块关停 —— 全局 reduced-motion 块在文件中部
+   （早于本节），同特异性下会被这里的基础声明盖掉（docs/DESIGN.md §10.3.1
+   「位置是硬约束」）。 */
 .hook-context-card {
 	margin: var(--space-2) 0;
 	padding: var(--space-3) var(--space-4);
@@ -19340,6 +19413,36 @@ html[data-sidebar-density='compact'] .space-group-header {
 /* 四态：可折叠标题在 hover 时提一档文字色（与其它可点行同一反馈口径）。 */
 .hook-context-head:hover .hook-context-title {
 	color: var(--text);
+}
+
+/* 折叠提示：折叠态说「查看内容」，展开态说「收起」—— 两个文本节点常驻 DOM，
+   由 CSS 按 details 的 open 属性切换，读屏则由原生 <summary> 自己播报展开状态。 */
+.hook-context-toggle {
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+.hook-context-toggle .when-open {
+	display: none;
+}
+
+.hook-context-card[open] .hook-context-toggle .when-closed {
+	display: none;
+}
+
+.hook-context-card[open] .hook-context-toggle .when-open {
+	display: inline;
+}
+
+/* 箭头：折叠朝下（可展开），展开旋 180° 朝上（可收起）。 */
+.hook-context-chevron {
+	flex: none;
+	color: var(--text-secondary);
+	transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.hook-context-card[open] .hook-context-chevron {
+	transform: rotate(180deg);
 }
 
 /* 来源胶囊：事件 + hook id。truncated 只在这一条上多一枚弱警示标记。 */
@@ -19395,5 +19498,14 @@ html[data-sidebar-density='compact'] .space-group-header {
 @media (max-width: 899px) {
 	.hook-context-head {
 		align-items: flex-start;
+	}
+}
+
+/* 减弱动态效果：chevron 的 180° 旋转是纯装饰过渡，关掉后直接换朝向。
+   单独放在**文件末尾**而不是文件中部那个全局块里 —— 全局块位于本节之前，
+   与基础声明同特异性时会被后者按源序盖掉（docs/DESIGN.md §10.3.1）。 */
+@media (prefers-reduced-motion: reduce) {
+	.hook-context-chevron {
+		transition: none;
 	}
 }
