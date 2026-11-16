@@ -172,6 +172,25 @@ jobs:
           # 与别处相反：这个 job 要 `git push` tag，需要持久化的凭证
           # （persist-credentials: false 会让 push 拿不到认证）。
           persist-credentials: true
+          # 打 tag 可能触碰 `.github/workflows/**`：GITHUB_TOKEN 是 GitHub App
+          # 安装令牌，**没有 workflows 权限**。运行期间 main 又合入了 workflow
+          # 变更时，给那个提交补 tag 会被拒绝（#404）。BETA_TAG_TOKEN 是一个
+          # 仅限本仓库的 fine-grained PAT（Contents + Workflows: read/write）；
+          # 缺失时退回 GITHUB_TOKEN（行为与修复前一致），并由下一步给出提示。
+          token: ${{ secrets.BETA_TAG_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: 检查 beta tag 凭据
+        env:
+          BETA_TAG_TOKEN: ${{ secrets.BETA_TAG_TOKEN }}
+        run: |
+          #!/usr/bin/env bash
+          set -euo pipefail
+          # 只判空、不回显：secret 的值一旦进日志就可能被编码/截断后漏过脱敏。
+          if [ -z "${BETA_TAG_TOKEN}" ]; then
+            echo "::warning::未配置 BETA_TAG_TOKEN，本次用 GITHUB_TOKEN 推送 tag。若运行期间 main 合入了 .github/workflows/** 的变更，GitHub 会拒绝推送（见 #404）。配置方法见 docs/MAINTAINER_GUIDE.md 的「Beta 渠道 → tag 凭据」。"
+          else
+            echo "✓ 使用 BETA_TAG_TOKEN 推送 beta tag"
+          fi
 
       # download-artifact 的 pattern 是**单个 glob**，不认 `|` 或语法——
       # 首发实测把 `beta-notes|installer-*` 当字面量匹配，一个都没下来，
