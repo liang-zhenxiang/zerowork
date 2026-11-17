@@ -14437,14 +14437,20 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                   });
                 },
                 children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(IconFolder, { size: 12, className: "space-group-icon" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 12, className: "space-group-chevron" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-name", children: group.name }),
-                  /* 「当前」徽标（issue #73）：置顶（排序）+ 文字徽标双信号承担
-                     「这是你现在所在的空间」；颜色只做主色强调，不新造语义。 */
-                  group.cwd === currentCwd && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-badge", children: "当前" }),
-                  /* round16 F7：组统计（会话数 · 运行中）。 */
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-meta", children: `${group.sessions.length} 会话${group.sessions.filter((s) => s.running).length > 0 ? ` · ${group.sessions.filter((s) => s.running).length} 运行中` : ""}` })
+                  /* 两行结构：名称独占第一行，会话计数落到第二行。
+                     单行时「图标 + chevron + 名称 + 当前徽标 + 计数 + 常驻操作区」全挤在
+                     一行里，264 侧栏下名称只剩 1~3 字（「ze…」「季…」）；计数与徽标
+                     与名称共享宽度是主要原因。分成两行后名称可用宽基本等于整行。 */
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "space-group-title-row", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(IconFolder, { size: 12, className: "space-group-icon" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 12, className: "space-group-chevron" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-name", children: group.name }),
+                    /* 「当前」徽标（issue #73）：置顶（排序）+ 文字徽标双信号承担
+                       「这是你现在所在的空间」；颜色只做主色强调，不新造语义。 */
+                    group.cwd === currentCwd && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-badge", children: "当前" })
+                  ] }),
+                  /* round16 F7：组统计（会话数 · 运行中），第二行。 */
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "space-group-sub-row", children: `${group.sessions.length} 会话${group.sessions.filter((s) => s.running).length > 0 ? ` · ${group.sessions.filter((s) => s.running).length} 运行中` : ""}` })
                 ]
               }
             ),
@@ -68720,8 +68726,27 @@ function LongTermMemorySection({ busy }) {
             onChange: (e) => setContent(e.currentTarget.value)
           }
         ) : (
-          /* 查看态复用画像文本框档位：div 挂同一 class，只补 pre-wrap（见入口样式表）。 */
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "profile-textarea profile-view", children: savedContent === "" ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "暂无内容，点击编辑添加" }) : savedContent })
+          /* 查看态复用画像文本框档位：div 挂同一 class，只补 pre-wrap（见入口样式表）。
+             整块可点进入编辑：空态文案承诺「点击编辑添加」，真正的入口却只有右上角
+             「编辑」，承诺与可点区域不一致。挂 button 语义（role+tabIndex+Enter/Space），
+             焦点环由全局 [role="button"]:focus-visible 承担；编辑态是 textarea，
+             不再挂这套语义（避免嵌套交互）。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "div",
+            {
+              className: editing ? "profile-textarea profile-view" : "profile-textarea profile-view is-clickable",
+              role: editing ? void 0 : "button",
+              tabIndex: editing ? void 0 : 0,
+              onClick: editing ? void 0 : () => setEditing(true),
+              onKeyDown: editing ? void 0 : (e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setEditing(true);
+                }
+              },
+              children: savedContent === "" ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "暂无内容，点击编辑添加" }) : savedContent
+            }
+          )
         ),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "AI 主动记下的偏好与决定，可随时修改；保存后下一轮对话生效。" })
       ] })
@@ -73151,12 +73176,17 @@ function StatsView({ onClose }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "使用统计" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "把统计画成一张可分享的图片，存到 exports 目录", disabled: stats === void 0 || sharing, onClick: share, children: [
+      /*
+       * 空态（没有任何会话与 token）下，数据类动作（分享卡 / 本周摘要 / 导出 CSV）
+       * 全部隐藏：它们画的是下面那块空态卡已经说明「还没有数据」的内容，
+       * 留着只会让头部挤满一排按不动的按钮。刷新与重试首页属于恢复动作，保留。
+       */
+      !empty2 && /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "把统计画成一张可分享的图片，存到 exports 目录", disabled: stats === void 0 || sharing, onClick: share, children: [
         sharing ? "生成中…" : "分享卡"
       ] }),
       /* #363 第二十轮 F5：本周摘要。7 天汇总文本进剪贴板（贴周报/群聊都用得上）；
          数据全来自已加载的 stats，零新增 IPC。 */
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+      !empty2 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
         type: "button",
         className: "mini-btn",
         onClick: () => {
@@ -73183,7 +73213,7 @@ function StatsView({ onClose }) {
        * 零主进程改动——分享卡走 statsShare 是因为要落 exports/ 且校验
        * PNG 魔数；CSV 是表格数据，走浏览器下载语义更自然。
        */
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "模型用量表导出为 CSV 表格", disabled: stats === void 0 || (stats?.byModel?.length ?? 0) === 0, onClick: () => {
+      !empty2 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "模型用量表导出为 CSV 表格", disabled: stats === void 0 || (stats?.byModel?.length ?? 0) === 0, onClick: () => {
         if (stats === void 0) return;
         /* byModel 经 IPC 序列化后是 {model, count, tokens, cost}——tokens 已是
          * 四项合计（input+output+cacheRead+cacheWrite），不重复拆列。 */
@@ -73205,11 +73235,10 @@ function StatsView({ onClose }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
         "刷新"
       ] }),
-      /* round15 F8：跨页重试首页统计（App 级 usageStats 失败时首页全 0，这里一键补救）。 */
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "若首页「今日」显示为 0，点此重试", onClick: () => window.dispatchEvent(new CustomEvent("zw:stats-retry")), children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
-        "重试首页"
-      ] })
+      /* round15 F8：跨页重试首页统计（App 级 usageStats 失败时首页全 0，这里一键补救）。
+         只在文字上区分「刷新」与「重试首页」：两枚按钮此前都带 IconRefresh，
+         而它们做的事不同（刷新本页数据 / 回首页重拉）。图标只留给前者。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "若首页「今日」显示为 0，点此重试", onClick: () => window.dispatchEvent(new CustomEvent("zw:stats-retry")), children: "重试首页" })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-body", children: [
       shareUrl !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "stat-hint stats-share-hint", children: [
