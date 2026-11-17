@@ -1791,8 +1791,11 @@ textarea:focus-visible {
 .space-group-header-main {
 	flex: 1;
 	display: flex;
-	align-items: center;
-	gap: var(--space-1);
+	/* 两行：第一行名称，第二行计数（见 .space-group-title-row / -sub-row）。
+	   单行时计数与「当前」徽标跟名称抢同一行的宽度，264 侧栏下名称只剩 1~3 字。 */
+	flex-direction: column;
+	align-items: stretch;
+	gap: 2px;
 	min-width: 0;
 	padding: var(--space-1) var(--space-2);
 	/* **不预留让位宽度**（理由同 .task-item-body）：组头的「+」「⋯」两个操作钮是普通
@@ -1801,6 +1804,26 @@ textarea:focus-visible {
 	   **第二重让位**：组名可用宽被扣两次（当年 216px 侧栏算下来只剩 ~50px，约 3~4 字，
 	   所以被截成 ".kami…"/"给肉…"）。右侧没有常驻元信息要保护（组计数早已不渲染），删掉即可。 */
 	text-align: left;
+}
+
+/* 第一行：图标 + chevron + 名称 + 「当前」徽标。 */
+.space-group-title-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-1);
+	min-width: 0;
+}
+
+/* 第二行：会话数 · 运行中。缩进对齐名称文字（图标 12 + gap 4 + chevron 12 + gap 4）。
+   用 --text-secondary 而不是 --text-faint：会话数是「需要读到」的 meta，
+   不能停在装饰档（DESIGN §2.1）。 */
+.space-group-sub-row {
+	padding-left: calc(12px + var(--space-1) + 12px + var(--space-1));
+	font-size: 11px;
+	color: var(--text-secondary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 /* 折叠箭头：展开朝下，收起旋转 -90°，纯 CSS 过渡。 */
@@ -11572,6 +11595,19 @@ textarea:focus-visible {
 	overflow-y: auto;
 }
 
+/* 查看态整块可点进入编辑（空态文案承诺「点击编辑添加」）。焦点环由全局
+   [role="button"]:focus-visible 提供；这里只补鼠标语义与悬停提示。
+   光标用 text 而不是 pointer：点下去之后出现的是文本框，text 才是下一步的形状。 */
+.profile-view.is-clickable {
+	cursor: text;
+	transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
+}
+
+.profile-view.is-clickable:hover {
+	border-color: var(--border-strong);
+	background: var(--bg-raised);
+}
+
 /* ── 重试状态行与排队徽标（spec: add-observability-ledger）───────── */
 /* 琥珀（--warning）表「出错但在自愈」，--danger 留给终态错误卡。 */
 .stream-retry {
@@ -14064,6 +14100,10 @@ select:focus-visible,
 .home-inner {
 	max-width: 900px;
 	min-height: max(680px, 100%);
+	/* 案例槽预留：`.home-main` 为绝对定位的案例区留出的底部空间。
+	   英雄区在「扣掉这块预留」后垂直居中，所以它同时决定上下游留白配比
+	   （§3.8 的 12:12:24:16 是 860 逻辑高下的标定值）。 */
+	--home-case-reserve: 268px;
 }
 
 /* 英雄区光晕：标题背后一团青→紫的柔光。它让超大标题「发亮」，
@@ -14072,7 +14112,7 @@ select:focus-visible,
    .home 的实心底色之后而完全看不见（同一个坑在 .composer-zone 上用
    isolation: isolate 兜住了，这里没必要再造一个层叠上下文）。 */
 .home-main {
-	padding-bottom: 268px;
+	padding-bottom: var(--home-case-reserve, 268px);
 	background-image: radial-gradient(
 		620px 300px at 50% -30px,
 		var(--halo-b) 0%,
@@ -14081,6 +14121,38 @@ select:focus-visible,
 	);
 	background-repeat: no-repeat;
 }
+
+/* 矮视口分级：输入卡必须留在首屏（1280 宽实测，composer.bottom / home.bottom）
+
+     860 → 833.4 / 854    完整档（§3.8 的 12:12:24:16 与 268 预留）
+     820 → 833.4 / 814    **溢出 19px**
+     800 / 760 / 740 → 同样溢出
+     679 → 576.2 / 673    紧凑档
+
+   英雄区内容本身在 1280 宽下约 782px（不含眉标的 45px 与案例预留），`max(680,100%)`
+   的 680 底线还会再垫高。所以分两档收内容，**收的是「不属于首屏主体」的东西**：
+
+   · `≤840`：`.home-eyebrow` 纯装饰（DOM 上本来就 aria-hidden），收起不丢信息。
+     实测收起后内容 782px、输入卡底边 788.2；而 home.bottom = innerHeight - 6，
+     要 innerHeight ≥ 794.2 才装得下，所以 793 及以下还需要第二档。840 这个
+     上限也是量出来的：不收起时输入卡底边 833.4，需要 innerHeight ≥ 839.4。
+   · `≤800`：再收起 `.capability-zone`（场景/模板的发现宫格，§3.8 的「能力 chip」行）。
+     收起后输入卡底边 637，679（CI）下仍有 36px 余量。场景入口仍由 `.mode-tabs`
+     承担，命令面板同样可达（专注模式撤掉同一块的判据见
+     `html[data-focus="on"] .capability-zone`）。阈值取 800 而非 720 是量出来的：
+     只收起眉标时，innerHeight 793 及以下仍会溢出；801 起还留 6.8px。
+   · 两档都保留 `--home-case-reserve: 268`。`.cases` 是绝对定位、钉在 `.home-inner`
+     底部 56px 处，自身高约 190~212px —— 预留必须 ≥「案例区高 + 56」，降到 170
+     会让案例区直接压到输入卡上（实测入侵约 90px；e2e P1-① 的重叠断言钉住这一点）。
+     预留只影响案例区位置，**不影响**输入卡位置，所以在这里省不出首屏空间。
+   · 收起后输入卡底边 637（≤800）；≤720 还叠加既有的欢迎横幅收起规则
+     （`.welcome-banner`，见文件后段），底边进一步降到 576。案例区两种档位下都
+     紧贴其下 0.4px（与 860 基线同样的邻接），卡片滚动可见。
+
+   规则块**必须排在上面两条基础声明之后**（`.home-eyebrow` 的 display 在它前面，
+   `.capability-zone` 的 display 只由本块给出）：@media 不提高优先级，同特异性
+   靠源序裁决 —— 写早了会被后面的 `.home-eyebrow { display: inline-flex }`
+   按源序盖掉，实测过一次（截图上眉标照常出现）。 */
 
 /* 眉标：极光点 + 大写小字，给首页一个「开场白」，也是记忆点之一。 */
 .home-eyebrow {
@@ -14110,6 +14182,31 @@ select:focus-visible,
 	background: var(--grad-brand);
 	box-shadow: 0 0 0 3px var(--ring-soft);
 	animation: home-eyebrow-pulse 2.8s var(--ease-standard) infinite;
+}
+
+/*
+ * 第一档（≤840）：收起装饰眉标，不再强制 680 最小高。能力宫格保留。
+ * 860 下内容高约 833、视口 854，刚好放下；往下每降 10px 输入卡就被顶出 10px。
+ * 收起眉标后输入卡底边 788.2，801 起仍有 6.8px 余量，793 及以下装不下 ——
+ * 于是第二档的阈值取 800（量出来的，不是拍脑袋）。
+ */
+@media (max-height: 840px) {
+	.home-inner {
+		/* 不再强制 680 的最小高：矮视口下它只会把内容再顶长一截。 */
+		min-height: 100%;
+	}
+
+	.home-eyebrow {
+		display: none;
+	}
+}
+
+/* 第二档（≤800）：再收起发现型宫格（场景入口仍由 `.mode-tabs` 承担），
+   输入卡底边降到 637 —— 679（CI）下仍余 36px。 */
+@media (max-height: 800px) {
+	.capability-zone {
+		display: none;
+	}
 }
 
 @keyframes home-eyebrow-in {
@@ -17506,13 +17603,6 @@ mark.find-hit {
 .space-color-empty {
 	background: transparent;
 	box-shadow: inset 0 0 0 1.5px var(--border-strong);
-}
-/* F7 组统计小字：紧跟组名，弱文字色，宽度自适应。 */
-.space-group-meta {
-	margin-left: var(--space-2);
-	font-size: 11px;
-	color: var(--text-faint);
-	white-space: nowrap;
 }
 /* F6 组内搜索：复用 task-filter 样式，宽度收窄为组内条。 */
 .space-search-input {
