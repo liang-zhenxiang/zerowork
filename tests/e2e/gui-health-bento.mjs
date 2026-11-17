@@ -20,6 +20,22 @@ const h = createHarness({ name: "health-bento", shots: true });
 await h.launch();
 const win = h.window();
 
+/*
+ * 矮视口（≤800 逻辑高）下首页会收起 `.capability-zone`（docs/DESIGN.md §3.8.1：
+ * 把输入卡留在首屏）。本文件验的是**这张网格本身的布局**（5 列 / 2 行 / 跨列卡），
+ * 而 CI runner 的屏幕只有 1024×679 上下，拿不到「高窗口」那一档 —— 真去量会读到
+ * `display:none` 的 0 宽卡片。
+ *
+ * 所以在矮视口里临时停用这条收起规则：网格的列宽、行数、跨列只由**宽度**决定，
+ * 与高度无关，量到的仍是真实布局。截图同样展示这张网格 —— 本文件的意义就是
+ * 给它留像素证据；「矮视口下它被收起」由 gui-ui-audit 的 P1-① 负责。
+ */
+if ((await win.evaluate(() => window.innerHeight)) <= 800) {
+	await win.addStyleTag({
+		content: "@media (max-height: 800px) { .capability-zone { display: block !important; } }",
+	});
+}
+
 /** 首页 8 张 Bento 卡的可读摘要（名字 / 描述 / 计数 / 是否跨列 / 实际宽度）。 */
 const bentoCards = () =>
 	win.evaluate(() =>
