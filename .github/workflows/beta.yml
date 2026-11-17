@@ -187,7 +187,7 @@ jobs:
           set -euo pipefail
           # 只判空、不回显：secret 的值一旦进日志就可能被编码/截断后漏过脱敏。
           if [ -z "${BETA_TAG_TOKEN}" ]; then
-            echo "::warning::未配置 BETA_TAG_TOKEN，本次用 GITHUB_TOKEN 推送 tag。若运行期间 main 合入了 .github/workflows/** 的变更，GitHub 会拒绝推送（见 #404）。配置方法见 docs/MAINTAINER_GUIDE.md 的「Beta 渠道 → tag 凭据」。"
+            echo "::warning::未配置 BETA_TAG_TOKEN，本次用 GITHUB_TOKEN 推送 tag。若运行期间 main 合入了 .github/workflows/** 的变更，GitHub 会拒绝推送（见 #404）。配置方法见 docs/MAINTAINER_GUIDE.md 的「Beta tag 的凭据」。"
           else
             echo "✓ 使用 BETA_TAG_TOKEN 推送 beta tag"
           fi
@@ -271,8 +271,17 @@ jobs:
             echo "tag ${TAG} 已在远端（重跑），不重复推"
           else
             git tag -a "$TAG" -m "Beta 渠道自动发布（main 快照）"
-            git push origin "$TAG"
-            echo "✓ 已推 ${TAG}"
+            if push_out="$(git push origin "$TAG" 2>&1)"; then
+              echo "✓ 已推 ${TAG}"
+            else
+              printf '%s\n' "$push_out"
+              # 原始 git 报错只说「没有 workflows 权限」，读不出「该配什么」。
+              # 命中这条已知拒绝时补一条可执行的诊断；其他失败原样退出。
+              if printf '%s' "$push_out" | grep -q 'without .workflows. permission'; then
+                echo "::error::推送 beta tag 被拒绝：运行期间 main 合入了 .github/workflows/** 的变更，而当前凭据是没有 workflows 权限的 GITHUB_TOKEN。请配置 BETA_TAG_TOKEN（fine-grained PAT：本仓库 Contents + Workflows 均为 Read and write），方法见 docs/MAINTAINER_GUIDE.md 的「Beta tag 的凭据」；配好后重跑本工作流即可，版本号幂等重算。"
+              fi
+              exit 1
+            fi
           fi
 
       - name: 创建 Beta Release（pre-release）
