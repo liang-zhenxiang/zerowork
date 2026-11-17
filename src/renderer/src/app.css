@@ -7704,6 +7704,15 @@ textarea:focus-visible {
 	overflow-wrap: anywhere;
 }
 
+/* 脚注里的链接（如「关于」页指向仓库的许可清单）：不继承浏览器默认蓝，
+   与全站可点标识同色。只作用于设置页脚注，避免影响 Markdown 渲染出的
+   正文链接（那些走各自阅读器的既有样式）。 */
+.settings-foot a {
+	color: var(--accent);
+	text-decoration-thickness: 1px;
+	text-underline-offset: 2px;
+}
+
 /* 分区内的小节标题（「关于」页的「第三方组件」用它开一段）。
    档位照 .settings-section-head h2 的下一档：字号同为 --text-body、
    颜色降一档到次文色 —— 靠**字重与颜色**区分层级，不新造字号。 */
@@ -13572,7 +13581,7 @@ button.agent-row {
    结果是圆角框里套一个方框 —— 不是「更明显」，是看着像渲染坏了。 */
 .ss-field:focus-within {
 	border-color: var(--border);
-	outline: 2px solid var(--text-secondary);
+	outline: 2px solid var(--ring);
 	outline-offset: 2px;
 	box-shadow: none;
 }
@@ -16205,7 +16214,7 @@ html[data-palette='graphite'] {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease;
+	transition: border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
 }
 .home-quick-btn:hover {
 	border-color: var(--accent);
@@ -16261,7 +16270,7 @@ html[data-palette='graphite'] {
 	border-radius: var(--radius-md, 10px);
 	border: 1px solid var(--border);
 	background: var(--bg-elevated);
-	transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+	transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
 .stats-badge:hover { transform: translateY(-2px); }
 .stats-badge.is-earned {
@@ -16323,7 +16332,7 @@ select:focus-visible,
 	opacity: 0.28;
 	/* §5 例外⑥（#288 第五轮）：分享卡路径提示的展开动画需要过渡 height——
 	 * 内容只有一行文本，无布局抖动风险；登记于 docs/DESIGN.md §5。 */
-	transition: height var(--dur-base) ease;
+	transition: height var(--dur-base) var(--ease-standard);
 }
 .week-spark-bar[data-today='true'] {
 	opacity: 1;
@@ -16381,7 +16390,7 @@ select:focus-visible,
 	background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, var(--bg)));
 	/* §5 例外⑦（#288 第五轮）：数据概览的归档占比条填充需要过渡 width——
 	 * 进度条语义，宽度变化正是要传达的信息；登记于 docs/DESIGN.md §5。 */
-	transition: width var(--dur-base) ease;
+	transition: width var(--dur-base) var(--ease-standard);
 }
 .data-overview-bar-text {
 	position: absolute; right: 0; top: -18px;
@@ -17745,7 +17754,7 @@ mark.find-hit {
    src/renderer/src/health-score.js（纯函数、单测直测）；这里只管摆位置与取色。
 
    取色纪律（docs/DESIGN.md §2.4 / §7.6）：状态色只表状态，且状态**不看颜色也
-   读得出** —— 每一行都写着「正常 / 扣分 / 无法判断」，颜色只是增强。
+   读得出** —— 每一行都写着「正常 / 待改善 / 无法判断」，颜色只是增强。
    环的档位色与总分档位同源（≥90 --ok / ≥70 --accent / ≥50 --warning / 其余 --danger）。 */
 .health-card {
 	display: flex;
