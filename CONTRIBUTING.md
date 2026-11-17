@@ -137,6 +137,36 @@ npm start
 > 并设 `replace-registry-host=always`）。**请配到用户级的 `~/.npmrc`，不要提交进仓库** ——
 > 仓库里的 `package-lock.json` 刻意指向官方 registry，这样 CI（跑在境外）与本地都能走最快的路。
 
+### `npm ci` 之后跑 GUI 测试报「Electron failed to install correctly」
+
+**现象**：`npm ci` 成功退出，但 `npm run test:gui` 或任何 Playwright 用例在启动时报
+
+```
+electron.launch: Electron failed to install correctly.
+Please delete `node_modules/electron` and run "npx install-electron --no" manually.
+```
+
+`ls node_modules/electron/dist` 是空的（或不存在）。
+
+**原因**：Electron 的 postinstall 会单独从 GitHub Releases 下载对应平台的二进制；
+网络受限、代理中断或超时的情况下 npm **仍然算安装成功**，只是二进制没下来。
+`npm ci` 的退出码不会告诉你这件事。
+
+**解决**（在仓库根目录）：
+
+```bash
+ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/ \
+  node node_modules/electron/install.js
+ls node_modules/electron/dist   # 应看到 Electron.app / LICENSE 等
+```
+
+也可以只重装这一个包：`npm rebuild electron`（同样需要能访问下载源）。
+
+**什么情况下不该用这个方案**：所在网络不允许第三方镜像时，应改为让 `npm ci`
+走可访问官方源的代理/环境；**不要**把镜像地址写进仓库的任何文件（与上面 `~/.npmrc`
+同一条纪律）。镜像只解决「下载不到」，不解决版本/完整性校验问题 ——
+`install.js` 仍按 `package-lock.json` 里的版本与校验值下载。
+
 ---
 
 ## 本地检查
