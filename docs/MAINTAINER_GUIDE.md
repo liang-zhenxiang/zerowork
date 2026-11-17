@@ -929,6 +929,12 @@ without `workflows` permission
 去文档哪一节看，不必再从原始 git 报错反推。到期轮换：更新 secret 即可，
 不需要改工作流；PAT 失效时的表现就是同一条 git 拒绝与同一条诊断。
 
+**一个连带的差别（2026-11-17）**：`GITHUB_TOKEN` 推送的 tag **不会触发下游工作流**，
+PAT 推送的会。所以换成 `BETA_TAG_TOKEN` 后，每个 beta tag 都会触发 `release.yml`。
+`release.yml` 的 `notes` job 因此加了守卫，凡 tag 名含 `-`（预发布）一律跳过 ——
+否则它会在稳定版的版本一致性校验处失败，更糟的是会为 beta 重建 `latest.yml`
+并改写 beta 的 Release。**动这个守卫时要保留这条说明**，它防的是渠道污染。
+
 **给 beta 用户的提示**：beta 用户切回稳定渠道后，要**等到下一个稳定版本发布**
 才会收到更新（beta 版本号领先稳定版，这是语义化版本的比较规则使然，不是 bug）——
 设置页的更新区文案里写了这一点。
