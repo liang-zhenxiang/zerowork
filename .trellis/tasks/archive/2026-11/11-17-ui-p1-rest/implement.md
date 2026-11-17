@@ -27,7 +27,7 @@
 - [x] `npm test`、`lint:all`、`build`、`ui-audit`、`gui-settings`、`route-crawl`、`check:unicode`
 - [x] 反向验证两条（reserve / 空态可点）
 - [x] `CHANGELOG.md` 记「修复」
-- [ ] PR → CI 绿 → squash 合并
+- [x] PR → CI 绿 → squash 合并（#413，提交 57e0fb1）
 
 ## 回滚
 
