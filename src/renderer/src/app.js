@@ -70948,7 +70948,9 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
     },
     [load]
   );
-  const cardRef = useModalFocus();
+  /* 初始焦点落在当前分组的导航项，而不是第一个可聚焦元素（那颗是右上角关闭键）：
+     键盘用户打开设置后应当从「我在哪一组」开始 Tab，而不是被送到「关掉它」上。 */
+  const cardRef = useModalFocus({ initialFocus: () => document.querySelector(".settings-nav-item[aria-current='page']") });
   reactExports.useEffect(() => {
     const onKey = (event) => {
       if (event.key !== "Escape") return;
@@ -71780,6 +71782,9 @@ function SkillsView({ onClose, onTodo, onToast, experts, expertsError, onRetryEx
   }, [snapshot, onToast]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "skills", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "skills-head", children: [
+      /* 读屏用户的页面标题：这一页只有「返回 + 切换胶囊」，没有可见 h1，
+         补一个 sr-only 标题让导航后能报出「当前在哪」。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "sr-only", children: "专家·技能·连接器" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "skills-tabs", children: TABS.map((t) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -72383,7 +72388,7 @@ function GlobalShortcutRow() {
  * 评分与建议的选择全在 health-score.js（纯函数、单测直测）；这里只摆位置：
  * 左环右表，环中心是总分，下面一行建议。**环本身是 role="img" 且带 aria-label**，
  * 屏幕阅读器不依赖图形；四行分项与建议都是真实文本，颜色只做增强
- * （docs/DESIGN.md §7.6：状态不看颜色也读得出 —— 每行都写着「正常 / 扣分 /
+ * （docs/DESIGN.md §7.6：状态不看颜色也读得出 —— 每行都写着「正常 / 待改善 /
  * 无法判断」）。
  */
 const HEALTH_RING_RADIUS = 52;

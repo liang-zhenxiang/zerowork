@@ -318,7 +318,7 @@ await h.check("健康评分是诊断页的第一块（顶部评分环）", () =>
 	assert.equal(health.firstSection, "健康评分", `第一块是「${health.firstSection}」`);
 });
 
-await h.check("四行分项齐全，且每行有真实的「正常 / 扣分 / 无法判断」状态文案", () => {
+await h.check("四行分项齐全，且每行有真实的「正常 / 待改善 / 无法判断」状态文案", () => {
 	assert.deepEqual(
 		health.rows.map((row) => row.name),
 		["模型可用", "内置运行时", "最近任务成功率", "全局快捷键"],
@@ -326,7 +326,7 @@ await h.check("四行分项齐全，且每行有真实的「正常 / 扣分 / �
 	);
 	for (const row of health.rows) {
 		assert.ok(
-			["正常", "扣分", "无法判断"].includes(row.state),
+			["正常", "待改善", "无法判断"].includes(row.state),
 			`「${row.name}」的状态文案=${JSON.stringify(row.state)}（状态不只靠颜色，必须有这三个词之一）`,
 		);
 		assert.ok(
@@ -376,14 +376,14 @@ await h.check("至少一项扣分时，建议指向扣分最多的那一项（�
 	);
 });
 
-await h.check("干净配置下模型项必然是扣分（没选模型 / 没有可用模型）", () => {
+await h.check("干净配置下模型项必然是待改善（没选模型 / 没有可用模型）", () => {
 	const model = health.rows.find((row) => row.name === "模型可用");
 	assert.ok(model !== undefined, "缺少「模型可用」行");
 	assert.ok(
 		model.score <= 10,
 		`干净配置下模型得分=${model.score}/25（既没选模型也没有可用模型时应 ≤10）`,
 	);
-	assert.equal(model.state, "扣分", `模型项状态=${model.state}（应如实显示「扣分」）`);
+	assert.equal(model.state, "待改善", `模型项状态=${model.state}（应如实显示「待改善」）`);
 });
 
 await h.check("建议不是一句空话：扣分时给出下一步动作", () => {

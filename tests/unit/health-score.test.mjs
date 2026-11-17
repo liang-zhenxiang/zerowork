@@ -67,6 +67,9 @@ describe("computeHealth：模型可用", () => {
 		const health = computeHealth({ ...healthy(), model: { kind: "model-not-usable" } });
 		expect(itemOf(health, "model").score).toBe(10);
 		expect(itemOf(health, "model").status).toBe("deduct");
+		/* 文案是「待改善」而不是「扣分」：状态词紧挨得分「10 / 25」时，
+		   「扣分」会被读成「扣了 10 分」（口径是四项合计，不是单行扣分）。 */
+		expect(itemOf(health, "model").stateText).toBe("待改善");
 		expect(health.advice).toContain("模型");
 	});
 

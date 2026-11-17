@@ -14,6 +14,8 @@
  * 11-17-ui-p1-rest 又并入剩余四项 P1（标签前缀 P1-）：
  *   P1-① 首页矮视口下输入卡完整落在首屏；P1-② 统计空态隐藏数据类动作；
  *   P1-③ 记忆空态整块可点进入编辑；P1-④ 侧栏空间组名称与计数分两行。
+ * 11-17-ui-p2-polish 并入六项 P2 里五处可见行为（最后一条 check）：设置初始焦点、
+ * 关于页链接色、检索焦点环、健康评分状态词、专家页 sr-only h1。
  * 其中统计空态要求「一条会话都没有」，所以预置会话（hooks 注入卡）改到这些
  * 空态用例之后再落盘，并用一次渲染层重载让侧栏拿到新的 taskList。
  *
@@ -1265,6 +1267,136 @@ await h.check("设置页：存储位置用平台中立文案；Hooks 规则说�
 	);
 	assert.equal(opened, true, "点击后规则说明应展开");
 	await win.evaluate(() => document.querySelector('[aria-label="关闭设置"]')?.click());
+});
+
+/* ══ 任务 11-17-ui-p2-polish：六项打磨里五处「只有真跑起来才看得见」的行为 ══ */
+await h.check("P2：设置初始焦点、关于链接、检索焦点环、健康文案、专家页 sr-only h1", async () => {
+	// ① 打开设置：初始焦点落在当前分组的导航项，而不是右上角关闭键
+	//    （useModalFocus 默认取第一个可聚焦元素，那颗正是关闭键）。
+	await win.evaluate(() => document.querySelector('[aria-label="设置"]')?.click());
+	await waitUntil(
+		async () =>
+			(await win.evaluate(() => document.querySelector(".settings-card") !== null)) ? true : null,
+		{ timeout: 15_000, desc: "设置对话框挂上" },
+	);
+	const focus = await win.evaluate(
+		() =>
+			new Promise((resolve) => {
+				// 焦点在 ref 回调里同步设置；等一帧让样式与 class 都落定再读。
+				window.requestAnimationFrame(() => {
+					const active = document.activeElement;
+					const current = document.querySelector(".settings-nav-item[aria-current='page']");
+					resolve({
+						activeLabel: (active?.getAttribute("aria-label") ?? active?.textContent ?? "").trim(),
+						isClose: active?.getAttribute("aria-label") === "关闭设置",
+						isNavItem: active?.classList?.contains("settings-nav-item") === true,
+						isCurrent: current !== null && active === current,
+						currentLabel: (current?.textContent ?? "").trim(),
+					});
+				});
+			}),
+	);
+	assert.equal(focus.isClose, false, `设置初始焦点落在关闭键上（active=${focus.activeLabel}）`);
+	assert.ok(focus.isNavItem, `设置初始焦点不在分组导航项上（active=${focus.activeLabel}）`);
+	assert.equal(focus.isCurrent, true, `设置初始焦点不是当前分组「${focus.currentLabel}」`);
+
+	// ② 「关于」页脚注链接与全站可点标识同色（--accent），不是浏览器默认蓝。
+	await win.evaluate(() => {
+		const item = [...document.querySelectorAll(".settings-nav-item")].find(
+			(n) => (n.textContent ?? "").trim() === "关于",
+		);
+		item?.click();
+	});
+	const linkColor = await waitUntil(
+		async () => {
+			const value = await win.evaluate(() => {
+				const link = document.querySelector(".settings-foot a");
+				return link === null ? null : getComputedStyle(link).color;
+			});
+			return value;
+		},
+		{ timeout: 15_000, desc: "关于页脚注链接出现" },
+	);
+	const accent = await resolvedColor("--accent");
+	assert.equal(linkColor, accent, `关于页链接色=${linkColor}（浏览器默认蓝？），应等于 --accent ${accent}`);
+	await win.evaluate(() => document.querySelector('[aria-label="关闭设置"]')?.click());
+	await waitUntil(
+		async () =>
+			(await win.evaluate(() => document.querySelector(".settings-card") === null)) ? true : null,
+		{ timeout: 10_000, desc: "设置对话框关闭" },
+	);
+
+	// ③ 会话检索：外框焦点环与全局焦点语言同色（--ring，不再是 --text-secondary）。
+	await clickNav("会话检索");
+	const outline = await waitUntil(
+		async () => {
+			const value = await win.evaluate(() => {
+				const input = document.querySelector(".ss-field .ss-input");
+				if (input === null) return null;
+				input.focus();
+				const field = input.closest(".ss-field");
+				return {
+					focused: field?.matches(":focus-within") === true,
+					color: field === null ? "" : getComputedStyle(field).outlineColor,
+				};
+			});
+			return value?.focused === true ? value : null;
+		},
+		{ timeout: 15_000, desc: "会话检索输入框获得焦点" },
+	);
+	const ring = await resolvedColor("--ring");
+	assert.equal(outline.color, ring, `检索焦点环色=${outline.color}，应等于 --ring ${ring}`);
+
+	// ④ 诊断：扣分行的状态词是「待改善」——紧挨「10 / 25」时「扣分」会被读成
+	//    「扣了 10 分」（口径是四项合计，不是单行扣分）。
+	//    哪一项是扣分行取决于本机配置（开发机可能已有可用模型），所以按
+	//    status 类（.deduct）锁定而非写死「模型可用」——testing spec §四·补：
+	//    断言不依赖本机恰好配了什么。
+	await clickNav("诊断");
+	const healthRows = await waitUntil(
+		async () => {
+			const value = await win.evaluate(() =>
+				[...document.querySelectorAll(".health-row")].map((row) => ({
+					name: (row.querySelector(".health-row-name")?.textContent ?? "").trim(),
+					state: (row.querySelector(".health-row-state")?.textContent ?? "").trim(),
+					deduct: row.querySelector(".health-row-state")?.classList.contains("deduct") === true,
+				})),
+			);
+			return Array.isArray(value) && value.length === 4 ? value : null;
+		},
+		{ timeout: 20_000, desc: "诊断页健康评分四行渲染" },
+	);
+	for (const row of healthRows) {
+		assert.ok(
+			["正常", "待改善", "无法判断"].includes(row.state),
+			`「${row.name}」状态文案=${row.state}（应是这三词之一）`,
+		);
+	}
+	const deductRows = healthRows.filter((row) => row.deduct);
+	for (const row of deductRows) {
+		assert.equal(row.state, "待改善", `「${row.name}」扣分行状态=${row.state}（应显示「待改善」而不是「扣分」）`);
+	}
+	assert.ok(
+		healthRows.every((row) => row.state !== "扣分"),
+		`状态词仍是「扣分」：${healthRows.map((row) => `${row.name}=${row.state}`).join(" / ")}`,
+	);
+
+	// ⑤ 专家页：没有可见 h1，但有 sr-only 标题给读屏用户报「当前在哪」。
+	await clickNav("专家·技能·连接器");
+	const heading = await waitUntil(
+		async () => {
+			const value = await win.evaluate(() => {
+				const h1 = document.querySelector("h1.sr-only");
+				return h1 === null
+					? null
+					: { text: (h1.textContent ?? "").trim(), clip: getComputedStyle(h1).clipPath };
+			});
+			return value;
+		},
+		{ timeout: 15_000, desc: "专家页 sr-only h1 出现" },
+	);
+	assert.equal(heading.text, "专家·技能·连接器", `专家页 h1 文案=${heading.text}`);
+	assert.notEqual(heading.clip, "none", "sr-only h1 必须真的不占布局（clip-path 应生效）");
 });
 
 await h.check("无渲染层未捕获异常", () => assert.equal(h.pageErrors.length, 0, h.pageErrors.join("; ")));
