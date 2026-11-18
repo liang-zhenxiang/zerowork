@@ -489,6 +489,21 @@ const INVOKE = {
    * （要用 Electron dialog），用户取消返回 undefined。
    */
   pickSkillDirectory: "skills:pick-directory",
+  /* ── 能力包（zerowork-pack v1） ───────────────────────────────── */
+  /** 预览能力包（目录或 .zwpack）：不写盘、不安装，失败返回逐条 errors。 */
+  packInspect: "packs:inspect",
+  /** 安装能力包（同名旧版本原子替换；同名非能力包目录拒绝覆盖）。 */
+  packInstall: "packs:install",
+  /** 卸载能力包（只接受带 _pack.json 的安装目录）。 */
+  packUninstall: "packs:uninstall",
+  /** 已安装能力包列表。 */
+  packList: "packs:list",
+  /** 导出用户专家或已安装能力包为 .zwpack（内置专家拒绝）。 */
+  packExport: "packs:export",
+  /** 弹系统文件框选 .zwpack；用户取消返回 undefined。 */
+  pickPackFile: "packs:pick-file",
+  /** 弹保存框选导出目标；用户取消返回 undefined。 */
+  pickPackSave: "packs:pick-save",
   /* ── MCP 连接器 ─────────────────────────────────────────────── */
   /**
    * MCP 配置快照：各 server 的运行态（连接状态 + 工具数）+ 生效层级 mcp.json
@@ -858,6 +873,13 @@ const bridge = {
   setSkillEnabled: (name, enabled) => ipcRenderer.invoke(INVOKE.setSkillEnabled, name, enabled),
   importSkill: (sourcePath) => ipcRenderer.invoke(INVOKE.importSkill, sourcePath),
   pickSkillDirectory: () => ipcRenderer.invoke(INVOKE.pickSkillDirectory),
+  inspectPack: (sourcePath) => ipcRenderer.invoke(INVOKE.packInspect, sourcePath),
+  installPack: (sourcePath) => ipcRenderer.invoke(INVOKE.packInstall, sourcePath),
+  uninstallPack: (id) => ipcRenderer.invoke(INVOKE.packUninstall, id),
+  listPacks: () => ipcRenderer.invoke(INVOKE.packList),
+  exportPack: (request) => ipcRenderer.invoke(INVOKE.packExport, request),
+  pickPackFile: () => ipcRenderer.invoke(INVOKE.pickPackFile),
+  pickPackSave: (suggestedName) => ipcRenderer.invoke(INVOKE.pickPackSave, suggestedName),
   mcpConfigGet: () => ipcRenderer.invoke(INVOKE.mcpConfigGet),
   mcpConfigSet: (configJson) => ipcRenderer.invoke(INVOKE.mcpConfigSet, configJson),
   mcpServerToggle: (serverName, enabled) => ipcRenderer.invoke(INVOKE.mcpServerToggle, serverName, enabled),

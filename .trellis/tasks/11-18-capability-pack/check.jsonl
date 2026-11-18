@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：可证伪断言、截图先于断言、反向验证"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "验收：daemon 图不变环、IPC 已登记、失败可诊断"}
