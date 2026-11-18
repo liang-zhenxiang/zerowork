@@ -20246,3 +20246,22 @@ html[data-sidebar-density='compact'] .space-group-header {
 	color: var(--warning);
 	font-weight: 600;
 }
+
+/* F8 TL;DR 跳轮的组高亮 */
+.turn-flash {
+	animation: turn-flash-bg 2s var(--ease-standard);
+}
+@keyframes turn-flash-bg {
+	0%, 60% {
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+	}
+	100% {
+		background: transparent;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.turn-flash {
+		animation: none;
+		background: transparent;
+	}
+}
