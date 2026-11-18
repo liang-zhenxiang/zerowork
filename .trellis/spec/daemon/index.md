@@ -189,6 +189,23 @@ macOS / Linux 上受限档直接拒绝执行 —— 这也是本项目不发 Lin
 
 ---
 
+## 八、第三方解压库会「净化」危险路径，校验必须用原名（2026-11-18，能力包）
+
+JSZip 在 `loadAsync` 时会把 `skills/../agents/x.md` 清洗成 `agents/x.md` ——
+`entry.name` 看起来完全合法，原样名在 `entry.unsafeOriginalName`。**只校验
+`entry.name` 的导入器会把这类包静默接受**（能力包的第一版就是这样写错的）。
+
+- 路径判定（绝对路径 / `..` / 隐藏 / 平台非法字符）一律用
+  `entry.unsafeOriginalName ?? entry.name`；
+- zip bomb 预检用 `entry._data.uncompressedSize`（声明值），解压后再按**实际字节**
+  复核 —— 声明值可以撒谎，两道都要有；
+- 符号链接看 `unixPermissions & 0o170000 === 0o120000`（JSZip 生成时需
+  `platform: "UNIX"` 才会保留该位）；
+- 能力包只接受声明式内容（扩展名白名单），**永不执行包内代码**；
+  连接器只声明、不写 `mcp.json`、不携带凭据；
+- 安装目录里的 `_pack.json` 是本应用元数据，不属于包内容 —— 备份目录必须放在
+  `packs/` **之外**，否则会被 `loadExpertsDir` 当多出来的专家扫描并让整库加载失败。
+
 ## 相关
 
 - `docs/ARCHITECTURE.md` —— 进程模型、模块划分、**设计决策与已否决方案**
