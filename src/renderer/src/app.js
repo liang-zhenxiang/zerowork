@@ -12948,13 +12948,18 @@ function resolveSessionOrigin(summaries, session) {
   const title = summaries.find((candidate) => candidate.path === parentPath)?.title.trim();
   return { title: title === void 0 || title === "" ? void 0 : title };
 }
-function sessionRowTitle(session, origin) {
+function sessionRowTitle(session, origin, deliveredName) {
   /* #354 第十九轮 F3：悬浮提示补「最后活跃时间」——path 已在别的通道给
      （开发者向），用户向的时间此前只能看 meta 小字，扫视列表时想要
      「这条是什么时候动的」就得逐行读。 */
   const at = Number(session.modifiedAt ?? 0);
   const timeLine = at > 0 ? `最后活跃：${new Date(at).toLocaleString("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}` : void 0;
-  const lines = [session.title, timeLine, origin === void 0 ? void 0 : originHint(origin)].filter((line) => line !== void 0);
+  const lines = [
+    session.title,
+    timeLine,
+    deliveredName !== void 0 ? `最后交付：${deliveredName}` : void 0,
+    origin === void 0 ? void 0 : originHint(origin)
+  ].filter((line) => line !== void 0);
   return lines.join("\n");
 }
 function originHint(origin) {
@@ -13490,6 +13495,8 @@ function Sidebar({
   onArchiveTask,
   /* #354 第十九轮 F6：复制会话。 */
   onCopyTask,
+  /* #390 F10：任务行悬浮补「最后交付」文件名用。 */
+  sessionDigests,
   onPinTask,
   onExportTask,
   onExportMarkdownTask,
@@ -13801,6 +13808,11 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
        引导整理——一次性判断，不存状态不弹通知。 */
     const stale30Days = Number(task.modifiedAt ?? 0) > 0 && Date.now() - Number(task.modifiedAt) > 30 * 864e5;
     const meta = formatMessageTime(task.modifiedAt, Date.now());
+    /* #390 F10：任务行悬浮补「最后交付」文件名（数据来自 sessionDigests）。 */
+    const rowDigest = sessionDigests?.[task.path];
+    const deliveredName = rowDigest?.kind === "delivered" && Array.isArray(rowDigest.names) && rowDigest.names.length > 0
+      ? rowDigest.names[0]
+      : void 0;
     /*
      * F3（#288 第五轮）内联统计：侧栏会话行 meta 加消息数气泡。口径与
      * 首页 resume 卡一致——messageCount 是 user+assistant 条数之和，0 条
@@ -13889,7 +13901,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         {
           type: "button",
           className: "task-item-body",
-          title: sessionRowTitle(task, origin),
+          title: sessionRowTitle(task, origin, deliveredName),
           onClick: (event) => {
             /* #327 round13 F8：Shift+⌘/Ctrl 点选两个会话 → 底部浮条「比较」。 */
             if ((event.metaKey || event.ctrlKey) && event.shiftKey) {
@@ -32640,7 +32652,29 @@ function HeadingAnchor(Tag, base) {
         title: "复制标题链接",
         onClick: (e) => {
           const slug = slugifyHeading(e.currentTarget.parentElement);
-          navigator.clipboard.writeText(`${base}#${slug}`).then(() => window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制标题链接" }] })));
+          /* #397 第二十五轮 F7：定位 + 高亮同步执行——反馈不依赖 clipboard 的
+             promise。复制后台静默跟进。 */
+          try {
+            const heading = e.currentTarget.closest("h2,h3");
+            if (heading !== null) {
+              heading.scrollIntoView({ behavior: "instant", block: "start" });
+              /* #397 F7：高亮用 fixed overlay（不挂 heading 上——markdown 重渲染
+                 会重建 DOM 把 class 吞掉；overlay 独立于流内容，重渲染免疫）。 */
+              const rect = heading.getBoundingClientRect();
+              const overlay = document.createElement("div");
+              overlay.className = "heading-flash-overlay";
+              overlay.style.cssText = `position:fixed;left:0;right:0;top:${Math.max(0, rect.top - 6)}px;height:${rect.height + 12}px;pointer-events:none;z-index:40;background:color-mix(in srgb, var(--accent) 16%, transparent);transition:opacity 1.2s ease;`;
+              document.body.appendChild(overlay);
+              window.setTimeout(() => {
+                overlay.style.opacity = "0";
+                window.setTimeout(() => overlay.remove(), 1400);
+              }, 1800);
+            }
+          } catch {
+          }
+          navigator.clipboard.writeText(`${base}#${slug}`).catch(() => {
+          });
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制标题链接，已定位到该标题" }] }));
         },
         children: "⚓"
       })
@@ -36387,7 +36421,7 @@ function ChatView({
     for (const view of turnViews) {
       if (view.userEntry === void 0) continue;
       const text0 = (view.userEntry.text ?? "").replace(/\s+/g, " ").trim();
-      if (text0 !== "") intents.push(text0.length > 40 ? `${text0.slice(0, 40)}…` : text0);
+      if (text0 !== "") intents.push({ text: text0.length > 40 ? `${text0.slice(0, 40)}…` : text0, turnIndex: turnViews.indexOf(view) });
       if (intents.length >= 3) break;
     }
     let conclusion = "";
@@ -37013,7 +37047,23 @@ function ChatView({
           tldr !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-tldr-wrap", children: [
             tldrOpen && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "chat-tldr", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tldr-label", children: "摘要" }),
-              ...tldr.intents.map((intent, idx) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tldr-intent", children: intent }, `ti-${idx}`)),
+              ...tldr.intents.map((intent, idx) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tldr-intent", title: "跳到这一轮", onClick: () => {
+                /* #379 窗口化 × 跳转：目标轮在未渲染中间段时先展开全部再定位。 */
+                if (document.querySelector(".turn-window-more") !== null) {
+                  document.querySelector(".turn-window-more")?.click();
+                }
+                window.requestAnimationFrame(() => {
+                  window.requestAnimationFrame(() => {
+                    const groups = document.querySelectorAll(".turn-group");
+                    const target = groups[intent.turnIndex];
+                    if (target !== void 0) {
+                      target.scrollIntoView({ behavior: "smooth", block: "start" });
+                      target.classList.add("turn-flash");
+                      window.setTimeout(() => target.classList.remove("turn-flash"), 2000);
+                    }
+                  });
+                });
+              }, children: intent.text }, `ti-${idx}`)),
               tldr.conclusion !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "chat-tldr-conclusion", children: tldr.conclusion })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "chat-tldr-toggle", onClick: () => setTldrOpen((v) => !v), "aria-expanded": tldrOpen, title: "会话摘要", children: tldrOpen ? "收起摘要" : "TL;DR" })
@@ -37043,7 +37093,23 @@ function ChatView({
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onBackToLeader, children: "返回主会话" })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "stream-wrap", children: [
-          rulerPct !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "time-ruler", "aria-hidden": "true", children: [
+          rulerPct !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+            className: "time-ruler",
+            role: "slider",
+            "aria-label": "会话阅读位置标尺",
+            "aria-valuenow": rulerPct,
+            "aria-valuemin": 0,
+            "aria-valuemax": 100,
+            title: "点击定位到对应位置",
+            onClick: (e) => {
+              const rect = e.currentTarget.getBoundingClientRect();
+              const ratio = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+              const node2 = scrollRef.current;
+              if (node2 === null) return;
+              node2.scrollTo({ top: (node2.scrollHeight - node2.clientHeight) * ratio, behavior: "smooth" });
+              followRef.current = false;
+            },
+            children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-fill", style: { height: `${rulerPct}%` } }) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "time-ruler-pct", children: `${rulerPct}%` })
           ] }),
@@ -79253,6 +79319,7 @@ function App() {
         onArchiveTask: archiveTask,
         onCopyTask: copyTask,
         onPinTask: pinTask,
+        sessionDigests,
         onExportTask: exportTask,
         onExportMarkdownTask: exportMarkdownTask,
         onExportTxtTask: exportTxtTask,
