@@ -103,6 +103,9 @@ export default [
 				// 主题相关的用例在 evaluate 回调里切主题，用得到这两个浏览器全局
 				localStorage: "readonly",
 				CustomEvent: "readonly",
+				// 拖放导入的能力库用例在 evaluate 回调里合成事件（DragEvent + DataTransfer）
+				DataTransfer: "readonly",
+				DragEvent: "readonly",
 			},
 		},
 	},
