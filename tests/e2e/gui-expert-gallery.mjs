@@ -173,8 +173,12 @@ async function waitAnimations(selector) {
 }
 
 /**
- * 请求窗口尺寸并等它真的变化、稳定两帧，返回**实际** inner 尺寸。
- * `resizeTo` 在 CI（屏幕 1024×679）会被系统钳制，所以调用方按返回值/实测做断言。
+ * 请求窗口尺寸并等它稳定，返回**实际** inner 尺寸。
+ *
+ * `resizeTo` 会被系统屏幕钳制：CI 的屏幕只有 1024×679，请求 700 高时窗口
+ * 根本不会变高 —— 旧写法只等「高度与之前不同」，在 CI 上会等到超时
+ * （真实红过一次）。这里接受两种成功：高度真的变了，或目标高度本来就不高于
+ * 当前高度（已经被屏幕钳制）。调用方一律按返回的实测值断言。
  */
 async function resizeWindow(width, height) {
 	const before = await win.evaluate(() => window.innerHeight);
@@ -182,7 +186,8 @@ async function resizeWindow(width, height) {
 	const size = await waitUntil(
 		async () => {
 			const actual = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
-			return actual.height !== before && actual.width > 0 ? actual : null;
+			const settled = actual.height !== before || actual.height <= height;
+			return settled && actual.width > 0 ? actual : null;
 		},
 		{ timeout: 10_000, desc: `窗口尺寸请求 ${width}×${height}` },
 	);
