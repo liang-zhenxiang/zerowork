@@ -903,6 +903,38 @@ gh workflow run release.yml -f tag=v0.4.0
 > 已经发布的版本则用上面这条 dispatch（它跑的就是同一段逻辑）。
 > 只做静态检查是不够的 —— `startup_failure` 这类错**连日志都没有**（见上一节）。
 
+**Beta tag 的凭据：`BETA_TAG_TOKEN`（2026-11-16，issue #404）**
+
+beta 的 tag 由流水线自己创建并推送。`GITHUB_TOKEN` 是 GitHub App 的安装令牌，
+**没有 `workflows` 权限**；如果一次 beta 运行期间 main 又合入了
+`.github/workflows/**` 的变更，给那个提交补 tag 会被拒绝：
+
+```
+refusing to allow a GitHub App to create or update workflow .github/workflows/codeql.yml
+without `workflows` permission
+```
+
+（真实记录：2026-11-16 的 run 43804136359，触发者是 Actions 升级的 Dependabot PR。）
+
+**配置（仓库所有者一次性完成）**：
+
+1. 创建 **fine-grained PAT**，只授权 `liang-zhenxiang/zerowork` 一个仓库：
+   **Contents: Read and write** + **Workflows: Read and write**，设一个到期日；
+2. 仓库 Settings → Secrets and variables → Actions 新增 secret `BETA_TAG_TOKEN`；
+3. 不需要改任何代码：`beta.yml` 的 publish job 会自动优先使用它。
+
+**没有配置时**：流水线退回 `GITHUB_TOKEN` 并在运行日志里打一条 `::warning::`，
+行为与引入本机制之前完全一致 —— 一旦踩到并发 + workflow 变更，仍会红一次。
+被拒绝时「打 tag」步骤会额外打一条 `::error::`，直接说明该配哪个 secret、
+去文档哪一节看，不必再从原始 git 报错反推。到期轮换：更新 secret 即可，
+不需要改工作流；PAT 失效时的表现就是同一条 git 拒绝与同一条诊断。
+
+**一个连带的差别（2026-11-17）**：`GITHUB_TOKEN` 推送的 tag **不会触发下游工作流**，
+PAT 推送的会。所以换成 `BETA_TAG_TOKEN` 后，每个 beta tag 都会触发 `release.yml`。
+`release.yml` 的 `notes` job 因此加了守卫，凡 tag 名含 `-`（预发布）一律跳过 ——
+否则它会在稳定版的版本一致性校验处失败，更糟的是会为 beta 重建 `latest.yml`
+并改写 beta 的 Release。**动这个守卫时要保留这条说明**，它防的是渠道污染。
+
 **给 beta 用户的提示**：beta 用户切回稳定渠道后，要**等到下一个稳定版本发布**
 才会收到更新（beta 版本号领先稳定版，这是语义化版本的比较规则使然，不是 bug）——
 设置页的更新区文案里写了这一点。

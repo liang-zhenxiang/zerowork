@@ -619,6 +619,28 @@ const INVOKE = {
    * （要用 Electron dialog），用户取消返回 undefined。
    */
   pickSkillDirectory: "skills:pick-directory",
+  /* ── 能力包（zerowork-pack v1） ───────────────────────────────── */
+  /**
+   * 预览一个能力包（目录或 .zwpack）：返回将安装的专家摘要、技能清单、连接器
+   * 声明、文件数与体积、冲突信息。**不写盘、不安装**；失败返回
+   * `{ ok:false, errors:[{code,message,file?}] }`，渲染层逐条展示。
+   */
+  packInspect: "packs:inspect",
+  /** 安装能力包（同名旧版本原子替换；同名非能力包目录拒绝覆盖）。 */
+  packInstall: "packs:install",
+  /** 卸载能力包（只接受带 _pack.json 的安装目录）。 */
+  packUninstall: "packs:uninstall",
+  /** 已安装能力包列表（id / version / name / installedAt / source）。 */
+  packList: "packs:list",
+  /** 把用户自己的专家或已安装能力包导出为 .zwpack（内置专家拒绝导出）。 */
+  packExport: "packs:export",
+  /**
+   * 弹系统文件框选 `.zwpack`。由 main 本地应答（要用 Electron dialog），
+   * 用户取消返回 undefined。
+   */
+  pickPackFile: "packs:pick-file",
+  /** 弹保存框选导出目标（默认名由渲染层按 `<id>-<version>.zwpack` 给出）。 */
+  pickPackSave: "packs:pick-save",
   /* ── MCP 连接器 ─────────────────────────────────────────────── */
   /**
    * MCP 配置快照：各 server 的运行态（连接状态 + 工具数）+ 生效层级 mcp.json

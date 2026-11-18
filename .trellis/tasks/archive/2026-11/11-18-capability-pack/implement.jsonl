@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 模块纪律：顶层声明、IPC 登记、落盘顺序、不执行不可信内容"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/ e2e / 反向验证与可证伪断言的硬规范"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "预览弹窗的 Token、焦点、状态双通道纪律"}
+{"file": "docs/DESIGN.md", "reason": "视觉 Token 与动效曲线纪律"}
+{"file": "src/main/daemon/experts.js", "reason": "现有专家加载与校验规则（能力包必须复用）"}
+{"file": "src/main/daemon/skills.js", "reason": "现有导入的 staging/回滚/元数据模式"}
+{"file": "src/main/daemon/session-files.js", "reason": "IPC 注册与 listExperts 投影"}
+{"file": "src/shared/ipc.js", "reason": "通道常量登记"}
+{"file": "src/preload/index.js", "reason": "preload 暴露面与现有 pickSkillDirectory 写法"}
+{"file": "src/main/index.js", "reason": "文件对话框 handler 与生命周期"}

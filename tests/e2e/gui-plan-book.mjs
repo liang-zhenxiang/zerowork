@@ -837,6 +837,19 @@ await h.check("暗色截图", async () => {
 		desc: "抽屉关闭"
 	});
 	await openPlanBook();
+	/*
+	 * 暗色下步骤行必须与抽屉面**不同色**：--bg-raised 与 surface-1 在暗色
+	 * 同为 #0e1624，用 bg-raised 会让步骤行失去容器（2026-11-16 评审）。
+	 */
+	const darkStep = await win.evaluate(() => {
+		const step = document.querySelector(".plan-book-step");
+		const drawer = document.querySelector(".plan-book");
+		return {
+			step: step === null ? "" : getComputedStyle(step).backgroundColor,
+			drawer: drawer === null ? "" : getComputedStyle(drawer).backgroundColor,
+		};
+	});
+	assert.notEqual(darkStep.step, darkStep.drawer, `暗色下计划书步骤与抽屉同色（${darkStep.step}）——步骤行失去容器`);
 	await shootPlanBook("plan-book-dark");
 	await win.evaluate(() => {
 		void window.kami?.setThemePreference?.("light");

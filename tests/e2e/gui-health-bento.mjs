@@ -20,6 +20,22 @@ const h = createHarness({ name: "health-bento", shots: true });
 await h.launch();
 const win = h.window();
 
+/*
+ * 矮视口（≤800 逻辑高）下首页会收起 `.capability-zone`（docs/DESIGN.md §3.8.1：
+ * 把输入卡留在首屏）。本文件验的是**这张网格本身的布局**（5 列 / 2 行 / 跨列卡），
+ * 而 CI runner 的屏幕只有 1024×679 上下，拿不到「高窗口」那一档 —— 真去量会读到
+ * `display:none` 的 0 宽卡片。
+ *
+ * 所以在矮视口里临时停用这条收起规则：网格的列宽、行数、跨列只由**宽度**决定，
+ * 与高度无关，量到的仍是真实布局。截图同样展示这张网格 —— 本文件的意义就是
+ * 给它留像素证据；「矮视口下它被收起」由 gui-ui-audit 的 P1-① 负责。
+ */
+if ((await win.evaluate(() => window.innerHeight)) <= 800) {
+	await win.addStyleTag({
+		content: "@media (max-height: 800px) { .capability-zone { display: block !important; } }",
+	});
+}
+
 /** 首页 8 张 Bento 卡的可读摘要（名字 / 描述 / 计数 / 是否跨列 / 实际宽度）。 */
 const bentoCards = () =>
 	win.evaluate(() =>
@@ -302,7 +318,7 @@ await h.check("健康评分是诊断页的第一块（顶部评分环）", () =>
 	assert.equal(health.firstSection, "健康评分", `第一块是「${health.firstSection}」`);
 });
 
-await h.check("四行分项齐全，且每行有真实的「正常 / 扣分 / 无法判断」状态文案", () => {
+await h.check("四行分项齐全，且每行有真实的「正常 / 待改善 / 无法判断」状态文案", () => {
 	assert.deepEqual(
 		health.rows.map((row) => row.name),
 		["模型可用", "内置运行时", "最近任务成功率", "全局快捷键"],
@@ -310,7 +326,7 @@ await h.check("四行分项齐全，且每行有真实的「正常 / 扣分 / �
 	);
 	for (const row of health.rows) {
 		assert.ok(
-			["正常", "扣分", "无法判断"].includes(row.state),
+			["正常", "待改善", "无法判断"].includes(row.state),
 			`「${row.name}」的状态文案=${JSON.stringify(row.state)}（状态不只靠颜色，必须有这三个词之一）`,
 		);
 		assert.ok(
@@ -360,14 +376,14 @@ await h.check("至少一项扣分时，建议指向扣分最多的那一项（�
 	);
 });
 
-await h.check("干净配置下模型项必然是扣分（没选模型 / 没有可用模型）", () => {
+await h.check("干净配置下模型项必然是待改善（没选模型 / 没有可用模型）", () => {
 	const model = health.rows.find((row) => row.name === "模型可用");
 	assert.ok(model !== undefined, "缺少「模型可用」行");
 	assert.ok(
 		model.score <= 10,
 		`干净配置下模型得分=${model.score}/25（既没选模型也没有可用模型时应 ≤10）`,
 	);
-	assert.equal(model.state, "扣分", `模型项状态=${model.state}（应如实显示「扣分」）`);
+	assert.equal(model.state, "待改善", `模型项状态=${model.state}（应如实显示「待改善」）`);
 });
 
 await h.check("建议不是一句空话：扣分时给出下一步动作", () => {

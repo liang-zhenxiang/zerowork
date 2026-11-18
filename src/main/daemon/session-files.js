@@ -147,6 +147,13 @@ import {
 	parseFrontmatter,
 } from "./experts.js";
 import {
+	exportPack,
+	inspectPack,
+	installPack,
+	listPacks,
+	uninstallPack,
+} from "./packs.js";
+import {
 	McpConfigError,
 	readMcpConfigSource,
 	toggleMcpServer,
@@ -1932,10 +1939,37 @@ async function listSkills(expertSkillsDir) {
   }
 }
 
+/**
+ * 技能清单的展示投影：名称 + SKILL.md frontmatter 里的 description。
+ *
+ * `loadExperts` 给的是 `{ name, file }` 引用（不读文件）；这里按需补描述。
+ * 读不到 / 没有 description 时给空串 —— 界面只显示名称，**不伪造**描述。
+ * pi 在加载阶段已经校验过 frontmatter，这里失败只可能是文件在两次读取之间
+ * 被改动，不该让整个 `listExperts` 失败。
+ */
+function expertSkillSummaries(skills) {
+  if (!Array.isArray(skills)) return [];
+  return skills.map((ref) => {
+    let description = "";
+    try {
+      const doc = parseFrontmatter(readFileSync(ref.file, "utf8"), ref.file);
+      if (typeof doc.frontmatter.description === "string") description = doc.frontmatter.description;
+    } catch {
+      // 读不到就留白（见上）。
+    }
+    return { name: ref.name, description };
+  });
+}
+
 function loadExpertsNow() {
   return loadExperts(
     join(getResourcesDir(), "experts"),
-    join(getConfigDir(), "experts"),
+    // 合并顺序：内置 → 能力包 → 用户手工专家（后者覆盖前者）。
+    // 能力包排在手工专家之前，所以「同名时用户自己的目录仍然优先」这条既有语义不变。
+    [
+      { dir: join(getConfigDir(), "packs"), source: "pack" },
+      { dir: join(getConfigDir(), "experts"), source: "user" }
+    ],
     BUILTIN_SKILL_DIRS,
     loadAgents(join(getResourcesDir(), "agents"), join(getConfigDir(), "agents"))
   );
@@ -4582,6 +4616,14 @@ const handlers = {
     return buildSkillsSnapshot();
   },
   [INVOKE.importSkill]: async ([sourcePath]) => importSkill(sourcePath),
+  /* ── 能力包（zerowork-pack） ─────────────────────────────────── */
+  // 失败一律返回 { ok:false, errors:[{code,message,file?}] }，不 throw ——
+  // 预览弹窗要逐条展示「哪个文件、哪条规则」，一句异常消息做不到这件事。
+  [INVOKE.packInspect]: async ([sourcePath]) => inspectPack(sourcePath),
+  [INVOKE.packInstall]: async ([sourcePath]) => installPack(sourcePath),
+  [INVOKE.packUninstall]: async ([id]) => uninstallPack(id),
+  [INVOKE.packList]: async () => listPacks(),
+  [INVOKE.packExport]: async ([request]) => exportPack(request),
   /* ── MCP 连接器 ─────────────────────────────────────────────── */
   [INVOKE.mcpConfigGet]: async () => {
     const configJson = readMcpConfigSource(mcpEditCwd());
@@ -5712,7 +5754,16 @@ const handlers = {
     quickPrompts: e.quickPrompts,
     tags: e.tags,
     source: e.source,
-    expertType: e.expertType
+    expertType: e.expertType,
+    // 能力库画廊：技能（名称 + 描述）与团队型专家的成员数。
+    // 只增字段，既有的展示字段与顺序不变。
+    skills: expertSkillSummaries(e.skills),
+    agents: e.agents.length,
+    // 能力包来源才带：详情弹窗据此显示「来源：能力包 <id>@<version>」与移除入口。
+    ...e.packId === void 0 ? {} : { packId: e.packId },
+    ...e.packVersion === void 0 ? {} : { packVersion: e.packVersion },
+    // 能力包安装时间（毫秒）：卡片 meta 与「最近安装」排序用。缺省不带。
+    ...e.packInstalledAt === void 0 ? {} : { packInstalledAt: e.packInstalledAt }
   })),
   /**
    * 团队任务板投影（spec: add-team-ux-parity 批次 ③）：Ctrl+T 面板的数据源。

@@ -186,6 +186,8 @@ const SKILL_FILE = "SKILL.md";
 
 const AGENTS_DIR = "agents";
 
+const PACK_META_FILE = "_pack.json";
+
 const EXPERT_TYPES = ["expert", "team"];
 
 function strayMarkdown(dir, allowed) {
@@ -236,6 +238,40 @@ function loadExpertAgents(expertDir) {
     );
   }
   return agents;
+}
+
+/**
+ * 读安装目录里的能力包元数据。
+ *
+ * **只在 source === "pack" 时调用**：用户手工专家目录里若恰好有一个
+ * `_pack.json`，不该被当成「来自能力包」——来源是加载路径决定的，不是文件内容
+ * 自证的。读不懂就当没有（不因为一份坏元数据让整个专家列表加载失败）。
+ */
+function readPackMeta(expertDir) {
+  const file = join(expertDir, PACK_META_FILE);
+  if (!existsSync(file)) return void 0;
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8"));
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
+    const manifest = raw.manifest;
+    if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) return void 0;
+    const id = typeof manifest.id === "string" && manifest.id !== "" ? manifest.id : void 0;
+    const version = typeof manifest.version === "string" && manifest.version !== "" ? manifest.version : void 0;
+    // 「最近安装」排序的数据源。旧包 / 被手工改坏的元数据可能没有这个字段：
+    // 缺省不带（界面据此不显示安装时间，也不在排序里伪造一个位置）。
+    const installedAt =
+      typeof raw.installedAt === "number" && Number.isFinite(raw.installedAt) ? raw.installedAt : void 0;
+    // 只认与目录名一致的 id：否则一个被改坏的 _pack.json 会让界面把「移除」
+    // 指向另一个目录（卸载按 packId 找目录）。
+    if (id === void 0 || id !== basename(expertDir)) return void 0;
+    return {
+      id,
+      ...version === void 0 ? {} : { version },
+      ...installedAt === void 0 ? {} : { installedAt }
+    };
+  } catch {
+    return void 0;
+  }
 }
 
 function loadExpertDir(dir, dirName, source) {
@@ -292,7 +328,8 @@ function loadExpertDir(dir, dirName, source) {
       body: doc.body
     },
     source,
-    skills
+    skills,
+    ...source === "pack" ? { packMeta: readPackMeta(dir) } : {}
   };
 }
 
@@ -317,6 +354,28 @@ function loadGlobalSkills(globalSkillsDirs) {
   return refs;
 }
 
+/**
+ * 用户级专家来源。数组中靠后的目录覆盖靠前的（与「用户覆盖内置」同一口径）；
+ * 能力包目录排在 `configDir/experts` 之前，所以用户手工专家仍然优先。
+ */
+function normalizeUserExpertDirs(userExpertsDir) {
+  const entries = Array.isArray(userExpertsDir) ? userExpertsDir : [userExpertsDir];
+  const dirs = [];
+  for (const entry of entries) {
+    if (typeof entry === "string") {
+      if (entry !== "") dirs.push({ dir: entry, source: "user" });
+      continue;
+    }
+    if (typeof entry === "object" && entry !== null) {
+      const dir = entry.dir;
+      const source = entry.source;
+      if (typeof dir !== "string" || dir === "") continue;
+      dirs.push({ dir, source: source === "pack" ? "pack" : "user" });
+    }
+  }
+  return dirs;
+}
+
 function loadExperts(resourcesExpertsDir, userExpertsDir, globalSkillsDirs, globalAgents) {
   if (!existsSync(resourcesExpertsDir)) {
     throw new Error(`内置专家目录缺失：${resourcesExpertsDir}。这是打包错误——没有内置专家，专家模式无可用人格`);
@@ -325,10 +384,12 @@ function loadExperts(resourcesExpertsDir, userExpertsDir, globalSkillsDirs, glob
   if (builtin.length === 0) {
     throw new Error(`内置专家目录为空：${resourcesExpertsDir}。这是打包错误`);
   }
-  const user = existsSync(userExpertsDir) ? loadExpertsDir(userExpertsDir, "user") : [];
   const byName = /* @__PURE__ */ new Map();
   for (const loaded of builtin) byName.set(loaded.def.name, loaded);
-  for (const loaded of user) byName.set(loaded.def.name, loaded);
+  for (const { dir, source } of normalizeUserExpertDirs(userExpertsDir)) {
+    if (!existsSync(dir)) continue;
+    for (const loaded of loadExpertsDir(dir, source)) byName.set(loaded.def.name, loaded);
+  }
   const claimed = /* @__PURE__ */ new Map();
   for (const ref of loadGlobalSkills(globalSkillsDirs)) claimed.set(ref.name, ref.file);
   for (const loaded of byName.values()) {
@@ -349,7 +410,17 @@ function loadExperts(resourcesExpertsDir, userExpertsDir, globalSkillsDirs, glob
       }
     }
   }
-  return [...byName.values()].map((loaded) => ({ ...loaded.def, source: loaded.source }));
+  return [...byName.values()].map((loaded) => ({
+    ...loaded.def,
+    source: loaded.source,
+    // 技能引用（{ name, file }）：能力库画廊与能力包预览从这里取「专家包含哪些技能」。
+    // 始终是数组（没有私有技能就是 []），调用方不必再判空。
+    skills: loaded.skills,
+    // 只有能力包来源才带这两个字段（缺省不带，而不是带空值 —— UI 据此留白）。
+    ...loaded.packMeta?.id === void 0 ? {} : { packId: loaded.packMeta.id },
+    ...loaded.packMeta?.version === void 0 ? {} : { packVersion: loaded.packMeta.version },
+    ...loaded.packMeta?.installedAt === void 0 ? {} : { packInstalledAt: loaded.packMeta.installedAt }
+  }));
 }
 
 export {
@@ -371,6 +442,7 @@ export {
 	loadExpertsDir,
 	loadGlobalSkills,
 	mergeAgentPools,
+	normalizeUserExpertDirs,
 	optionalBoolean,
 	optionalString,
 	optionalStringArray,
