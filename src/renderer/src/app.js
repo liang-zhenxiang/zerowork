@@ -15998,6 +15998,7 @@ function SkillStrip({
 }
 function Composer({
   ready,
+  convChars,
   placeholder,
   rows,
   cwd: cwd2,
@@ -16474,6 +16475,19 @@ function Composer({
           /* §21.4 估算的显示门独立于字符计数：字符计数是「快写满了」的警告
            * （remaining<1000 才出现），而 token 估算要的是日常量级感 —— 只要
            * 有实质输入（≥40 字符）就显示，搭便车永远等不到那一天。 */
+          modelContextWindow !== void 0 && modelContextWindow > 0 && convChars !== void 0 && (() => {
+            const usedTokens = Math.ceil(convChars / 4) + tokenEstimate;
+            const pct = Math.min(100, Math.round(usedTokens / modelContextWindow * 100));
+            const warn = pct >= 80;
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", {
+              className: `ctx-meter${warn ? " ctx-meter-warn" : ""}`,
+              title: warn ? `会话约占上下文窗口 ${pct}%——接近上限，最早的轮次可能已被压缩或将被截断` : `会话约占上下文窗口的 ${pct}%`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ctx-meter-track", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ctx-meter-fill", style: { width: `${pct}%` } }) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ctx-meter-label", children: [pct, "%"] })
+              ]
+            });
+          })(),
           draft.length >= 40 && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "span",
             {
@@ -37015,22 +37029,7 @@ function ChatView({
           ] }),
           /* #397 第二十四轮 F1/F2/F7：上下文占比条。chars/4 粗估 tokens ÷ 当前模型
              contextWindow；>80% 时条转警示色并在 title 里提示压缩与截断预估。 */
-          modelContextWindow !== void 0 && modelContextWindow > 0 && (() => {
-            const usedTokens = Math.ceil(sessionStats.chars / 4);
-            const pct = Math.min(100, Math.round(usedTokens / modelContextWindow * 100));
-            const warn = pct >= 80;
-            const willCut = usedTokens > modelContextWindow ? Math.max(0, turnViews.length - Math.floor(modelContextWindow / Math.max(1, Math.ceil(sessionStats.chars / Math.max(1, turnViews.length)) / 4))) : 0;
-            return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", {
-              className: `ctx-meter${warn ? " ctx-meter-warn" : ""}`,
-              title: warn
-                ? `会话约占 ${modelContextWindow === 1e3 ? "" : ""}上下文窗口的 ${pct}%——接近上限时最早的轮次可能已被压缩；发送后预计最早约 ${willCut} 轮将被截断`
-                : `会话约占上下文窗口的 ${pct}%`,
-              children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ctx-meter-track", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ctx-meter-fill", style: { width: `${pct}%` } }) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ctx-meter-label", children: [pct, "%"] })
-              ]
-            });
-          })(),
+
           headerActions
         ] }),
         memberView !== void 0 && onBackToLeader !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "member-focus-bar", role: "status", children: [
@@ -37181,6 +37180,7 @@ function ChatView({
                   rows: 2,
                   cwd: conversation.state.cwd,
                   modelId: conversation.state.modelId,
+                  convChars: sessionStats.chars,
                   memberItems,
                   onSubmit: handleComposerSubmit,
                   onError,

@@ -39,11 +39,13 @@ await h.check("① 上下文占比条出现（>80% 警示色）", async () => {
   });
   await waitUntil(() => win.evaluate(() => document.querySelector(".chat") !== null), { timeout: 15000, desc: "进入会话页" });
   await win.waitForTimeout(800);
-  const meter = await win.evaluate(() => {
-    const m = document.querySelector(".ctx-meter");
-    return m === null ? null : { pct: (m.querySelector(".ctx-meter-label")?.textContent ?? ""), warn: m.classList.contains("ctx-meter-warn") };
-  });
-  if (meter === null) throw new Error("占比条未出现");
+  const meter = await waitUntil(
+    () => win.evaluate(() => {
+      const m = document.querySelector(".composer-bar .ctx-meter");
+      return m === null ? null : { pct: (m.querySelector(".ctx-meter-label")?.textContent ?? ""), warn: m.classList.contains("ctx-meter-warn") };
+    }),
+    { timeout: 10000, desc: "composer 占比条出现" },
+  );
   if (meter.pct === "0%") throw new Error("占比 0%（会话内容未被统计）");
   await h.shoot("01-ctx-meter");
 });
