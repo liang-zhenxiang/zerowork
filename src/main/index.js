@@ -153,6 +153,8 @@ const MAIN_HANDLED = [
   INVOKE.saveArtifactAs,
   INVOKE.pickWorkspaceDirectory,
   INVOKE.pickSkillDirectory,
+  INVOKE.pickPackFile,
+  INVOKE.pickPackSave,
   INVOKE.pickInputFiles,
   INVOKE.importProfile,
   INVOKE.workspaceReveal,
@@ -662,6 +664,38 @@ function registerIpc() {
       properties: ["openDirectory"]
     });
     return canceled || filePaths.length === 0 ? void 0 : filePaths[0];
+  });
+  /*
+   * 能力包导入：只让选 `.zwpack` 文件；但系统文件框的过滤是**建议**，用户仍可
+   * 切到「所有文件」。真正的安全校验不在这里 —— 目录来源同样合法（开发与分享时
+   * 直接给文件夹更常见），路径与内容全部由 daemon 的 packs.js 校验。
+   */
+  ipcMain.handle(INVOKE.pickPackFile, async () => {
+    if (window === void 0) return void 0;
+    const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+      title: "选择能力包文件（.zwpack）",
+      properties: ["openFile"],
+      filters: [
+        { name: "能力包", extensions: ["zwpack"] },
+        { name: "所有文件", extensions: ["*"] }
+      ]
+    });
+    return canceled || filePaths.length === 0 ? void 0 : filePaths[0];
+  });
+  /*
+   * 导出目标：默认名由渲染层给出（`<id>-<version>.zwpack`）。这里只取 basename，
+   * 不信任传进来的路径形状 —— 它可能被拼进 defaultPath 造成奇怪的默认目录。
+   */
+  ipcMain.handle(INVOKE.pickPackSave, async (_event, suggestedName) => {
+    if (window === void 0) return void 0;
+    const raw = typeof suggestedName === "string" ? basename(suggestedName) : "";
+    const name = raw.endsWith(".zwpack") ? raw : `${raw === "" ? "expert" : raw}.zwpack`;
+    const { canceled, filePath } = await dialog.showSaveDialog(window, {
+      title: "导出能力包",
+      defaultPath: name,
+      filters: [{ name: "能力包", extensions: ["zwpack"] }]
+    });
+    return canceled ? void 0 : filePath;
   });
   ipcMain.handle(INVOKE.importProfile, async () => {
     if (window === void 0) return void 0;
