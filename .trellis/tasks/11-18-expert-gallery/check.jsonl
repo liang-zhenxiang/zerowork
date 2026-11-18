@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：截图先于断言、反向验证、门禁"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "验收：状态双通道、焦点与对比度"}

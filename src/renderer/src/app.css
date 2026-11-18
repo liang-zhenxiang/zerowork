@@ -9639,6 +9639,8 @@ textarea:focus-visible {
  * ──────────────────────────────────────────────────────────────── */
 
 .ex {
+	/* 相对定位是拖放覆盖层的锚点（.ex-drop-overlay 绝对定位铺满整页内容）。 */
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	gap: var(--space-5);
@@ -9767,13 +9769,154 @@ textarea:focus-visible {
 	background: var(--primary);
 }
 
+/* 筛选行：来源 chip 在左，排序在右。合成一行而不是两行 ——
+   排序只有一个控件，独占一行会在首屏白白吃掉约 50px（矮窗口下很贵）。 */
+.ex-filter-row {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: var(--space-4);
+}
+
+/* 来源四档（全部 / 内置 / 自建 / 能力包）：与 .ex-cat 同一套 chip 语汇，
+   计数是伴随信息不是状态，跟着文字色走、不另造颜色。
+   「来源」这个可见小标签与「标签」「排序」同款（.ex-sort-label）—— 两行 chip
+   各有一个「全部」，没有标签时读者不知道在筛什么。 */
+.ex-source-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+
+.ex-source-row .ex-sort-label {
+	flex: 0 0 auto;
+}
+
+.ex-source-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	height: 28px;
+	padding: var(--space-1) var(--space-4);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	box-sizing: border-box;
+	/* 数字随计数变化时不抖动；取值来自系统字体特性，不新增字体档。 */
+	font-variant-numeric: tabular-nums;
+}
+
+.ex-source-chip:hover {
+	background: var(--bg-hover);
+}
+
+/* 选中态与 .ex-cat.active 同一语言（--primary-active + --primary-text），
+   并在同一行里用 aria-pressed 提供语义状态（DESIGN §7.6「状态不只靠颜色」）。 */
+.ex-source-chip.active,
+.ex-source-chip.active:hover {
+	background: var(--primary-active);
+	border-color: var(--primary-active);
+	color: var(--primary-text);
+	font-weight: 500;
+}
+
+/* 排序行：标签 + 既有 SelectField（DESIGN §6 禁止原生 select）。 */
+.ex-tools-row {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-3);
+}
+
+.ex-sort-label {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 拖放覆盖层：铺满专家页内容区，只在拖入文件时出现。
+   pointer-events: none 是硬要求 —— 覆盖层若接收命中，drop 就落在它身上而不是
+   .ex 容器，拖放反而失效。
+   外层只负责虚线框与整页底色；提示文字放在 .ex-drop-inner 里，用
+   sticky + 100vh 锚定视口 —— `.ex` 是整页内容（可能远高于视口），
+   直接居中会把「松开以导入」落到首屏之外（首版截图实测）。 */
+.ex-drop-overlay {
+	position: absolute;
+	inset: 0;
+	z-index: var(--z-overlay);
+	border: 2px dashed var(--accent);
+	border-radius: var(--radius-lg);
+	/* 让下面的卡片隐约可见：覆盖层是「提示」，不是遮断。 */
+	background: color-mix(in srgb, var(--bg) 85%, transparent);
+	color: var(--text-secondary);
+	pointer-events: none;
+}
+
+.ex-drop-inner {
+	position: sticky;
+	top: 0;
+	height: 100vh;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-3);
+}
+
+.ex-drop-icon {
+	color: var(--accent);
+}
+
+.ex-drop-title {
+	font-size: var(--text-body);
+	font-weight: 500;
+	color: var(--text);
+}
+
+.ex-drop-hint {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 标签行：可见「标签」小标签 + 可横向滚动的 chip 条。
+   与来源行同构（标签 + chip），两行各有一个「全部」也不再有歧义。 */
+.ex-tag-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	min-width: 0;
+}
+
+.ex-tag-row .ex-sort-label {
+	flex: 0 0 auto;
+}
+
 /* 分类 chips 行：可横向滚动且隐藏滚动条（触摸板横滑是主要交互，
-   常驻滚动条会把 28px 的行高压出双轨）。 */
+   常驻滚动条会把 28px 的行高压出双轨）。溢出时用 mask 做渐隐提示
+   （.fade-left / .fade-right 由组件按实际滚动位置加，不常驻）。 */
 .ex-cats {
+	flex: 1 1 auto;
+	min-width: 0;
 	display: flex;
 	gap: var(--space-3);
 	overflow-x: auto;
 	scrollbar-width: none;
+}
+
+/* mask 里的 #000 不是「颜色」：掩膜只取 alpha（同 .turn-nav-scroller.fade-*）。 */
+.ex-cats.fade-right {
+	mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 24px), transparent 100%);
+}
+
+.ex-cats.fade-left {
+	mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 100%);
+}
+
+.ex-cats.fade-left.fade-right {
+	mask-image: linear-gradient(to right, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%);
 }
 
 .ex-cats::-webkit-scrollbar {
@@ -9836,6 +9979,39 @@ textarea:focus-visible {
 	background: var(--bg-raised);
 }
 
+/* 封面色条（能力库画廊）：卡片顶部 3px 的身份色。
+   颜色由组件按 `expertAvatarColor(displayName)` 内联给出 —— 与头像**同一套**
+   颜色与同一个哈希，不在这里另立一组槽位（两套身份色等于没有身份色）。
+   **纯装饰、无语义**，只为让一屏卡片与头像对得上，故 aria-hidden。 */
+.ex-cover {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 3px;
+	border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+/* 暗色下同一条高饱和色细线会显得比头像更亮（3px 全是纯色，没有被字压住）。
+   压一档透明度即可，不新增 token、也不改变「与头像同色」这个事实。 */
+[data-theme="dark"] .ex-cover {
+	opacity: 0.8;
+}
+
+/* 卡片 meta 行：技能数 / 版本 / 安装时间。信息量小但需要读到，走次文色。 */
+.ex-card-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	font-variant-numeric: tabular-nums;
+	/* 卡片底部 rail：meta 与 tags 作为一整块钉底，空余空间留在描述之后
+	   （tags 不再各自 margin-top:auto，否则 meta 会被推离 tags）。 */
+	margin-top: auto;
+}
+
 .ex-card-head {
 	display: flex;
 	align-items: center;
@@ -9889,9 +10065,9 @@ textarea:focus-visible {
 
 .ex-card-tags {
 	display: flex;
+	flex-wrap: wrap;
 	gap: var(--space-2);
-	/* 钉底：描述长短不一时 tags 行仍对齐卡片底边。 */
-	margin-top: auto;
+	/* 不再各自 margin-top:auto —— 底部 rail 由 .ex-card-meta 统一钉底。 */
 }
 
 .ex-tag {
@@ -9919,6 +10095,20 @@ textarea:focus-visible {
 	color: var(--text-secondary);
 }
 
+/* 覆盖整卡的「查看详情」按钮：卡片本身**不再是** role=button（里面还有真正的
+   「使用」按钮，嵌套按钮对读屏与键盘都是坏结构）。这一颗是独立可聚焦的
+   键盘入口，绝对定位铺满整卡接管鼠标点击；焦点环画在整卡边界上。
+   `使用` 以 z-index:1 压在它之上（见 .ex-card-use）。 */
+.ex-card-open {
+	position: absolute;
+	inset: 0;
+	z-index: 0;
+	border: 0;
+	border-radius: inherit;
+	background: transparent;
+	cursor: pointer;
+}
+
 /* hover 浮现的「使用」：absolute 钉右上，只切 opacity —— 插入/移除会
    推挤卡片标题布局，且 grid 里所有卡片 hover 时此起彼伏地跳动。 */
 .ex-card-use {
@@ -9932,6 +10122,8 @@ textarea:focus-visible {
 	background: var(--primary);
 	color: var(--primary-text);
 	font-size: var(--text-meta);
+	/* 必须高于铺满整卡的 .ex-card-open（0），否则点不到。 */
+	z-index: 1;
 	opacity: 0;
 	transition: opacity var(--dur-fast) var(--ease-standard);
 }
@@ -10058,6 +10250,7 @@ textarea:focus-visible {
 
 .ex-modal-tags {
 	display: flex;
+	flex-wrap: wrap;
 	gap: var(--space-2);
 }
 
@@ -10092,6 +10285,90 @@ textarea:focus-visible {
 	border-color: var(--text-faint);
 }
 
+/* 「包含技能」分区：与「专家帮你做」同一种次级面（--bg-raised、无边框），
+   列表只承载名称与描述，不加卡片级盒子（DESIGN §3.9 盒子预算）。 */
+.ex-modal-skills {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding: var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+}
+
+.ex-modal-skills-title {
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.ex-skill-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+/* 技能一行一条：名称（不换行、可截断）+ 描述（ellipsis，全文在 title 里）。
+   多行描述会把 15 条技能变成一篇要滚很久的正文，而详情只需要「有哪些能力」。 */
+.ex-skill-row {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-3);
+	min-width: 0;
+}
+
+.ex-skill-name {
+	/* 名称不参与压缩（否则描述一长，名字被挤成「c...」）；上限 40% 防止
+	   超长名字把描述挤没。 */
+	flex: 0 0 auto;
+	max-width: 40%;
+	min-width: 0;
+	font-size: var(--text-list);
+	color: var(--text);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.ex-skill-desc {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* 「展开全部（N）」/「收起」：就地一条文字动作，不新增盒子（DESIGN §3.9）。 */
+.ex-skill-toggle {
+	align-self: flex-start;
+	padding: 0;
+	border: none;
+	background: none;
+	font-size: var(--text-meta);
+	color: var(--accent);
+}
+
+.ex-skill-toggle:hover {
+	text-decoration: underline;
+}
+
+.ex-skill-toggle:active {
+	opacity: 0.8;
+}
+
+/* 详情里的团队规模（仅团队型）。与来源行同为伴随信息，不另造颜色。 */
+.ex-modal-meta {
+	display: flex;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
 .ex-modal-use {
 	height: 38px;
 	border: none;
@@ -10104,6 +10381,19 @@ textarea:focus-visible {
 
 .ex-modal-use:hover {
 	background: var(--primary-hover);
+}
+
+/* 矮视口（13 寸笔记本常见可用高、CI 的 679）：专家页是信息密集的首屏页面，
+   先收垂直节奏，不隐藏任何功能。块排在 .ex / .skills-body 的基础声明之后 ——
+   @media 不提高优先级，同特异性靠源序裁决。 */
+@media (max-height: 760px) {
+	.skills-body {
+		padding-top: var(--space-3);
+	}
+
+	.ex {
+		gap: var(--space-3);
+	}
 }
 
 /* ── 能力包（zerowork-pack）：来源行 / 预览弹窗 ──────────────────
@@ -12082,6 +12372,7 @@ textarea:focus-visible {
 .quick-prompt-chip:active,
 .skills-tab:active,
 .ex-cat:active,
+.ex-source-chip:active,
 .preview-action:active:not(:disabled),
 .code-block-copy:active:not(:disabled),
 .error-card-copy:active:not(:disabled),
@@ -12233,6 +12524,7 @@ textarea:focus-visible {
 .ex-mine,
 .ex-back,
 .ex-subtab,
+.ex-source-chip,
 .ex-create-btn,
 .ex-modal-prompt,
 .ex-modal-use,

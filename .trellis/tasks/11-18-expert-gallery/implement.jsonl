@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "Token、焦点、状态双通道与矮视口纪律"}
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e/单测/反向验证与可证伪断言"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "listExperts 投影与 daemon 模块纪律"}
+{"file": "docs/DESIGN.md", "reason": "视觉 Token 与动效曲线"}
+{"file": "src/main/daemon/experts.js", "reason": "loadExperts 返回结构与 packMeta"}
+{"file": "src/main/daemon/session-files.js", "reason": "listExperts 投影与技能元数据读取"}
+{"file": "src/renderer/src/app.js", "reason": "ExpertsView / ExpertCard / ExpertDetailModal"}
+{"file": "src/renderer/src/app.css", "reason": "ex-* 样式与 Token 语汇"}
+{"file": "tests/e2e/gui-pack.mjs", "reason": "能力包夹具与安装链路可复用"}
