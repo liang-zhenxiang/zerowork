@@ -257,10 +257,18 @@ function readPackMeta(expertDir) {
     if (typeof manifest !== "object" || manifest === null || Array.isArray(manifest)) return void 0;
     const id = typeof manifest.id === "string" && manifest.id !== "" ? manifest.id : void 0;
     const version = typeof manifest.version === "string" && manifest.version !== "" ? manifest.version : void 0;
+    // 「最近安装」排序的数据源。旧包 / 被手工改坏的元数据可能没有这个字段：
+    // 缺省不带（界面据此不显示安装时间，也不在排序里伪造一个位置）。
+    const installedAt =
+      typeof raw.installedAt === "number" && Number.isFinite(raw.installedAt) ? raw.installedAt : void 0;
     // 只认与目录名一致的 id：否则一个被改坏的 _pack.json 会让界面把「移除」
     // 指向另一个目录（卸载按 packId 找目录）。
     if (id === void 0 || id !== basename(expertDir)) return void 0;
-    return { id, ...version === void 0 ? {} : { version } };
+    return {
+      id,
+      ...version === void 0 ? {} : { version },
+      ...installedAt === void 0 ? {} : { installedAt }
+    };
   } catch {
     return void 0;
   }
@@ -405,9 +413,13 @@ function loadExperts(resourcesExpertsDir, userExpertsDir, globalSkillsDirs, glob
   return [...byName.values()].map((loaded) => ({
     ...loaded.def,
     source: loaded.source,
+    // 技能引用（{ name, file }）：能力库画廊与能力包预览从这里取「专家包含哪些技能」。
+    // 始终是数组（没有私有技能就是 []），调用方不必再判空。
+    skills: loaded.skills,
     // 只有能力包来源才带这两个字段（缺省不带，而不是带空值 —— UI 据此留白）。
     ...loaded.packMeta?.id === void 0 ? {} : { packId: loaded.packMeta.id },
-    ...loaded.packMeta?.version === void 0 ? {} : { packVersion: loaded.packMeta.version }
+    ...loaded.packMeta?.version === void 0 ? {} : { packVersion: loaded.packMeta.version },
+    ...loaded.packMeta?.installedAt === void 0 ? {} : { packInstalledAt: loaded.packMeta.installedAt }
   }));
 }
 
