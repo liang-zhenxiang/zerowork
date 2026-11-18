@@ -7498,6 +7498,7 @@ textarea:focus-visible {
 	font-size: var(--text-list);
 	box-shadow: var(--shadow-md);
 	pointer-events: auto;
+	overflow-wrap: anywhere;
 	animation: toast-in var(--dur-fast) ease-out;
 }
 
@@ -7807,8 +7808,11 @@ textarea:focus-visible {
 	border-color: color-mix(in srgb, var(--ok) 40%, var(--border));
 }
 
+/* 危险按钮的文字：--danger 对白底约 3.7:1，12px 小字达不到 AA 4.5:1。
+   混入正文色（亮色变深、暗色变亮）不新增 token；描边仍是纯 --danger ——
+   非文字图形按 3:1 判定，保持警示强度。 */
 .mini-btn.danger {
-	color: var(--danger);
+	color: color-mix(in srgb, var(--danger) 78%, var(--text));
 	border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
 }
 
@@ -9684,7 +9688,6 @@ textarea:focus-visible {
 }
 
 .ex-mine {
-	margin-left: auto;
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-2);
@@ -9696,8 +9699,22 @@ textarea:focus-visible {
 	color: var(--text);
 }
 
-.ex-mine:hover {
+.ex-mine:hover:not(:disabled) {
 	background: var(--bg-hover);
+}
+
+.ex-mine:disabled {
+	color: var(--text-secondary);
+	cursor: default;
+}
+
+/* 顶栏右侧动作组：两个按钮之间的距离由这一处决定，按钮自身不再各自
+   `margin-left: auto`（否则中间会多出一段无法解释的空白）。 */
+.ex-topbar-actions {
+	display: flex;
+	align-items: center;
+	gap: var(--space-4);
+	margin-left: auto;
 }
 
 /* 我的专家子页顶栏的「< 全部专家」返回（文字即按钮，与子 tab 同层级）。 */
@@ -9888,6 +9905,20 @@ textarea:focus-visible {
 	color: var(--text-secondary);
 }
 
+/* 来源徽标：能力包是「来源」，不是状态 —— 用 chip 底 + 次文色，
+   与标签同层但形态可区分（DESIGN §7.6：状态/来源不看颜色也读得出）。 */
+.ex-source-badge {
+	display: inline-flex;
+	align-items: center;
+	height: 20px;
+	padding: 0 var(--space-3);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
 /* hover 浮现的「使用」：absolute 钉右上，只切 opacity —— 插入/移除会
    推挤卡片标题布局，且 grid 里所有卡片 hover 时此起彼伏地跳动。 */
 .ex-card-use {
@@ -9988,6 +10019,12 @@ textarea:focus-visible {
 	gap: var(--space-4);
 }
 
+/* 关闭键在所有专家弹窗里都贴右：头部没有可伸缩的标题块，默认会紧跟标题，
+   宽弹窗（预览 640px）下看起来像「浮在中间」。 */
+.ex-modal-head .ex-modal-close {
+	margin-left: auto;
+}
+
 .ex-detail-avatar {
 	width: 72px;
 	height: 72px;
@@ -10067,6 +10104,210 @@ textarea:focus-visible {
 
 .ex-modal-use:hover {
 	background: var(--primary-hover);
+}
+
+/* ── 能力包（zerowork-pack）：来源行 / 预览弹窗 ──────────────────
+ * 视觉复用 .ex-modal-* 与 .hooks-import-* 的语汇：预览不是新物种，
+ * 只是「安装前多看一眼」。新增的类只承担结构，取值全部来自 Token。
+ * ──────────────────────────────────────────────────────────────── */
+
+/* 详情弹窗底部的来源与动作行。来源是信息、动作用 mini-btn，不新造字号档。 */
+.ex-modal-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+
+.ex-modal-source {
+	min-width: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	overflow-wrap: anywhere;
+}
+
+/* 移除的二次确认是**独立一块**：和「来源」挤在同一条 flex 行里时，
+   问句会被挤成省略号，用户看不清到底确认的是什么。 */
+.ex-modal-confirm {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--danger);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+}
+
+.ex-modal-confirm-title {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--text-list);
+	line-height: 1.6;
+}
+
+/* 字重只有 400 / 500 两档（docs/DESIGN.md §3.6）。 */
+.ex-modal-confirm-title strong {
+	font-weight: 500;
+}
+
+.ex-modal-confirm-note {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+}
+
+.ex-modal-confirm-actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-3);
+}
+
+/* 预览弹窗比详情宽一档：技能 / 连接器是列表，520px 会把描述压成多行。 */
+.ex-modal.pack-preview {
+	max-width: 640px;
+}
+
+/* 描述承载「这个包是干什么的」，走主文字色；只有 meta / hint 才降一档。 */
+.pack-preview .ex-modal-desc {
+	color: var(--text);
+}
+
+.pack-preview-meta {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+}
+
+.pack-preview-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+}
+
+.pack-preview-section h3 {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	font-weight: 500;
+}
+
+.pack-preview-list {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.pack-preview-list li {
+	font-size: var(--text-list);
+	line-height: 1.6;
+	overflow-wrap: anywhere;
+}
+
+.pack-preview-list strong {
+	font-weight: 500;
+}
+
+.pack-preview-hint {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+}
+
+/* 安全说明：三句话集中在动作区上方一条全宽说明条，动作区不再重复。 */
+.pack-preview-safety {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-md);
+	background: var(--bg-raised);
+}
+
+.pack-preview-safety p {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+}
+
+/* 冲突提示：只是「注意」，不是错误 —— 用次文 + 左侧强调边，不用状态色。 */
+.pack-preview-warn {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border-left: 2px solid var(--accent);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+}
+
+.pack-preview-warn p {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--text-meta);
+	line-height: 1.6;
+}
+
+/* 错误：红色只留给标题；正文是给人读的，机器码/文件退到次行小字。
+   红色正文会同时压掉对比度与层级（整片红字读不出哪句是原因）。 */
+.pack-preview-errors {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+
+.pack-preview-errors h3 {
+	margin: 0;
+	/* 同 .mini-btn.danger：纯 --danger 作 13px 正文色在亮色下低于 AA。 */
+	color: color-mix(in srgb, var(--danger) 78%, var(--text));
+	font-size: var(--text-list);
+	font-weight: 500;
+}
+
+.pack-preview-errors ul {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.pack-preview-errors li {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.pack-error-message {
+	margin: 0;
+	color: var(--text);
+	font-size: var(--text-list);
+	line-height: 1.6;
+	overflow-wrap: anywhere;
+}
+
+.pack-error-meta {
+	margin: 0;
+	color: var(--text-secondary);
+	font-size: var(--text-meta);
+	overflow-wrap: anywhere;
+}
+
+.pack-preview-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-3);
 }
 
 /* ── 项目（projects）：L1 卡片墙 / L2 详情 ──────────────────────

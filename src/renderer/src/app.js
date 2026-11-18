@@ -71466,13 +71466,19 @@ const SEARCH_DEBOUNCE_MS = 200;
 function matchKeyword(expert, keyword) {
   return [expert.name, expert.displayName, expert.profession, expert.description, expert.displayDescription].some((field) => field.toLowerCase().includes(keyword));
 }
-function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
+function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onToast, onReload }) {
   const [searchInput, setSearchInput] = reactExports.useState("");
   const [keyword, setKeyword] = reactExports.useState("");
   const [selectedTag, setSelectedTag] = reactExports.useState(void 0);
   const [listTab, setListTab] = reactExports.useState("experts");
   const [detail, setDetail] = reactExports.useState(void 0);
   const [myExperts, setMyExperts] = reactExports.useState(false);
+  /*
+   * 能力包预览：`{ sourcePath, result }`。`result` 是 daemon 的原样回包
+   * （ok 时带 preview，失败时带 errors），渲染层不重算任何安全判定。
+   */
+  const [packState, setPackState] = reactExports.useState(void 0);
+  const [packBusy, setPackBusy] = reactExports.useState(false);
   const composingRef = reactExports.useRef(false);
   const debounceRef = reactExports.useRef(void 0);
   const scheduleKeyword = reactExports.useCallback((value) => {
@@ -71498,7 +71504,83 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
     }
     return ordered;
   }, [scoped]);
-  const userExperts = reactExports.useMemo(() => list2.filter((e) => e.source === "user"), [list2]);
+  // 「我的专家」= 用户能管理的那两档：手工作品 + 能力包装进来的专家
+  //（后者同样可以移除，所以必须在这里能找到，否则装完只能从全量列表翻）。
+  const userExperts = reactExports.useMemo(
+    () => list2.filter((e) => e.source === "user" || e.source === "pack"),
+    [list2]
+  );
+  const openPackPicker = reactExports.useCallback(async () => {
+    if (packBusy) return;
+    setPackBusy(true);
+    try {
+      const sourcePath = await window.kami.pickPackFile();
+      if (sourcePath === void 0) return;
+      const result = await window.kami.inspectPack(sourcePath);
+      setPackState(
+        result?.ok === true
+          ? { sourcePath, phase: "inspect", preview: result.preview }
+          : {
+              sourcePath,
+              phase: "inspect",
+              errors: result?.errors ?? [{ code: "PACK_UNKNOWN", message: "没有收到预览结果" }]
+            }
+      );
+    } catch (e) {
+      setPackState({
+        sourcePath: "",
+        phase: "inspect",
+        errors: [{ code: "PACK_IPC_ERROR", message: e instanceof Error ? e.message : String(e) }]
+      });
+    } finally {
+      setPackBusy(false);
+    }
+  }, [packBusy]);
+  const installPickedPack = reactExports.useCallback(async () => {
+    if (packState === void 0 || packBusy) return;
+    const { sourcePath, preview } = packState;
+    setPackBusy(true);
+    try {
+      const result = await window.kami.installPack(sourcePath);
+      if (result?.ok === true) {
+        const name = result.expert?.displayName ?? result.id;
+        /*
+         * 安装成功要有**可见落点**：直接打开详情（那里有来源与移除），
+         * 而不是只弹一条 toast —— toast 消失后用户不知道装到哪去了。
+         * 现取一次列表拿完整的投影（packId/packVersion 只在 daemon 侧知道）。
+         */
+        let fresh;
+        try {
+          const list = await window.kami.listExperts();
+          fresh = list.find((entry) => entry.name === result.id);
+        } catch {
+          // 列表刷新失败不该吞掉「安装成功」这件事：仍然 toast + 重载。
+        }
+        setPackState(void 0);
+        onToast?.(`已安装能力包「${name}」`, "success");
+        onReload?.();
+        if (fresh !== void 0) setDetail(fresh);
+      } else {
+        // 安装失败**保留预览内容**：用户正看着的那份摘要不该消失，
+        // 错误条插在动作区上方，主按钮变成「重试安装」。
+        setPackState({
+          sourcePath,
+          phase: "install",
+          preview,
+          errors: result?.errors ?? [{ code: "PACK_UNKNOWN", message: "安装失败，但没有返回原因" }]
+        });
+      }
+    } catch (e) {
+      setPackState({
+        sourcePath,
+        phase: "install",
+        preview,
+        errors: [{ code: "PACK_IPC_ERROR", message: e instanceof Error ? e.message : String(e) }]
+      });
+    } finally {
+      setPackBusy(false);
+    }
+  }, [packState, packBusy, onToast, onReload]);
   const kw = keyword.trim().toLowerCase();
   const visibleExperts = reactExports.useMemo(() => {
     if (kw !== "") return scoped.filter((e) => matchKeyword(e, kw));
@@ -71526,7 +71608,7 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
           "创建专家"
         ] })
       ] }),
-      detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertDetailModal, { expert: detail, onClose: () => setDetail(void 0), onUse: onUseExpert })
+      detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertDetailModal, { expert: detail, onClose: () => setDetail(void 0), onUse: onUseExpert, onToast, onReload })
     ] });
   }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex", children: [
@@ -71556,9 +71638,15 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
           }
         )
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "ex-mine", onClick: () => setMyExperts(true), children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(IconUser, { size: 14 }),
-        "我的专家"
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-topbar-actions", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "ex-mine", onClick: openPackPicker, disabled: packBusy, title: "导入 .zwpack 能力包", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 14 }),
+          "导入能力包…"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "ex-mine", onClick: () => setMyExperts(true), children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconUser, { size: 14 }),
+          "我的专家"
+        ] })
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-subtabs", children: [
@@ -71617,7 +71705,16 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAssistant, { size: 40 }), title: "还没有团队型专家" })
       ) : /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAssistant, { size: 40 }), title: "专家库为空" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-grid", children: visibleExperts.map((expert) => /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertCard, { expert, onOpen: setDetail, onUse: onUseExpert }, expert.name)) })
     ] }),
-    detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertDetailModal, { expert: detail, onClose: () => setDetail(void 0), onUse: onUseExpert })
+    detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertDetailModal, { expert: detail, onClose: () => setDetail(void 0), onUse: onUseExpert, onToast, onReload }),
+    packState !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(PackPreviewModal, {
+      state: packState,
+      busy: packBusy,
+      onInstall: installPickedPack,
+      onRetryPick: openPackPicker,
+      onClose: () => {
+        if (!packBusy) setPackState(void 0);
+      }
+    })
   ] });
 }
 function ExpertCard({
@@ -71647,7 +71744,10 @@ function ExpertCard({
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-card-desc", children: expert.displayDescription }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-card-tags", children: expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag)) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-card-tags", children: [
+          expert.source === "pack" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-source-badge", children: "能力包" }, "source"),
+          expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag))
+        ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
@@ -71664,12 +71764,133 @@ function ExpertCard({
     }
   );
 }
+function PackPreviewModal({
+  state,
+  busy,
+  onInstall,
+  onRetryPick,
+  onClose
+}) {
+  const preview = state.preview;
+  const errors = state.errors ?? [];
+  const installFailed = state.phase === "install" && errors.length > 0;
+  const inspectFailed = preview === void 0;
+  // 预览失败时标题用所选文件名：说「哪个包」比说「包坏了」有用。
+  const parts = String(state.sourcePath ?? "").split(/[\\/]/).filter((part) => part !== "");
+  const pickedName = parts.length === 0 ? "" : parts[parts.length - 1];
+  const closeRef = reactExports.useRef(null);
+  const installRef = reactExports.useRef(null);
+  const cardRef = useModalFocus({
+    initialFocus: () => preview === void 0 ? closeRef.current : installRef.current
+  });
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape" && !busy) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+  const conflicts = preview?.conflicts;
+  // 错误条目：主文案是给人读的，机器码与文件名退到次行小字。
+  // 红色只保留在标题上 —— 一整片红字读不出层级，也压掉了正文对比度。
+  const errorList = (list) => /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { children: list.map((entry, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "pack-error-message", children: entry.message }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "pack-error-meta", children: `${entry.code}${entry.file === void 0 ? "" : ` · ${entry.file}`}` })
+  ] }, `${index}-${entry.code}`)) });
+  const meta = [];
+  if (preview !== void 0) {
+    if (preview.manifest.author !== void 0) meta.push(`作者 ${preview.manifest.author}`);
+    if (preview.manifest.domain !== void 0) meta.push(preview.manifest.domain);
+    meta.push(`${preview.manifest.id}@${preview.manifest.version}`);
+    meta.push(`${preview.files} 个文件 · ${formatSize(preview.bytes)}`);
+    if (pickedName !== "") meta.push(`所选 ${pickedName}`);
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-mask", onClick: () => {
+    if (!busy) onClose();
+  }, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "ex-modal pack-preview",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": "能力包预览",
+      ref: cardRef,
+      onClick: (e) => e.stopPropagation(),
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-head", children: [
+          preview !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertAvatar, { displayName: preview.expert.displayName, className: "ex-detail-avatar" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-title", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-name", children: preview !== void 0 ? preview.expert.displayName : pickedName === "" ? "能力包预览" : pickedName }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-profession", children: preview !== void 0 ? preview.expert.profession : "没有文件被写入" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn ex-modal-close", "aria-label": "关闭", ref: closeRef, onClick: onClose, disabled: busy, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) })
+        ] }),
+        inspectFailed ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pack-preview-errors", role: "alert", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "无法导入这个能力包" }),
+          errorList(errors)
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-modal-desc", children: preview.manifest.description ?? preview.expert.displayDescription }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "pack-preview-meta", children: meta.join(" · ") }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-tags", children: preview.expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag)) }),
+          preview.skills.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "pack-preview-section", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: `技能（${preview.skills.length}）` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "pack-preview-list", children: preview.skills.map((skill) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: skill.name }),
+              skill.description === "" ? "" : ` — ${skill.description}`
+            ] }, skill.name)) })
+          ] }),
+          preview.connectors.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "pack-preview-section", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: `连接器声明（${preview.connectors.length}）` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "pack-preview-list", children: preview.connectors.map((connector) => /* @__PURE__ */ jsxRuntimeExports.jsx("li", { children: `${connector.id}${connector.type === void 0 ? "" : ` (${connector.type})`}${connector.description === void 0 ? "" : ` — ${connector.description}`}` }, connector.id)) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "pack-preview-hint", children: "需要的话请到设置 → 连接器手动配置。" })
+          ] }),
+          (conflicts.existing || conflicts.overridesBuiltin) && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pack-preview-warn", role: "status", children: [
+            conflicts.existing && conflicts.existingIsPack && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: conflicts.existingVersion === void 0 ? `注意：已安装同名能力包 → 将替换为 ${preview.manifest.version}。` : conflicts.existingVersion === preview.manifest.version ? `注意：已安装 ${conflicts.existingVersion}（同版本）→ 将重新安装并替换。` : `注意：已安装 ${conflicts.existingVersion} → 将升级到 ${preview.manifest.version}。` }),
+            conflicts.existing && !conflicts.existingIsPack && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: `注意：配置目录里已有同名文件夹 ${conflicts.existingPath ?? ""}，请先重命名或删除。` }),
+            conflicts.overridesBuiltin && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "注意：与内置专家同名，安装后会用能力包覆盖内置专家（卸载后恢复内置）。" })
+          ] }),
+          installFailed && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pack-preview-errors pack-preview-install-error", role: "alert", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "安装失败" }),
+            errorList(errors)
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pack-preview-safety", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "只写入本地配置目录，不会改动系统或其它应用。" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "包内代码不会被执行；只接受声明式内容与图片。" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "连接器只声明：不会安装，也不会读取或保存任何凭据。" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pack-preview-actions", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onClose, disabled: busy, children: "取消" }),
+          inspectFailed ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onRetryPick, disabled: busy, children: "重新选择…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onRetryPick, disabled: busy, children: "重新选择…" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", ref: installRef, onClick: onInstall, disabled: busy, children: busy ? "安装中…" : installFailed ? "重试安装" : "安装" })
+          ] })
+        ] })
+      ]
+    }
+  ) });
+}
 function ExpertDetailModal({
   expert,
   onClose,
-  onUse
+  onUse,
+  onToast,
+  onReload
 }) {
-  const cardRef = useModalFocus();
+  // 初始焦点落在「使用专家」—— 打开详情是为了用它，而不是为了关掉它。
+  const useBtnRef = reactExports.useRef(null);
+  const confirmRef = reactExports.useRef(null);
+  const cardRef = useModalFocus({ initialFocus: () => useBtnRef.current });
+  const [busy, setBusy] = reactExports.useState(false);
+  const [confirmRemove, setConfirmRemove] = reactExports.useState(false);
+  /*
+   * 触发「移除能力包」的那颗按钮在确认态会被卸载（确认块是独立一块），
+   * 焦点不接管就会掉到 body。确认态出现时把焦点交给「确认移除」。
+   */
+  reactExports.useEffect(() => {
+    if (confirmRemove) confirmRef.current?.focus();
+  }, [confirmRemove]);
   reactExports.useEffect(() => {
     const onKey = (event) => {
       if (event.key === "Escape") onClose();
@@ -71677,6 +71898,66 @@ function ExpertDetailModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  const isPack = expert.source === "pack";
+  const toastError = (result) => {
+    const first = result?.errors?.[0];
+    onToast?.(first === void 0 ? "操作失败" : `${first.message}${first.file === void 0 ? "" : `（${first.file}）`}`, "error");
+  };
+  const removePack = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await window.kami.uninstallPack(expert.packId ?? expert.name);
+      if (result?.ok === true) {
+        onToast?.(`已移除能力包「${expert.displayName}」`, "success");
+        onReload?.();
+        onClose();
+        return;
+      }
+      /*
+       * 失效态（目录已被手工删除 / 已不是能力包）：详情继续开着会停留在一个
+       * 不存在的专家上，还带着「使用专家」——刷新列表后直接关掉。
+       */
+      if (result?.reason === "not-installed") {
+        onToast?.("这个能力包已经不在了，列表已刷新", "info");
+        onReload?.();
+        onClose();
+        return;
+      }
+      if (result?.reason === "not-a-pack") {
+        onToast?.("这个目录已经不是能力包了，列表已刷新", "error");
+        onReload?.();
+        onClose();
+        return;
+      }
+      toastError(result);
+      onReload?.();
+      setConfirmRemove(false);
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const exportPack = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const version = expert.packVersion ?? "1.0.0";
+      const destPath = await window.kami.pickPackSave(`${expert.name}-${version}.zwpack`);
+      if (destPath === void 0) return;
+      const result = await window.kami.exportPack({ name: expert.name, destPath });
+      if (result?.ok === true) {
+        // 只显示文件名：完整路径太长，在 toast 里会被截断成看不出重点的一行。
+        const saved = String(result.path ?? destPath).split(/[\\/]/).filter((part) => part !== "");
+        onToast?.(`已导出能力包「${saved[saved.length - 1] ?? destPath}」`, "success");
+      } else toastError(result);
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     // 遮罩点击即关闭（轻量弹窗不强制点按钮）。
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-mask", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -71684,6 +71965,7 @@ function ExpertDetailModal({
       {
         className: "ex-modal",
         role: "dialog",
+        "aria-modal": "true",
         "aria-label": `专家详情：${expert.displayName}`,
         ref: cardRef,
         onClick: (e) => e.stopPropagation(),
@@ -71711,7 +71993,32 @@ function ExpertDetailModal({
               prompt2
             ))
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", onClick: () => onUse(expert.name), children: "使用专家" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-actions", children: isPack ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: `来源：能力包 ${expert.packId ?? expert.name}${expert.packVersion === void 0 ? "" : `@${expert.packVersion}`}` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+            !confirmRemove && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", onClick: () => setConfirmRemove(true), disabled: busy, children: "移除能力包" })
+          ] }) : expert.source === "user" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：我的专家" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: exportPack, disabled: busy, children: busy ? "导出中…" : "导出能力包…" })
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：内置专家" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: true, title: "内置专家可能包含第三方内容，再分发授权确认之前不支持导出", children: "导出能力包…" })
+          ] }) }),
+          isPack && confirmRemove && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-confirm", role: "group", "aria-label": "确认移除能力包", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ex-modal-confirm-title", children: [
+              "确认移除「",
+              /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: expert.displayName }),
+              "」？"
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-modal-confirm-note", children: "会删除本地配置目录中的该能力包（原始 .zwpack 文件不受影响），不可恢复。" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-confirm-actions", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setConfirmRemove(false), disabled: busy, children: "取消" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", ref: confirmRef, onClick: removePack, disabled: busy, children: busy ? "移除中…" : "确认移除" })
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", ref: useBtnRef, onClick: () => onUse(expert.name), children: "使用专家" })
         ]
       }
     ) })
@@ -71824,7 +72131,9 @@ function SkillsView({ onClose, onTodo, onToast, experts, expertsError, onRetryEx
         error: expertsError,
         onRetry: onRetryExperts,
         onUseExpert,
-        onCreateExpert
+        onCreateExpert,
+        onToast,
+        onReload: onRetryExperts
       }
     ) : (
       /*
