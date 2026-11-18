@@ -15949,6 +15949,28 @@ function useModelSupportsVision(modelId) {
   }, [modelId]);
   return vision;
 }
+/* #397 第二十四轮 F1/F2/F7：当前模型的 contextWindow。与 useModelSupportsVision
+   同一套 settingsSnapshot 数据源。 */
+function useModelContextWindow(modelId) {
+  const [cw, setCw] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    if (modelId === void 0) {
+      setCw(void 0);
+      return;
+    }
+    let disposed = false;
+    window.kami.settingsSnapshot().then((snapshot) => {
+      if (disposed) return;
+      setCw(snapshot.models.find((m) => `${m.providerId}/${m.id}` === modelId)?.contextWindow);
+    }).catch(() => {
+      if (!disposed) setCw(void 0);
+    });
+    return () => {
+      disposed = true;
+    };
+  }, [modelId]);
+  return cw;
+}
 function VisionHint({ visible }) {
   if (!visible) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "vision-hint", children: "当前模型不支持看图，图片将以占位文本发送" });
@@ -15976,6 +15998,7 @@ function SkillStrip({
 }
 function Composer({
   ready,
+  convChars,
   placeholder,
   rows,
   cwd: cwd2,
@@ -15993,11 +16016,29 @@ function Composer({
   onCycleMember
 }) {
   const [draft, setDraft] = reactExports.useState(() => draftKey === void 0 ? "" : loadDraft(draftKey) ?? "");
+  /* #397 第二十四轮 F9：斜杠命令面板。草稿以 "/" 开头时弹出本地命令列表
+     （映射既有动作：帮助/统计/专注/新任务），选中即执行并清空草稿。
+     命令是「快捷入口」不是新通道——全部走既有 props 与 zw: 事件。 */
+  const slashCommands = [
+    { cmd: "/help", desc: "打开快捷键与帮助", run: () => window.dispatchEvent(new CustomEvent("zw:shortcut-sheet-open")) },
+    { cmd: "/stats", desc: "打开使用统计", run: () => window.dispatchEvent(new CustomEvent("zw:open-stats")) },
+    { cmd: "/focus", desc: "切换专注模式", run: () => window.dispatchEvent(new CustomEvent("zw:focus-toggle")) },
+    { cmd: "/new", desc: "新建任务", run: () => window.dispatchEvent(new CustomEvent("zw:new-task-from-code")) }
+  ];
+  const slashQuery = draft.startsWith("/") ? draft.slice(1).toLowerCase() : null;
+  const slashMatches = slashQuery === null ? [] : slashCommands.filter((c) => c.cmd.slice(1).startsWith(slashQuery));
+  const runSlashCommand = (cmd) => {
+    setDraft("");
+    if (draftKey !== void 0) saveDraft(draftKey, "");
+    cmd.run();
+  };
   const [stopConfirm, setStopConfirm] = reactExports.useState(stopConfirmIdle);
   const [historyNav, setHistoryNav] = reactExports.useState(void 0);
   const textareaRef = reactExports.useRef(null);
   const ime = useImeGuard();
   const visionSupported = useModelSupportsVision(modelId);
+  /* #397 第二十四轮 F5：当前模型 contextWindow（token 估算超限变色用）。 */
+  const modelContextWindow = useModelContextWindow(modelId);
   const img = useImageAttachments(onError);
   const [skills, setSkills] = reactExports.useState([]);
   const pickSkill = reactExports.useCallback((name2) => {
@@ -16014,6 +16055,9 @@ function Composer({
     const other = draft.length - cjk;
     return cjk + Math.ceil(other / 4);
   }, [draft]);
+  /* #397 第二十四轮 F5：估算超过 contextWindow 80% 时变色警示。 */
+  const tokenOverWindow = modelContextWindow !== void 0 && modelContextWindow > 0 && tokenEstimate > modelContextWindow * 0.8;
+
   /* §21.7 快速回复模板：三条默认短语，点击整句填入（不是追加）。存
    * localStorage——模板是个人习惯，不上 daemon 配置，重装不跟走。 */
   /* #327 round13 F2：会话模板。行菜单「存为模板」写 zw:templates；
@@ -16349,7 +16393,22 @@ function Composer({
           },
           `tpl-${tpl.title}`
         ))] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-input", children: [
+        /* #397 第二十四轮 F9：斜杠命令浮层。草稿以 / 开头且无空格时显示；
+           ↑↓ 交给用户（Enter 直接选中首个匹配——快捷入口无需复杂导航）。 */
+        slashMatches.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "slash-menu", role: "listbox", "aria-label": "斜杠命令", children: slashMatches.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "button",
+          {
+            type: "button",
+            className: "slash-menu-item",
+            onClick: () => runSlashCommand(c),
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "slash-menu-cmd", children: c.cmd }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "slash-menu-desc", children: c.desc })
+            ]
+          },
+          c.cmd
+        )) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-input", children: [
           ac.menu,
           /* @__PURE__ */ jsxRuntimeExports.jsx(
             "textarea",
@@ -16416,11 +16475,24 @@ function Composer({
           /* §21.4 估算的显示门独立于字符计数：字符计数是「快写满了」的警告
            * （remaining<1000 才出现），而 token 估算要的是日常量级感 —— 只要
            * 有实质输入（≥40 字符）就显示，搭便车永远等不到那一天。 */
+          modelContextWindow !== void 0 && modelContextWindow > 0 && convChars !== void 0 && (() => {
+            const usedTokens = Math.ceil(convChars / 4) + tokenEstimate;
+            const pct = Math.min(100, Math.round(usedTokens / modelContextWindow * 100));
+            const warn = pct >= 80;
+            return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", {
+              className: `ctx-meter${warn ? " ctx-meter-warn" : ""}`,
+              title: warn ? `会话约占上下文窗口 ${pct}%——接近上限，最早的轮次可能已被压缩或将被截断` : `会话约占上下文窗口的 ${pct}%`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ctx-meter-track", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ctx-meter-fill", style: { width: `${pct}%` } }) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ctx-meter-label", children: [pct, "%"] })
+              ]
+            });
+          })(),
           draft.length >= 40 && /* @__PURE__ */ jsxRuntimeExports.jsx(
             "span",
             {
-              className: "token-estimate",
-              title: "粗略估算，用于感知本轮输入规模",
+              className: `token-estimate${tokenOverWindow ? " token-estimate-over" : ""}`,
+              title: tokenOverWindow ? "本轮输入的估算已超过当前模型上下文窗口的 80%——发送后最早的轮次可能被截断" : "粗略估算，用于感知本轮输入规模",
               children: `≈${tokenEstimate} tok`
             }
           ),
@@ -36285,6 +36357,8 @@ function ChatView({
       /* 隐私模式：字号记忆属增强功能，静默放弃 */
     }
   }, []);
+  /* #397 第二十四轮 F1：当前模型 contextWindow（占比条分母）。 */
+  const modelContextWindow = useModelContextWindow(conversation.state.modelId);
   const sessionStats = reactExports.useMemo(() => {
     let turns = 0;
     let chars = 0;
@@ -36953,6 +37027,9 @@ function ChatView({
               sessionStats.duration
             ] })
           ] }),
+          /* #397 第二十四轮 F1/F2/F7：上下文占比条。chars/4 粗估 tokens ÷ 当前模型
+             contextWindow；>80% 时条转警示色并在 title 里提示压缩与截断预估。 */
+
           headerActions
         ] }),
         memberView !== void 0 && onBackToLeader !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "member-focus-bar", role: "status", children: [
@@ -37103,6 +37180,7 @@ function ChatView({
                   rows: 2,
                   cwd: conversation.state.cwd,
                   modelId: conversation.state.modelId,
+                  convChars: sessionStats.chars,
                   memberItems,
                   onSubmit: handleComposerSubmit,
                   onError,
@@ -70657,6 +70735,9 @@ function PromptPreviewSection() {
   const [fullView, setFullView] = reactExports.useState(false);
   const [expanded, setExpanded] = reactExports.useState(/* @__PURE__ */ new Set());
   const [nonce, setNonce] = reactExports.useState(0);
+  /* #397 第二十四轮 F3（换题）：预览结果一键复制。预览是「发给模型的最终提示词」，
+     调优时经常要贴到别处对比——原来只能手选全文。 */
+  const [copiedPreview, setCopiedPreview] = reactExports.useState(false);
   const requestSeq = reactExports.useRef(0);
   const load = reactExports.useCallback(async () => {
     try {
@@ -70721,6 +70802,22 @@ function PromptPreviewSection() {
         result.totalChars,
         " 字"
       ] }),
+      /* #397 第二十四轮 F3（换题）：预览结果一键复制到剪贴板。 */
+      result !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: `mini-btn${copiedPreview ? " saved" : ""}`,
+          onClick: () => {
+            navigator.clipboard.writeText(result.fullText ?? "").then(() => {
+              setCopiedPreview(true);
+              window.setTimeout(() => setCopiedPreview(false), 1500);
+            }).catch(() => {
+            });
+          },
+          children: copiedPreview ? "已复制" : "复制全文"
+        }
+      ),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
@@ -76557,6 +76654,13 @@ const SHORTCUT_SHEET = [
 	{ group: "系统", keys: [
 		{ combo: ["⌥", "⇧", "W"], desc: "全局唤起窗口（可在设置改）", where: "主进程 globalShortcut" },
 	] },
+	/* #397 第二十四轮 F10：斜杠命令说明（输入 / 触发，选中即执行）。 */
+	{ group: "斜杠命令", keys: [
+		{ combo: ["/help"], desc: "打开本面板", where: "Composer 输入 / 后选择" },
+		{ combo: ["/stats"], desc: "打开使用统计", where: "Composer 输入 / 后选择" },
+		{ combo: ["/focus"], desc: "切换专注模式", where: "Composer 输入 / 后选择" },
+		{ combo: ["/new"], desc: "新建任务", where: "Composer 输入 / 后选择" },
+	] },
 ];
 
 function ShortcutSheet({ onClose }) {
@@ -78061,6 +78165,9 @@ function App() {
     window.addEventListener("zw:palette-open", openPalette);
     window.addEventListener("zw:focus-toggle", toggleFocusNow);
     window.addEventListener("zw:shortcut-sheet-open", openShortcutSheet);
+    /* #397 第二十四轮 F9：斜杠命令的事件出口（openStats 既有回调）。 */
+    const onOpenStatsEvent = () => openStats();
+    window.addEventListener("zw:open-stats", onOpenStatsEvent);
     window.addEventListener("zw:toast", onGlobalToast);
     /* round10 F1：代码卡「新建任务」——切回首页让用户看到种子已就位。 */
     const onNewTaskFromCode = () => {
@@ -78073,6 +78180,7 @@ function App() {
       window.removeEventListener("zw:focus-toggle", toggleFocusNow);
       window.removeEventListener("zw:shortcut-sheet-open", openShortcutSheet);
       window.removeEventListener("zw:toast", onGlobalToast);
+    window.removeEventListener("zw:open-stats", onOpenStatsEvent);
       window.removeEventListener("zw:new-task-from-code", onNewTaskFromCode);
     };
   }, []);

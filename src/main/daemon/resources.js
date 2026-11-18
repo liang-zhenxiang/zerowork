@@ -384,7 +384,10 @@ async function buildPromptPreview(resources, request, env) {
       text: s.text,
       chars: s.text.length
     })),
-    totalChars: assembled.text.length
+    totalChars: assembled.text.length,
+    /* #397 第二十四轮 F3（换题）：全文文本（预览页「复制全文」直接可用——
+       此前渲染层只能从 segments 拼接，容易和 daemon 的拼接口径漂移）。 */
+    fullText: assembled.text
   };
 }
 
