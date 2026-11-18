@@ -16473,13 +16473,23 @@ const EXPERT_AVATAR_COLORS = [
   "#9661bc",
   "#f6903d"
 ];
+/**
+ * 专家的身份色：由展示名稳定哈希到 `EXPERT_AVATAR_COLORS` 的一格。
+ *
+ * 头像与卡片封面色条**共用这一份** —— 同一个专家在一屏里有且只有一种身份色。
+ * 纯装饰、无语义（只为同屏可区分）：不做成 token 是因为它不该被赋予语义，
+ * 也不该随主题换相（头像底在暗色下仍用同值）。
+ */
+function expertAvatarColor(displayName) {
+  let hash = 0;
+  for (const ch of String(displayName ?? "")) hash = hash * 31 + (ch.codePointAt(0) ?? 0) | 0;
+  return EXPERT_AVATAR_COLORS[Math.abs(hash) % EXPERT_AVATAR_COLORS.length] ?? EXPERT_AVATAR_COLORS[0];
+}
 function ExpertAvatar({
   displayName,
   className
 }) {
-  let hash = 0;
-  for (const ch of displayName) hash = hash * 31 + (ch.codePointAt(0) ?? 0) | 0;
-  const color2 = EXPERT_AVATAR_COLORS[Math.abs(hash) % EXPERT_AVATAR_COLORS.length] ?? EXPERT_AVATAR_COLORS[0];
+  const color2 = expertAvatarColor(displayName);
   return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "span",
     {
@@ -19160,7 +19170,14 @@ function useModalFocus(options = {}) {
     const marked = isolateBackground(node2);
     const preferred = latest.current.initialFocus?.() ?? null;
     const entry = preferred !== null && preferred.isConnected ? preferred : tabbablesWithin(node2)[0];
-    entry?.focus();
+    /*
+     * 初始焦点可能在弹窗内容深处（详情底部的「使用专家」、预览的「安装」）。
+     * 直接 focus 会让可滚动弹窗**先滚到底**再显示：用户看到的是弹窗尾部，
+     * 而不是标题。focusPreventScroll 把「焦点」与「滚动位置」解耦；弹窗自身
+     * 的阅读起点由内容决定（顶部）。
+     */
+    if (latest.current.focusPreventScroll === true) entry?.focus({ preventScroll: true });
+    else entry?.focus();
     openModals.push(node2);
     const onKeyDown = (event) => {
       if (event.key !== "Tab") return;
@@ -31995,6 +32012,17 @@ function gfm(options) {
  */
 import { remarkMath, rehypeKatex } from "../vendor-katex.js";
 import { rankEntries, matchRank, matchIndices, KIND_WEIGHT } from "./command-palette-core.js";
+// 能力库画廊的纯逻辑（来源筛选 / 排序 / 计数 / 封面色 / 拖放路径解析）。
+// 与命令面板同一模式：单测直接 import 这一份，组件只负责摆位置。
+import {
+	SOURCE_FILTERS,
+	SORT_MODES,
+	filterExperts,
+	sortExperts,
+	sourceCounts,
+	pathsFromDropText,
+	isPackDropPath
+} from "./expert-gallery-core.js";
 // 计划书（Plan Book）的纯逻辑：解析、步骤操作、LCS 差异、Markdown 导出。
 // 单测直接 import 这一份 —— 界面上只表现为「顺序 / 文案对不对」，GUI 断言说不清，
 // 所以那些不变量都在 plan-core.test.mjs 里钉死，组件只负责摆位置。
@@ -71463,13 +71491,42 @@ function JsonEditor({
   );
 }
 const SEARCH_DEBOUNCE_MS = 200;
-function matchKeyword(expert, keyword) {
-  return [expert.name, expert.displayName, expert.profession, expert.description, expert.displayDescription].some((field) => field.toLowerCase().includes(keyword));
+
+/** 详情里技能列表默认展示的条数；超出时给「展开全部（N）」。 */
+const SKILL_PREVIEW_LIMIT = 5;
+
+/**
+ * 能力包安装时间（本地时区）：「11 月 18 日安装」。
+ * 非当年安装带年份（「2025 年 11 月 18 日安装」）：跨年后只写月日会让
+ * 「最近安装」看起来像今年的。
+ * 缺失 / 非法值给空串，调用方据此不渲染 —— 不编一个假日期。
+ */
+function formatPackDate(installedAt) {
+  if (typeof installedAt !== "number" || !Number.isFinite(installedAt)) return "";
+  const date = new Date(installedAt);
+  if (Number.isNaN(date.getTime())) return "";
+  const now = new Date();
+  const year = date.getFullYear() === now.getFullYear() ? "" : `${date.getFullYear()} 年 `;
+  return `${year}${date.getMonth() + 1} 月 ${date.getDate()} 日安装`;
 }
+
+/**
+ * 是否是「拖文件」而不是拖一段文字：`Files`（真实 OS 拖拽）或
+ * `text/uri-list`（部分文件管理器与可脚本化的拖放）。
+ */
+function isFileDrag(transfer) {
+  if (transfer === null || transfer === void 0) return false;
+  const types = Array.from(transfer.types ?? []);
+  return types.includes("Files") || types.includes("text/uri-list");
+}
+
 function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onToast, onReload }) {
   const [searchInput, setSearchInput] = reactExports.useState("");
   const [keyword, setKeyword] = reactExports.useState("");
   const [selectedTag, setSelectedTag] = reactExports.useState(void 0);
+  const [source, setSource] = reactExports.useState("all");
+  const [sortMode, setSortMode] = reactExports.useState("default");
+  const [dragOver, setDragOver] = reactExports.useState(false);
   const [listTab, setListTab] = reactExports.useState("experts");
   const [detail, setDetail] = reactExports.useState(void 0);
   const [myExperts, setMyExperts] = reactExports.useState(false);
@@ -71504,18 +71561,44 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
     }
     return ordered;
   }, [scoped]);
+  /*
+   * 标签行的横向渐隐提示：只在**真的溢出**时给（并区分左右），
+   * 不新增常驻滚动条。用 ResizeObserver + scroll 事件，不轮询。
+   */
+  const tagRowRef = reactExports.useRef(null);
+  const [tagFade, setTagFade] = reactExports.useState({ left: false, right: false });
+  reactExports.useEffect(() => {
+    const node = tagRowRef.current;
+    if (node === null) return;
+    const update = () => {
+      const right = node.scrollLeft + node.clientWidth < node.scrollWidth - 1;
+      const left = node.scrollLeft > 1;
+      setTagFade((prev) => prev.left === left && prev.right === right ? prev : { left, right });
+    };
+    update();
+    node.addEventListener("scroll", update, { passive: true });
+    // 窗口尺寸变化会改可用宽度 → 溢出与否跟着变，必须重算（不只是 ResizeObserver）。
+    window.addEventListener("resize", update);
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
+    return () => {
+      node.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+      observer.disconnect();
+    };
+  }, [allTags.join("\u0000"), listTab]);
   // 「我的专家」= 用户能管理的那两档：手工作品 + 能力包装进来的专家
   //（后者同样可以移除，所以必须在这里能找到，否则装完只能从全量列表翻）。
   const userExperts = reactExports.useMemo(
     () => list2.filter((e) => e.source === "user" || e.source === "pack"),
     [list2]
   );
-  const openPackPicker = reactExports.useCallback(async () => {
-    if (packBusy) return;
-    setPackBusy(true);
+  /**
+   * 把一条本地路径送进 daemon 预览。文件框与拖放共用这一条路径 ——
+   * 渲染层不做任何安全判定（是否合法、是不是能力包都由 daemon 回答）。
+   */
+  const inspectPackFromPath = reactExports.useCallback(async (sourcePath) => {
     try {
-      const sourcePath = await window.kami.pickPackFile();
-      if (sourcePath === void 0) return;
       const result = await window.kami.inspectPack(sourcePath);
       setPackState(
         result?.ok === true
@@ -71528,6 +71611,21 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
       );
     } catch (e) {
       setPackState({
+        sourcePath,
+        phase: "inspect",
+        errors: [{ code: "PACK_IPC_ERROR", message: e instanceof Error ? e.message : String(e) }]
+      });
+    }
+  }, []);
+  const openPackPicker = reactExports.useCallback(async () => {
+    if (packBusy) return;
+    setPackBusy(true);
+    try {
+      const sourcePath = await window.kami.pickPackFile();
+      if (sourcePath === void 0) return;
+      await inspectPackFromPath(sourcePath);
+    } catch (e) {
+      setPackState({
         sourcePath: "",
         phase: "inspect",
         errors: [{ code: "PACK_IPC_ERROR", message: e instanceof Error ? e.message : String(e) }]
@@ -71535,7 +71633,7 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
     } finally {
       setPackBusy(false);
     }
-  }, [packBusy]);
+  }, [packBusy, inspectPackFromPath]);
   const installPickedPack = reactExports.useCallback(async () => {
     if (packState === void 0 || packBusy) return;
     const { sourcePath, preview } = packState;
@@ -71582,13 +71680,97 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
     }
   }, [packState, packBusy, onToast, onReload]);
   const kw = keyword.trim().toLowerCase();
-  const visibleExperts = reactExports.useMemo(() => {
-    if (kw !== "") return scoped.filter((e) => matchKeyword(e, kw));
-    if (selectedTag === void 0) return scoped;
-    return scoped.filter((e) => e.tags.includes(selectedTag));
-  }, [scoped, kw, selectedTag]);
+  /*
+   * 计数 = 「标签 + 关键词已过滤、来源未过滤」的集合。
+   * 这样 chip 上的数字与点下去看到的结果一致（若按全量算，「会议 3」点开
+   * 可能只有 1 张卡）。来源本身当然不参与计数，否则永远只有当前档非 0。
+   */
+  const counts = reactExports.useMemo(
+    () => sourceCounts(filterExperts(scoped, { tag: selectedTag, keyword })),
+    [scoped, selectedTag, keyword]
+  );
+  const visibleExperts = reactExports.useMemo(
+    () => sortExperts(filterExperts(scoped, { source, tag: selectedTag, keyword }), sortMode),
+    [scoped, source, selectedTag, keyword, sortMode]
+  );
+  const filtersActive = source !== "all" || selectedTag !== void 0 || kw !== "";
+  const clearFilters = reactExports.useCallback(() => {
+    setSource("all");
+    setSelectedTag(void 0);
+    setSearchInput("");
+    setKeyword("");
+  }, []);
+  const openPackFromDrop = reactExports.useCallback(async (sourcePath) => {
+    if (packBusy) return;
+    setPackBusy(true);
+    try {
+      await inspectPackFromPath(sourcePath);
+    } finally {
+      setPackBusy(false);
+    }
+  }, [packBusy, inspectPackFromPath]);
+  /*
+   * 拖放导入：真实 OS 拖拽优先走 preload 的 `getFilePath`（webUtils 只在
+   * preload 里可用），`text/uri-list` 是后备。渲染层**不猜路径** —— 两条路
+   * 拿到的都是文件系统给的绝对路径。目录也允许（daemon 支持目录来源）。
+   */
+  const handleDragEnter = (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    setDragOver(true);
+  };
+  const handleDragOver = (event) => {
+    if (!isFileDrag(event.dataTransfer)) return;
+    event.preventDefault();
+    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = "copy";
+    if (!dragOver) setDragOver(true);
+  };
+  const handleDragLeave = (event) => {
+    // 在容器内部移动时也会触发 dragleave；只有真正离开容器才收起覆盖层，
+    // 否则覆盖层会一闪一闪。
+    if (event.currentTarget.contains(event.relatedTarget)) return;
+    setDragOver(false);
+  };
+  const handleDrop = (event) => {
+    event.preventDefault();
+    setDragOver(false);
+    const transfer = event.dataTransfer;
+    let path;
+    if (transfer !== null && transfer.files.length > 0 && typeof window.kami.getFilePath === "function") {
+      for (const file of Array.from(transfer.files)) {
+        try {
+          const resolved = window.kami.getFilePath(file);
+          if (resolved !== void 0 && resolved !== "") {
+            path = resolved;
+            break;
+          }
+        } catch {
+          // 合成 File 拿不到磁盘路径时走 uri-list 后备。
+        }
+      }
+    }
+    if (path === void 0) {
+      const uriList = transfer === null ? "" : transfer.getData("text/uri-list");
+      const plain = transfer === null ? "" : transfer.getData("text/plain");
+      path = pathsFromDropText(`${uriList}\n${plain}`)[0];
+    }
+    if (path === void 0 || path === "") {
+      onToast?.("没有识别到文件路径，请用「导入能力包…」按钮选择", "error");
+      return;
+    }
+    if (!isPackDropPath(path)) {
+      onToast?.("请拖入 .zwpack 能力包（或能力包目录）", "error");
+      return;
+    }
+    void openPackFromDrop(path);
+  };
+  const dropOverlay = dragOver && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-drop-overlay", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-drop-inner", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 28, className: "ex-drop-icon" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-drop-title", children: "松开以导入能力包" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-drop-hint", children: "支持 .zwpack 文件或能力包目录" })
+  ] }) });
   if (myExperts) {
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex", children: [
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex", onDragEnter: handleDragEnter, onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop, children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-topbar", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "ex-back", onClick: () => setMyExperts(false), children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronLeft, { size: 15 }),
         "全部专家"
@@ -71608,10 +71790,12 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
           "创建专家"
         ] })
       ] }),
+      // 拖放覆盖层必须排在弹窗**之前**：两者同为 --z-overlay(90)，
+      // 同档时由 DOM 顺序裁决 —— 放在后面会让拖放提示盖住已打开的详情/预览。
+      dropOverlay,
       detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertDetailModal, { expert: detail, onClose: () => setDetail(void 0), onUse: onUseExpert, onToast, onReload })
     ] });
-  }
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex", children: [
+  }  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex", onDragEnter: handleDragEnter, onDragOver: handleDragOver, onDragLeave: handleDragLeave, onDrop: handleDrop, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-topbar", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-search", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconResearch, { size: 14, className: "ex-search-icon" }),
@@ -71675,36 +71859,99 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      kw === "" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-cats", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
+    experts !== void 0 && error === void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-filter-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-source-row", role: "group", "aria-label": "按来源筛选", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-sort-label", children: "来源" }),
+        SOURCE_FILTERS.map((filter) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
           {
             type: "button",
-            className: `ex-cat${selectedTag === void 0 ? " active" : ""}`,
-            "aria-pressed": selectedTag === void 0,
-            onClick: () => setSelectedTag(void 0),
-            children: "全部"
-          }
-        ),
-        allTags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            type: "button",
-            className: `ex-cat${selectedTag === tag ? " active" : ""}`,
-            "aria-pressed": selectedTag === tag,
-            onClick: () => setSelectedTag(selectedTag === tag ? void 0 : tag),
-            children: tag
+            className: `ex-source-chip${source === filter.id ? " active" : ""}`,
+            "aria-pressed": source === filter.id,
+            onClick: () => setSource(filter.id),
+            children: `${filter.label} ${counts[filter.id]}`
           },
-          tag
+          filter.id
         ))
       ] }),
-      error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry }) : experts === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : visibleExperts.length === 0 ? kw !== "" ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: `没有找到与「${keyword.trim()}」匹配的专家，试试其他关键词` }) : listTab === "teams" ? (
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-tools-row", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-sort-label", children: "排序" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectField, {
+          // 读屏拿不到可见的「排序」小标签与当前值的关系，aria-label 里带上当前档位。
+          ariaLabel: `排序方式：${SORT_MODES.find((option) => option.id === sortMode)?.label ?? "默认"}`,
+          value: sortMode,
+          options: SORT_MODES.map((option) => ({ value: option.id, label: option.label })),
+          onChange: setSortMode
+        })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      // 标签行与来源行同一条就绪条件：加载中 / 错误态不渲染筛选器。
+      experts !== void 0 && error === void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-tag-row", role: "group", "aria-label": "按标签筛选", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-sort-label", children: "标签" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `ex-cats${tagFade.left ? " fade-left" : ""}${tagFade.right ? " fade-right" : ""}`, ref: tagRowRef, children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: `ex-cat${selectedTag === void 0 ? " active" : ""}`,
+              "aria-pressed": selectedTag === void 0,
+              onClick: () => setSelectedTag(void 0),
+              children: "全部"
+            }
+          ),
+          allTags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: `ex-cat${selectedTag === tag ? " active" : ""}`,
+              "aria-pressed": selectedTag === tag,
+              onClick: () => setSelectedTag(selectedTag === tag ? void 0 : tag),
+              children: tag
+            },
+            tag
+          ))
+        ] })
+      ] }),
+      // 结果数：筛选/排序变化时由 aria-live 播报「找到 N 位专家」。
+      // 只播报数量，不把整张列表读出来。
+      error === void 0 && experts !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "sr-only", role: "status", "aria-live": "polite", children: `找到 ${visibleExperts.length} 位专家` }),
+      error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry }) : experts === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : visibleExperts.length === 0 ? filtersActive ? (
+        // 空态按来源给**下一步**：能装就装、能建就建，其余才是「换个条件」。
+        // 只说「没有结果」会让用户停在这里 —— 来源筛选本来就是一个入口。
+        source === "pack" ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          EmptyState,
+          {
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconPlus, { size: 40 }),
+            title: "还没有安装能力包",
+            description: "导入一个 .zwpack，专家和它的技能会出现在这里",
+            action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: openPackPicker, disabled: packBusy, children: "导入能力包…" })
+          }
+        ) : source === "user" ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          EmptyState,
+          {
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconGraduationCap, { size: 40 }),
+            title: "还没有自己的专家",
+            description: "创建属于你的专家，把常用做法固化下来",
+            action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onCreateExpert, children: "创建专家" })
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+          EmptyState,
+          {
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconResearch, { size: 40 }),
+            title: "没有符合条件的专家",
+            description: "试试换一个来源、标签或关键词",
+            action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: clearFilters, children: "清除筛选" })
+          }
+        )
+      ) : listTab === "teams" ? (
         // 团队专家是数据（声明 expertType: team 即进此页），没有就是真没有，
         // 不再是「即将上线」的占位文案。
         /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAssistant, { size: 40 }), title: "还没有团队型专家" })
       ) : /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAssistant, { size: 40 }), title: "专家库为空" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-grid", children: visibleExperts.map((expert) => /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertCard, { expert, onOpen: setDetail, onUse: onUseExpert }, expert.name)) })
     ] }),
+    // 同上：覆盖层排在弹窗之前（同为 --z-overlay，同档靠源序）。
+    dropOverlay,
     detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertDetailModal, { expert: detail, onClose: () => setDetail(void 0), onUse: onUseExpert, onToast, onReload }),
     packState !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(PackPreviewModal, {
       state: packState,
@@ -71722,20 +71969,27 @@ function ExpertCard({
   onOpen,
   onUse
 }) {
+  const skillCount = Array.isArray(expert.skills) ? expert.skills.length : 0;
+  const installedText = expert.source === "pack" ? formatPackDate(expert.packInstalledAt) : "";
+  /*
+   * 底部 rail 的内容用「 · 」连成一句：技能数 / 版本 / 安装时间是一个整体，
+   * 不是三个可点的 chip。为空时整行不渲染（0 个技能是噪声）。
+   */
+  const metaParts = [];
+  if (skillCount > 0) metaParts.push(`${skillCount} 个技能`);
+  if (expert.source === "pack" && expert.packVersion !== void 0) metaParts.push(`v${expert.packVersion}`);
+  if (installedText !== "") metaParts.push(installedText);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
       className: "ex-card",
-      role: "button",
-      tabIndex: 0,
+      // 鼠标点整卡仍打开详情；键盘入口是卡内那颗独立的「查看详情」按钮。
+      // **外层不再是 role=button**：真按钮套在 role=button 里会让读屏听到
+      // 两个「按钮」且「使用」到底算哪个按钮的子项说不清。
       onClick: () => onOpen(expert),
-      onKeyDown: (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpen(expert);
-        }
-      },
       children: [
+        // 封面色条与头像同色：同一个专家、同一种身份色（见 expertAvatarColor）。
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-cover", "aria-hidden": "true", style: { background: expertAvatarColor(expert.displayName) } }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-card-head", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertAvatar, { displayName: expert.displayName, className: "ex-card-avatar" }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-card-title", children: [
@@ -71744,10 +71998,28 @@ function ExpertCard({
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-card-desc", children: expert.displayDescription }),
+        // 底部 rail 的锚点：即使没有任何 meta 项也保留这个容器（空元素不可见），
+        // 否则 margin-top:auto 失去载体，tags 会浮在描述下方而不是卡片底边。
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-card-meta", children: metaParts.join(" · ") }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-card-tags", children: [
           expert.source === "pack" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-source-badge", children: "能力包" }, "source"),
+          expert.source === "user" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-source-badge", children: "自建" }, "source"),
           expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag))
         ] }),
+        // 覆盖整卡的「查看详情」：独立可聚焦，鼠标点击也由它接管（再冒泡到外层也无妨）。
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            className: "ex-card-open",
+            "aria-label": `查看详情：${expert.displayName}`,
+            onClick: (e) => {
+              e.stopPropagation();
+              onOpen(expert);
+            }
+          }
+        ),
+        // 「使用」是「查看详情」的兄弟节点并压在它之上（z-index），不能被盖住。
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
@@ -71778,11 +72050,17 @@ function PackPreviewModal({
   // 预览失败时标题用所选文件名：说「哪个包」比说「包坏了」有用。
   const parts = String(state.sourcePath ?? "").split(/[\\/]/).filter((part) => part !== "");
   const pickedName = parts.length === 0 ? "" : parts[parts.length - 1];
-  const closeRef = reactExports.useRef(null);
-  const installRef = reactExports.useRef(null);
-  const cardRef = useModalFocus({
-    initialFocus: () => preview === void 0 ? closeRef.current : installRef.current
-  });
+  /*
+   * 初始焦点交给对话框容器，**不是**「安装」：预览是一个要读的页面
+   * （技能 / 连接器 / 安全说明都在下方），回车键不该直接触发写入。
+   * 容器在内容顶部，弹窗也不会一打开就被底部按钮滚到底。
+   */
+  const cardNodeRef = reactExports.useRef(null);
+  const attachModalRef = useModalFocus({ focusPreventScroll: true, initialFocus: () => cardNodeRef.current });
+  const cardRef = reactExports.useCallback((node2) => {
+    cardNodeRef.current = node2;
+    return attachModalRef(node2);
+  }, [attachModalRef]);
   reactExports.useEffect(() => {
     const onKey = (event) => {
       if (event.key === "Escape" && !busy) onClose();
@@ -71814,6 +72092,7 @@ function PackPreviewModal({
       role: "dialog",
       "aria-modal": "true",
       "aria-label": "能力包预览",
+      tabIndex: -1,
       ref: cardRef,
       onClick: (e) => e.stopPropagation(),
       children: [
@@ -71823,7 +72102,7 @@ function PackPreviewModal({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-name", children: preview !== void 0 ? preview.expert.displayName : pickedName === "" ? "能力包预览" : pickedName }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-profession", children: preview !== void 0 ? preview.expert.profession : "没有文件被写入" })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn ex-modal-close", "aria-label": "关闭", ref: closeRef, onClick: onClose, disabled: busy, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn ex-modal-close", "aria-label": "关闭", onClick: onClose, disabled: busy, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) })
         ] }),
         inspectFailed ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "pack-preview-errors", role: "alert", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { children: "无法导入这个能力包" }),
@@ -71864,7 +72143,7 @@ function PackPreviewModal({
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onClose, disabled: busy, children: "取消" }),
           inspectFailed ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onRetryPick, disabled: busy, children: "重新选择…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onRetryPick, disabled: busy, children: "重新选择…" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", ref: installRef, onClick: onInstall, disabled: busy, children: busy ? "安装中…" : installFailed ? "重试安装" : "安装" })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onInstall, disabled: busy, children: busy ? "安装中…" : installFailed ? "重试安装" : "安装" })
           ] })
         ] })
       ]
@@ -71878,12 +72157,21 @@ function ExpertDetailModal({
   onToast,
   onReload
 }) {
-  // 初始焦点落在「使用专家」—— 打开详情是为了用它，而不是为了关掉它。
-  const useBtnRef = reactExports.useRef(null);
+  /*
+   * 初始焦点交给**对话框容器**（tabIndex=-1）：它永远在内容顶部，不会被
+   * 底部的「使用专家」把弹窗先滚到底；读屏用户先听到「专家详情：xxx」，
+   * 再按 Tab 从左到右走。
+   */
+  const cardNodeRef = reactExports.useRef(null);
+  const attachModalRef = useModalFocus({ focusPreventScroll: true, initialFocus: () => cardNodeRef.current });
+  const cardRef = reactExports.useCallback((node2) => {
+    cardNodeRef.current = node2;
+    return attachModalRef(node2);
+  }, [attachModalRef]);
   const confirmRef = reactExports.useRef(null);
-  const cardRef = useModalFocus({ initialFocus: () => useBtnRef.current });
   const [busy, setBusy] = reactExports.useState(false);
   const [confirmRemove, setConfirmRemove] = reactExports.useState(false);
+  const [skillsExpanded, setSkillsExpanded] = reactExports.useState(false);
   /*
    * 触发「移除能力包」的那颗按钮在确认态会被卸载（确认块是独立一块），
    * 焦点不接管就会掉到 body。确认态出现时把焦点交给「确认移除」。
@@ -71899,6 +72187,12 @@ function ExpertDetailModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const isPack = expert.source === "pack";
+  const skills = Array.isArray(expert.skills) ? expert.skills : [];
+  // 技能多时默认只展示前几条：详情是「快速认识这位专家」的地方，
+  // 15 条技能会把来源与「使用专家」推到很远。展开是就地的一条按钮。
+  const visibleSkills = skillsExpanded ? skills : skills.slice(0, SKILL_PREVIEW_LIMIT);
+  const installedText = isPack ? formatPackDate(expert.packInstalledAt) : "";
+  const isTeam = expert.expertType === "team";
   const toastError = (result) => {
     const first = result?.errors?.[0];
     onToast?.(first === void 0 ? "操作失败" : `${first.message}${first.file === void 0 ? "" : `（${first.file}）`}`, "error");
@@ -71967,6 +72261,7 @@ function ExpertDetailModal({
         role: "dialog",
         "aria-modal": "true",
         "aria-label": `专家详情：${expert.displayName}`,
+        tabIndex: -1,
         ref: cardRef,
         onClick: (e) => e.stopPropagation(),
         children: [
@@ -71980,6 +72275,7 @@ function ExpertDetailModal({
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-modal-desc", children: expert.displayDescription }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-tags", children: expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag)) }),
+          isTeam && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-meta", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["成员 ", expert.agents ?? 0] }) }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-prompts", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-modal-prompts-title", children: "专家帮你做" }),
             expert.quickPrompts.map((prompt2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -71993,16 +72289,41 @@ function ExpertDetailModal({
               prompt2
             ))
           ] }),
+          skills.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-skills", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ex-modal-skills-title", children: ["包含技能（", skills.length, "）"] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "ex-skill-list", children: visibleSkills.map((skill) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "li",
+              {
+                className: "ex-skill-row",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-skill-name", title: skill.name, children: skill.name }),
+                  // 单行 + ellipsis，全文放 title：长描述不再把一屏撑成正文阅读器。
+                  // 描述缺失时只显示名称：不留占位、不伪造。
+                  skill.description !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-skill-desc", title: skill.description, children: skill.description })
+                ]
+              },
+              skill.name
+            )) }),
+            skills.length > SKILL_PREVIEW_LIMIT && /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                className: "ex-skill-toggle",
+                onClick: () => setSkillsExpanded((value) => !value),
+                children: skillsExpanded ? "收起" : `展开全部（${skills.length}）`
+              }
+            )
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-actions", children: isPack ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: `来源：能力包 ${expert.packId ?? expert.name}${expert.packVersion === void 0 ? "" : `@${expert.packVersion}`}` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: `来源：能力包 ${expert.packId ?? expert.name}${expert.packVersion === void 0 ? "" : `@${expert.packVersion}`}${installedText === "" ? "" : ` · ${installedText}`}` }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
             !confirmRemove && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", onClick: () => setConfirmRemove(true), disabled: busy, children: "移除能力包" })
           ] }) : expert.source === "user" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：我的专家" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：自建专家" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: exportPack, disabled: busy, children: busy ? "导出中…" : "导出能力包…" })
           ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：内置专家" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：内置专家 · 可能包含第三方内容，暂不支持导出" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: true, title: "内置专家可能包含第三方内容，再分发授权确认之前不支持导出", children: "导出能力包…" })
           ] }) }),
@@ -72018,7 +72339,7 @@ function ExpertDetailModal({
               /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", ref: confirmRef, onClick: removePack, disabled: busy, children: busy ? "移除中…" : "确认移除" })
             ] })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", ref: useBtnRef, onClick: () => onUse(expert.name), children: "使用专家" })
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", onClick: () => onUse(expert.name), children: "使用专家" })
         ]
       }
     ) })
