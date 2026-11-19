@@ -28,6 +28,7 @@ import {
 	runningCount,
 	shouldHideOnClose,
 	shouldNotifyCompletion,
+	isQuietHours,
 } from "../../src/main/desktop-behavior.js";
 
 let configDir;
@@ -45,12 +46,43 @@ afterEach(() => {
 	rmSync(configDir, { recursive: true, force: true });
 });
 
+describe("#439 免打扰时段判定 isQuietHours", () => {
+	it("未开启/非法输入一律不算免打扰", () => {
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 23 * 60)).toBe(true);
+		expect(isQuietHours({}, 23 * 60)).toBe(false);
+		expect(isQuietHours({ quietStart: "bad", quietEnd: "08:00" }, 23 * 60)).toBe(false);
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "99:00" }, 23 * 60)).toBe(false);
+		expect(isQuietHours({ quietStart: "08:00", quietEnd: "08:00" }, 23 * 60)).toBe(false);
+	});
+	it("不跨零点：start<end 区间内含头不含尾", () => {
+		expect(isQuietHours({ quietStart: "12:00", quietEnd: "14:00" }, 12 * 60)).toBe(true);
+		expect(isQuietHours({ quietStart: "12:00", quietEnd: "14:00" }, 13 * 60 + 30)).toBe(true);
+		expect(isQuietHours({ quietStart: "12:00", quietEnd: "14:00" }, 14 * 60)).toBe(false);
+		expect(isQuietHours({ quietStart: "12:00", quietEnd: "14:00" }, 11 * 60 + 59)).toBe(false);
+	});
+	it("跨零点：start>end，22:00-08:00 在 23:00 与 07:00 都算", () => {
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 22 * 60)).toBe(true);
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 23 * 60 + 59)).toBe(true);
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 0)).toBe(true);
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 7 * 60 + 59)).toBe(true);
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 8 * 60)).toBe(false);
+		expect(isQuietHours({ quietStart: "22:00", quietEnd: "08:00" }, 12 * 60)).toBe(false);
+	});
+	it("免打扰下 shouldNotifyCompletion 直接 null", () => {
+		expect(shouldNotifyCompletion({ enabled: true, focused: false, eventType: "run_finished", outcome: "completed", quietHours: true })).toBe(null);
+		expect(shouldNotifyCompletion({ enabled: true, focused: false, eventType: "run_finished", outcome: "completed", quietHours: false })).toBe("completed");
+	});
+});
+
 describe("desktop.json —— 默认值与读写", () => {
 	it("文件不存在时按默认值（首启不阻塞）", () => {
 		expect(readDesktopPreferences()).toEqual({
 			closeToTray: false,
 			notifyOnComplete: true,
 			launchAtLogin: false,
+			quietHoursEnabled: false,
+			quietStart: "22:00",
+			quietEnd: "08:00",
 		});
 	});
 
@@ -62,7 +94,7 @@ describe("desktop.json —— 默认值与读写", () => {
 
 	it("写入后读回同一份值，并返回完整对象", () => {
 		const written = writeDesktopPreferences({ closeToTray: true });
-		expect(written).toEqual({ closeToTray: true, notifyOnComplete: true, launchAtLogin: false });
+		expect(written).toEqual({ closeToTray: true, notifyOnComplete: true, launchAtLogin: false, quietHoursEnabled: false, quietStart: "22:00", quietEnd: "08:00" });
 		expect(readDesktopPreferences()).toEqual(written);
 		expect(desktopPreferencesPath()).toBe(join(configDir, "desktop.json"));
 	});
@@ -70,7 +102,7 @@ describe("desktop.json —— 默认值与读写", () => {
 	it("部分写：只改给的键，其余保留", () => {
 		writeDesktopPreferences({ closeToTray: true, launchAtLogin: true });
 		const next = writeDesktopPreferences({ notifyOnComplete: false });
-		expect(next).toEqual({ closeToTray: true, notifyOnComplete: false, launchAtLogin: true });
+		expect(next).toEqual({ closeToTray: true, notifyOnComplete: false, launchAtLogin: true, quietHoursEnabled: false, quietStart: "22:00", quietEnd: "08:00" });
 	});
 
 	it("非布尔值与未知键一律丢弃（写侧与读侧同一判据）", () => {
@@ -97,6 +129,9 @@ describe("desktop.json —— 默认值与读写", () => {
 			closeToTray: false,
 			notifyOnComplete: false,
 			launchAtLogin: true,
+			quietHoursEnabled: false,
+			quietStart: "22:00",
+			quietEnd: "08:00",
 		});
 	});
 

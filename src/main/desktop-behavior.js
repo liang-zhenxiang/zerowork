@@ -31,11 +31,32 @@ function shouldHideOnClose({ closeToTray, quitting }) {
  * 通知内容不在这里拼：本函数只给「哪一种」，文案与会话 id 由主进程决定，
  * 避免把会话标题之类的信息带进通知（见 index.js 的 notifyCompletion）。
  */
-function shouldNotifyCompletion({ enabled, focused, eventType, outcome }) {
+function shouldNotifyCompletion({ enabled, focused, eventType, outcome, quietHours }) {
 	if (enabled !== true || focused === true) return null;
+	/* #439 第二十六轮 F2：免打扰时段内不发系统通知（应用内反馈不受影响）。 */
+	if (quietHours === true) return null;
 	if (eventType === "run_finished") return outcome === "completed" ? "completed" : null;
 	if (eventType === "run_error") return "failed";
 	return null;
+}
+
+/** #439 F2：免打扰判定。24h 制 HH:MM，start>end 表示跨零点（22:00-08:00）。
+    nowMinutes 由调用方传（可测）。 */
+function isQuietHours({ quietStart, quietEnd }, nowMinutes) {
+	if (typeof quietStart !== "string" || typeof quietEnd !== "string") return false;
+	const parse = (s) => {
+		const m = /^(\d{2}):(\d{2})$/.exec(s);
+		if (m === null) return null;
+		const h = Number(m[1]);
+		const min = Number(m[2]);
+		if (h > 23 || min > 59) return null;
+		return h * 60 + min;
+	};
+	const start = parse(quietStart);
+	const end = parse(quietEnd);
+	if (start === null || end === null || start === end) return false;
+	const now = typeof nowMinutes === "number" ? nowMinutes : new Date().getHours() * 60 + new Date().getMinutes();
+	return start < end ? now >= start && now < end : now >= start || now < end;
 }
 
 /** runId 是会话内生成的字符串；缺 id 的事件不计入（否则计数会被空串污染）。 */
@@ -62,4 +83,4 @@ function runningCount(runs) {
 	return runs.size;
 }
 
-export { shouldHideOnClose, shouldNotifyCompletion, addRunning, removeRunning, runningCount };
+export { shouldHideOnClose, shouldNotifyCompletion, isQuietHours, addRunning, removeRunning, runningCount };

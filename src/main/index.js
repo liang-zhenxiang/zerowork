@@ -14,7 +14,7 @@ import {
   docKindOf,
 } from "../shared/ipc.js";
 import { DESKTOP_DEFAULTS, readDesktopPreferences, writeDesktopPreferences } from "./desktop-preferences.js";
-import { addRunning, removeRunning, runningCount, shouldHideOnClose, shouldNotifyCompletion } from "./desktop-behavior.js";
+import { addRunning, isQuietHours, removeRunning, runningCount, shouldHideOnClose, shouldNotifyCompletion } from "./desktop-behavior.js";
 /**
  * 应用的唯一标识。**必须与 `electron-builder.yml` 的 `appId` 完全一致** ——
  * 那个值是安装器的身份（macOS 的 CFBundleIdentifier、Windows 的 AUMID、
@@ -220,6 +220,7 @@ const TRAY_ICON_DEFAULT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAA
 let desktopPrefs = { ...DESKTOP_DEFAULTS };
 let tray;
 let notificationUnsupportedWarned = false;
+let badgeCount = 0;
 /** 正在运行的 run（按 runId 去重）。托盘菜单只显示数量，不显示会话内容。 */
 const runningRuns = new Set();
 
@@ -253,6 +254,14 @@ function showWindow() {
   if (window.isMinimized()) window.restore();
   if (!window.isVisible()) window.show();
   window.focus();
+  /* #439 F4：用户回来了，Badge 清零。 */
+  if (process.platform === "darwin" && badgeCount > 0) {
+    badgeCount = 0;
+    try {
+      app.dock?.setBadge("");
+    } catch {
+    }
+  }
 }
 
 /** 托盘菜单的「打开自动化」：唤起窗口并让渲染层切到自动化视图。 */
@@ -361,7 +370,10 @@ function notifyCompletion(event, sessionId) {
     enabled: desktopPrefs.notifyOnComplete,
     focused: window !== void 0 && window.isDestroyed() === false && window.isFocused(),
     eventType: event.type,
-    outcome: event.outcome
+    outcome: event.outcome,
+    quietHours: desktopPrefs.quietHoursEnabled === true
+      ? isQuietHours({ quietStart: desktopPrefs.quietStart, quietEnd: desktopPrefs.quietEnd })
+      : false
   });
   if (verdict === null) return;
   if (!Notification.isSupported()) {
@@ -404,6 +416,15 @@ function trackSessionEventPush(channel, payload) {
   if (event.type === "run_finished" || event.type === "run_error") {
     if (removeRunning(runningRuns, event.runId)) refreshTrayMenu();
     notifyCompletion(event, sessionId);
+    /* #439 第二十六轮 F4：窗口在后台时完成的任务 → Dock Badge +1（macOS）。
+       showWindow（用户回来）时清零。Linux/Windows 无 dock badge，静默跳过。 */
+    if (process.platform === "darwin" && (window === void 0 || window.isDestroyed() === false && window.isFocused() === false)) {
+      badgeCount += 1;
+      try {
+        app.dock?.setBadge(String(badgeCount));
+      } catch {
+      }
+    }
   }
 }
 /*
