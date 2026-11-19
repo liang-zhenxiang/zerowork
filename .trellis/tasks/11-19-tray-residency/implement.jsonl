@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/main/index.md", "reason": "主进程生命周期、IPC 与退出链路纪律"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "设置页开关样式、焦点与状态双通道"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/e2e/反向验证规范"}
+{"file": ".trellis/spec/workflow/index.md", "reason": "子代理协作与验收流程"}
+{"file": "docs/DESIGN.md", "reason": "开关与设置的 Token/交互纪律"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：可证伪断言、反向验证、门禁"}
+{"file": ".trellis/spec/main/index.md", "reason": "验收：退出链路未被绕过、IPC 已登记"}
