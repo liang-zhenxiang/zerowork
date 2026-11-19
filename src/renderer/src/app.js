@@ -32128,6 +32128,26 @@ import {
 } from "./palette-memory.js";
 // 案例封面的几何内核（#104 起封面由第一方生成，不再引第三方 CDN 图）。
 import { coverAccent, coverBarWidth, coverBars, coverLines, coverVariant } from "./case-cover.js";
+// 资料库画廊（成果展厅）的纯逻辑：类型判定 / 封面几何 / 路径归属 / 四条件筛选 /
+// 继续修改提示 / 文件历史匹配。单测直接 import 这一份 —— 这一屏最容易错的是
+// 「筛出来的集合不对」「继续修改开在了错误的目录」，都是 GUI 断言说不清的那类。
+import {
+	ARTIFACT_TYPES,
+	TIME_RANGES,
+	artifactBadge,
+	artifactCover,
+	artifactCoverShape,
+	artifactCoverVariant,
+	artifactType,
+	continuePrompt,
+	displayPathFor,
+	filterArtifacts,
+	pathWithinCwd as artifactPathWithinCwd,
+	sourceCwdFor,
+	typeAccent,
+	typeLabel,
+	versionKeyFor
+} from "./library-gallery-core.js";
 // 「关于」页的第三方组件与许可（纯数据；单测锁着它与随包的 vendored 依赖一致）。
 import { APP_LICENSE, BUNDLED_COMPONENTS, FULL_NOTICES_LOCATION } from "./attributions.js";
 // 会话置顶的纯逻辑（排序 + 折叠窗口）在 session-pin.js 里，单测直接 import 它 ——
@@ -74493,11 +74513,9 @@ function buildSchedule(draft) {
  * 归一化分隔符（Windows 反斜杠）与末尾斜杠，避免「C:\ws」与「C:/ws/」被判成不同前缀。
  */
 function isPathWithinCwd(cwd2, path2) {
-  if (typeof cwd2 !== "string" || cwd2 === "") return false;
-  const norm = (value) => value.replace(/\\/g, "/").replace(/\/+$/, "");
-  const base = norm(cwd2);
-  const target = norm(path2);
-  return target !== "" && (target === base || target.startsWith(`${base}/`));
+  // 归属判定只有一份（library-gallery-core.js），资料库行、卡片与继续修改共用它 ——
+  // 三处若各写一份 normalize，迟早会出现「列表说在 cwd 内、详情说在外」的自相矛盾。
+  return artifactPathWithinCwd(cwd2, path2);
 }
 /**
  * 资料库的一行。行骨架复用 `.auto-row`（AutomationsView / 连接器同一套
@@ -74513,21 +74531,40 @@ function isPathWithinCwd(cwd2, path2) {
  * - 在文件夹中显示：打开**来源工作区**目录（既有 revealWorkspace 通道）。
  * - 定位到来源会话：跳到最近交付它的那个会话（复用 resumeTask）。
  */
-function LibraryRow({ artifact, now, onPreview, onReveal, onLocate, onOpenExternal }) {
+function LibraryRow({ artifact, now, onPreview, onReveal, onLocate, onOpenExternal, onOpen }) {
+  const type = artifactType(artifact);
   const sessions = Array.isArray(artifact.sessions) ? artifact.sessions : [];
   const previewSession = sessions.find((s) => isPathWithinCwd(s.cwd, artifact.path));
   const latestSession = sessions[0];
   const revealCwd = (previewSession ?? latestSession)?.cwd;
   const isUrl2 = artifact.kind === "url";
-  // 次文：大小（**交付时刻的快照**，不是实时值）· 来源会话标题 · 交付时间 · 多会话时标出会话数。
+  // 次文：类型 · 大小（**交付时刻的快照**，不是实时值）· 来源会话标题 · 交付时间 · 多会话时标出会话数。
   const meta = [
+    typeLabel(type),
     artifact.size > 0 ? formatSize(artifact.size) : void 0,
     latestSession?.title,
     artifact.deliveredAt !== void 0 ? formatMessageTime(Date.parse(artifact.deliveredAt), now) : void 0,
     sessions.length > 1 ? `共 ${sessions.length} 个会话交付过` : void 0
   ].filter((part) => part !== void 0 && part !== "").join(" · ");
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row", children: [
+  const openDetail = () => onOpen(artifact);
+  /* 整行可点（设计评审 2026-11-19）：列表视图此前只能通过行内按钮操作，
+     看详情必须先切回网格。行内按钮仍在，点击时各自 stopPropagation。
+     行本身**不做 role=button / tabIndex**：里面已经有真按钮，button 套 button
+     是非法 ARIA；键盘与读屏用户走行尾的「详情」按钮。 */
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+    className: "auto-row lib-row",
+    onClick: (event) => {
+      if (event.target.closest("button") !== null) return;
+      openDetail();
+    },
+    children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-main", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", {
+        className: "lib-row-type",
+        "data-type": type,
+        "aria-hidden": "true",
+        style: { "--lib-accent": typeAccent(type) ?? "var(--text-faint)" }
+      }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-text", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-title", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "auto-row-name", title: artifact.path, children: artifact.name }),
@@ -74539,9 +74576,26 @@ function LibraryRow({ artifact, now, onPreview, onReveal, onLocate, onOpenExtern
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-row-meta", children: meta })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "auto-row-ops", children: [
-        isUrl2 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onOpenExternal(artifact.path), children: "打开链接" }) : previewSession !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onPreview(previewSession.path, artifact.path), children: "预览" }) : null,
-        !isUrl2 && revealCwd !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "在系统文件管理器中打开来源工作区", onClick: () => onReveal(revealCwd), children: "在文件夹中显示" }),
-        latestSession !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onLocate(latestSession.path), children: "定位到来源会话" })
+        /* 键盘 / 读屏的详情入口：行本身不冒充按钮（内部已有真按钮）。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: (event) => {
+          event.stopPropagation();
+          openDetail();
+        }, children: "详情" }),
+        isUrl2 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: (event) => {
+          event.stopPropagation();
+          onOpenExternal(artifact.path);
+        }, children: "打开链接" }) : previewSession !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: (event) => {
+          event.stopPropagation();
+          onPreview(previewSession.path, artifact.path);
+        }, children: "预览" }) : null,
+        !isUrl2 && revealCwd !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", title: "在系统文件管理器中打开来源工作区", onClick: (event) => {
+          event.stopPropagation();
+          onReveal(revealCwd);
+        }, children: "在文件夹中显示" }),
+        latestSession !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: (event) => {
+          event.stopPropagation();
+          onLocate(latestSession.path);
+        }, children: "定位到来源会话" })
       ] })
     ] }),
     !isUrl2 && previewSession === void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-row-meta", children: "该产物在来源工作区之外，资料库不直接读它；可「定位到来源会话」后在那里查看。" })
@@ -74559,9 +74613,247 @@ function LibraryRow({ artifact, now, onPreview, onReveal, onLocate, onOpenExtern
  * error → 就地错误 + 重试；data === undefined → 加载态；artifacts 为空 → 空态。
  * 空态要**教人怎么产生产物**：这很可能是用户第一次见到本页时唯一见过的样子。
  */
-function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArtifact, onOpenExternal, onNewTask }) {
+/* ── 成果展厅（#423）─────────────────────────────────────────────────
+ * 资料库从「行式清单」改为**画廊**：默认网格，卡片上方是按类型画的第一方封面
+ * （复用 `case-cover.js` 的确定性几何，不出网、不引图片），下方是文件名 / 类型 /
+ * 大小 / 交付时间 / 来源会话。列表视图保留原有行能力，两视图共用同一份筛选结果。
+ *
+ * 封面**不是缩略图**：不跑 Office 渲染、不截图 —— 类型只决定画法与分类色，
+ * 让「这是一份表格还是一次汇报」在第一眼就能分辨。
+ */
+function LibraryCover({ artifact, type, className, showType }) {
+  const cover = artifactCover(artifact);
+  const variant = artifactCoverVariant(type);
+  const shape = artifactCoverShape(type);
+  // 中性类型（other）不借分类色：封面落到弱文字色，与「无差别分类」的既有口径一致。
+  const accent = typeAccent(type) ?? "var(--text-faint)";
+  let body;
+  if (variant === "chart") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-bars", children: cover.bars.map((height, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-bar", style: { height: `${height}%` } }, index)) });
+  } else if (variant === "slide") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-slide" });
+  } else if (variant === "note") {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "case-cover-lines", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line case-cover-line-lead", style: { width: `${cover.lines[0]}%` } }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line", style: { width: `${cover.lines[1]}%` } }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line", style: { width: `${cover.lines[2]}%` } })
+    ] });
+  } else {
+    body = /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-lines", children: cover.lines.map((width, index) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-line", style: { width: `${width}%` } }, index)) });
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", {
+    className: className === void 0 ? `case-cover lib-cover lib-cover-${shape}` : `case-cover lib-cover lib-cover-${shape} ${className}`,
+    style: { "--case-accent": accent },
+    "aria-hidden": "true",
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-cover-badge", children: artifactBadge(artifact) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "case-cover-sheet", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "case-cover-bar-top", style: { width: `${cover.barWidth}%` } }),
+        body
+      ] }),
+      showType === true && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-card-type", children: typeLabel(type) })
+    ]
+  });
+}
+/** 网格里的一张产物卡：整卡是一个按钮（回车 / 空格打开详情）。 */
+function LibraryCard({ artifact, now, onOpen }) {
+  const type = artifactType(artifact);
+  const sessions = Array.isArray(artifact.sessions) ? artifact.sessions : [];
+  const latest = sessions[0];
+  const deliveredAt = Date.parse(artifact.deliveredAt ?? "");
+  // 卡片 meta 只留「大小 / 时间」：类型已由封面的类型标签与扩展名角标承担。
+  // <1 KB 的文件不显示大小 —— 「46 B」读不出量级，只是噪声（设计评审 2026-11-19）。
+  const meta = [
+    artifact.size >= 1024 ? formatSize(artifact.size) : void 0,
+    Number.isFinite(deliveredAt) ? formatMessageTime(deliveredAt, now) : void 0
+  ].filter((part) => part !== void 0 && part !== "").join(" · ");
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+    type: "button",
+    className: artifact.exists === false ? "lib-card lib-card-missed" : "lib-card",
+    "data-type": type,
+    title: artifact.path,
+    onClick: () => onOpen(artifact),
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryCover, { artifact, type, showType: true }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "lib-card-title", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-card-name", children: artifact.name }),
+        artifact.exists === false && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "auto-badge auto-badge-missed", title: "交付时这个文件在，现在磁盘上已找不到", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 11 }),
+          "文件已不在"
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-card-meta", children: meta }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-card-source", children: latest === void 0 ? "来源 · 来源会话已不在" : `来源 · ${latest.title ?? "未命名会话"}${sessions.length > 1 ? ` · 共 ${sessions.length} 个会话交付过` : ""}` })
+    ]
+  });
+}
+/**
+ * 产物详情（模态）。动作的可用性与原因都**就地写出来**，不做「点了没反应」的按钮：
+ * - 预览：沿用「切到来源会话再开预览面板」的既有通道；落在来源 cwd 之外 / 文件已不在
+ *   时禁用并说明；
+ * - 版本历史：懒加载清单并按归一化路径匹配；匹配不到就说「没有留下版本」；
+ * - 继续修改：只在来源 cwd 内且文件仍在时可用 —— 不为「改任意路径」新开读通道。
+ */
+function LibraryDetail({ artifact, onClose, onPreview, onReveal, onResumeSession, onOpenHistory, onContinue, onOpenExternal, onToast }) {
+  const type = artifactType(artifact);
+  const isUrl2 = type === "url";
+  const sessions = Array.isArray(artifact.sessions) ? artifact.sessions : [];
+  const previewSession = sessions.find((s) => isPathWithinCwd(s.cwd, artifact.path));
+  const sourceCwd = sourceCwdFor(artifact);
+  const latest = sessions[0];
+  const revealCwd = sourceCwd ?? latest?.cwd;
+  const missing = artifact.exists === false;
+  const [history, setHistory] = reactExports.useState(void 0);
+  const [historyError, setHistoryError] = reactExports.useState(void 0);
+  const loadHistory = reactExports.useCallback(() => {
+    setHistory(void 0);
+    setHistoryError(void 0);
+    window.kami.listFileHistory().then((res) => setHistory(res ?? { files: [], truncated: false })).catch((e) => {
+      setHistoryError(errorText(e));
+    });
+  }, []);
+  reactExports.useEffect(() => {
+    if (!isUrl2) void loadHistory();
+  }, [artifact.path, isUrl2, loadHistory]);
+  const historyKey = historyError === void 0 && history !== void 0 ? versionKeyFor(history.files ?? [], artifact.path) : void 0;
+  /*
+   * 初始焦点交给对话框容器（不是第一个按钮）：「预览 / 继续修改」在底部，弹窗一打开
+   * 就把焦点送过去，读屏用户会先听到一个动作而不是「这是哪份产物」。
+   * preventScroll 保证长详情从顶部读起，不被初始焦点滚到底。
+   */
+  const cardNodeRef = reactExports.useRef(null);
+  const attachModalRef = useModalFocus({ focusPreventScroll: true, initialFocus: () => cardNodeRef.current });
+  const cardRef = reactExports.useCallback((node2) => {
+    cardNodeRef.current = node2;
+    return attachModalRef(node2);
+  }, [attachModalRef]);
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const copyText = (text2, okText) => {
+    if (navigator.clipboard === void 0) {
+      onToast("当前环境不能复制，请手动选中路径复制", "error");
+      return;
+    }
+    navigator.clipboard.writeText(text2).then(() => onToast(okText, "success")).catch(() => {
+      onToast("复制失败，请手动选中路径复制", "error");
+    });
+  };
+  const deliveredAt = Date.parse(artifact.deliveredAt ?? "");
+  const meta = [
+    typeLabel(type),
+    artifact.size > 0 ? formatSize(artifact.size) : void 0,
+    Number.isFinite(deliveredAt) ? formatMessageTime(deliveredAt, Date.now()) : void 0
+  ].filter((part) => part !== void 0 && part !== "").join(" · ");
+  // 副标题只显示「来源工作区名 / 相对路径」，完整路径放 title（隐私，设计评审 2026-11-19）。
+  const displayPath = displayPathFor(artifact);
+  const continueBlocked = isUrl2 || missing || sourceCwd === void 0;
+  const previewBlocked = missing || previewSession === void 0;
+  /*
+   * 「为什么这些动作不可用」只留**一句**（此前预览与继续修改各一行，读起来像两个错误）。
+   * 文件已不在与在来源工作区之外是互斥的两类原因，合并后仍是可诊断的一句。
+   */
+  const blockedNote = isUrl2 ? void 0 : missing ? "文件已不在磁盘上，无法预览或继续修改。" : sourceCwd === void 0 ? "该产物在来源工作区之外，资料库不直接读取它；可定位到来源会话后查看或继续。" : void 0;
+  const historyNote = historyError !== void 0 ? `版本历史读取失败：${historyError}` : history === void 0 ? "正在读取版本历史…" : historyKey === void 0 ? "当 Agent 修改过这份文件之后，这里会出现版本记录。" : void 0;
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-mask", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+    className: "ex-modal lib-detail",
+    role: "dialog",
+    "aria-modal": "true",
+    "aria-labelledby": "lib-detail-title",
+    tabIndex: -1,
+    ref: cardRef,
+    onClick: (e) => e.stopPropagation(),
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-detail-scroll", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-title", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { id: "lib-detail-title", className: "lib-detail-name", children: artifact.name }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-detail-path", title: displayPath.title, children: displayPath.text })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn ex-modal-close", "aria-label": "关闭", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryCover, { artifact, type, className: missing ? "lib-detail-cover lib-detail-cover-missed" : "lib-detail-cover" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-detail-meta", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: meta }),
+          missing && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "auto-badge auto-badge-missed", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(IconAlert, { size: 11 }),
+            "文件已不在"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "lib-detail-section", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "lib-detail-label", children: "来源会话" }),
+          sessions.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "lib-detail-note", children: "来源会话已不在" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "lib-detail-sessions", children: sessions.map((session) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "lib-detail-session", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-detail-session-title", title: session.cwd ?? "", children: session.title ?? "未命名会话" }),
+            session.path !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onResumeSession(session.path), children: "定位到来源会话" })
+          ] }, session.path ?? session.id)) })
+        ] }),
+        !isUrl2 && /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "lib-detail-section", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "lib-detail-label", children: "版本历史" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-detail-actions", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: historyKey === void 0, onClick: () => onOpenHistory(artifact.path), children: "查看版本历史" }),
+            historyError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: loadHistory, children: "重试" })
+          ] }),
+          historyNote !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "lib-detail-note", children: historyNote })
+        ] })
+      ] }),
+      /* 动作条固定在底部：详情内容再长也不会把「继续修改 / 预览」滚到看不见的地方。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-detail-footer", children: [
+        blockedNote !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "lib-detail-note", children: blockedNote }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-detail-actions", children: [
+          isUrl2 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => onOpenExternal(artifact.path), children: "打开链接" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => copyText(artifact.path, "已复制链接"), children: "复制链接" })
+          ] }) : missing ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* 失效文件的出路不是「继续改」，而是回到来源会话重新生成一份。 */
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", disabled: latest?.path === void 0, onClick: () => {
+              if (latest?.path !== void 0) onResumeSession(latest.path);
+            }, children: "回到来源会话重新生成" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: true, children: "预览" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: true, children: "继续修改" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: revealCwd === void 0, onClick: () => onReveal(revealCwd), children: "在文件夹中显示" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => copyText(artifact.path, "已复制路径"), children: "复制路径" })
+          ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", disabled: continueBlocked, onClick: () => onContinue(artifact), children: "继续修改" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: previewBlocked, onClick: () => onPreview(previewSession.path, artifact.path), children: "预览" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: revealCwd === void 0, onClick: () => onReveal(revealCwd), children: "在文件夹中显示" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => copyText(artifact.path, "已复制路径"), children: "复制路径" })
+          ] })
+        ] })
+      ] })
+    ]
+  }) });
+}
+function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArtifact, onOpenExternal, onNewTask, onContinue, onOpenHistory, onToast }) {
   const [data, setData] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
+  /*
+   * 视图选择跨会话保持（`zw:library-view`）：习惯列表的人不该每次回到资料库
+   * 都被弹回网格。读写都包 try/catch —— localStorage 不可用时退回默认网格。
+   */
+  const [viewMode, setViewMode] = reactExports.useState(() => {
+    try {
+      return window.localStorage.getItem("zw:library-view") === "list" ? "list" : "grid";
+    } catch {
+      return "grid";
+    }
+  });
+  const changeViewMode = (mode) => {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem("zw:library-view", mode);
+    } catch {
+      // 存不下不影响当前视图；下次进来回默认网格而已。
+    }
+  };
+  const [type, setType] = reactExports.useState("all");
+  const [sessionId, setSessionId] = reactExports.useState("all");
+  const [days, setDays] = reactExports.useState(0);
+  const [keyword, setKeyword] = reactExports.useState("");
+  const [detail, setDetail] = reactExports.useState(void 0);
   const load = reactExports.useCallback(async () => {
     try {
       setData(await window.kami.listLibrary());
@@ -74574,48 +74866,136 @@ function LibraryView({ onClose, onResumeSession, onRevealWorkspace, onPreviewArt
     void load();
   }, [load]);
   const now = Date.now();
+  const artifacts = data?.artifacts ?? [];
+  /* 来源会话筛选项：从产物自带的 sessions 派生（去重、按标题排序），不另拉一份会话列表。 */
+  const sessionOptions = reactExports.useMemo(() => {
+    const byPath = /* @__PURE__ */ new Map();
+    for (const artifact of data?.artifacts ?? []) {
+      for (const session of Array.isArray(artifact.sessions) ? artifact.sessions : []) {
+        if (typeof session?.path === "string" && !byPath.has(session.path)) byPath.set(session.path, session.title ?? "未命名会话");
+      }
+    }
+    const rows = [...byPath.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, "zh-Hans-CN"));
+    return [{ value: "all", label: "全部来源" }, ...rows];
+  }, [data]);
+  /* 两种视图共用同一份 visible：切视图不重算、不丢筛选（PRD 验收标准）。 */
+  const visible = data === void 0 ? [] : filterArtifacts(data.artifacts, { type, sessionId, days, keyword, now });
+  const resetFilters = () => {
+    setType("all");
+    setSessionId("all");
+    setDays(0);
+    setKeyword("");
+  };
+  const sessionLabel = sessionOptions.find((option) => option.value === sessionId)?.label ?? "全部来源";
+  const timeLabel = TIME_RANGES.find((range) => range.days === days)?.label ?? "全部时间";
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "资料库" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => void load(), children: "刷新" })
+      data !== void 0 && error === void 0 && artifacts.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-view-switch", role: "group", "aria-label": "视图切换", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `mini-btn${viewMode === "grid" ? " active" : ""}`, "aria-pressed": viewMode === "grid", onClick: () => changeViewMode("grid"), children: "网格" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `mini-btn${viewMode === "list" ? " active" : ""}`, "aria-pressed": viewMode === "list", onClick: () => changeViewMode("list"), children: "列表" })
+      ] }),
+      /* 刷新改成图标按钮：与分段视图控件拉开距离，页头不再挤三个文字按钮。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "刷新", title: "刷新", onClick: () => void load(), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 16 }) })
     ] }),
-    /* #363 第二十轮 F10：知识库聚合——片段/模板/导出物三区统计卡。
-       片段与模板是 localStorage 本地数据（同步读），导出物来自 listLibrary 同源。
-       数据区不管空不空都显示（这就是「知识库有什么」的第一眼）。 */
+    /* #363 第二十轮 F10 / #423：紧凑摘要——交付物与会话数是第一眼事实，
+       片段/模板是伴随信息（降为后面小字）。此前用的 .data-overview 引用了
+       两个不存在的 token（--line-weak / --surface-raised），容器其实没渲染。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", children: error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : data === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, {}) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(snippetCountForLibrary()) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "片段" })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(templateCountForLibrary()) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "模板" })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "data-overview-cell", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-num", children: String(data.artifacts.length) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "data-overview-label", children: "导出产物" })
-        ] })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "lib-summary", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "lib-summary-main", children: [String(data.artifacts.length), ` 份交付物 · 来自 ${Math.max(0, sessionOptions.length - 1)} 个会话`] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "lib-summary-sub", children: [`${snippetCountForLibrary()} 片段 · ${templateCountForLibrary()} 模板`] })
       ] }),
       data.artifacts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
       icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconLibrary, { size: 22 }),
-      title: "还没有交付过产物",
+      title: "还没有交付物",
       description: "让 Agent 做一件事——查资料、写文档、做表格——当它把成果文件交付出来时，就会出现在这里，之后跨会话都能找到。",
       action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: onNewTask, children: "新建任务" })
     }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      data.truncated && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: "产物较多，这里只显示最近交付的 500 条。" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-list", children: data.artifacts.map((artifact) => /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryRow, {
+      data.truncated && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "stat-hint", children: "交付物较多，这里只显示最近交付的 500 份。" }),
+      /* 筛选行与数据区同一条就绪条件：加载 / 错误态不渲染筛选器（与能力库同一纪律）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-toolbar", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-toolbar-row lib-type-chips", role: "group", "aria-label": "按类型筛选", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-toolbar-label", children: "类型" }),
+          ARTIFACT_TYPES.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+            type: "button",
+            className: `lib-filter-chip${type === option.id ? " active" : ""}`,
+            "aria-pressed": type === option.id,
+            onClick: () => setType(option.id),
+            children: option.label
+          }, option.id))
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-toolbar-row", children: [
+          /* 窄窗（<900px）用下拉代替 chip 行：11 个 chip 会换两三行，把画廊挤到首屏之外。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "lib-type-select", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "lib-toolbar-label", children: "类型" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectField, {
+              ariaLabel: `类型筛选：${typeLabel(type)}`,
+              value: type,
+              options: ARTIFACT_TYPES.map((option) => ({ value: option.id, label: option.label })),
+              onChange: setType
+            })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SelectField, {
+            ariaLabel: `来源会话筛选：${sessionLabel}`,
+            value: sessionId,
+            options: sessionOptions,
+            onChange: setSessionId
+          }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(SelectField, {
+            ariaLabel: `时间范围筛选：${timeLabel}`,
+            value: days,
+            options: TIME_RANGES.map((range) => ({ value: range.days, label: range.label })),
+            onChange: setDays
+          }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "ss-field lib-search", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 15, className: "ss-field-icon" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+              className: "ss-input",
+              type: "search",
+              value: keyword,
+              placeholder: "搜索文件名",
+              "aria-label": "按文件名搜索产物",
+              onChange: (event) => setKeyword(event.target.value)
+            }),
+            keyword !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-clear", "aria-label": "清空搜索", onClick: () => setKeyword(""), children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 12 }) })
+          ] })
+        ] })
+      ] }),
+      visible.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+        icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconSearch, { size: 22 }),
+        title: "没有符合条件的交付物",
+        description: "换个类型、来源或时间范围试试；也可以清除筛选，查看全部交付物。",
+        action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "primary-btn", onClick: resetFilters, children: "清除筛选" })
+      }) : viewMode === "grid" ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "lib-grid", children: visible.map((artifact) => /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryCard, {
+        artifact,
+        now,
+        onOpen: setDetail
+      }, artifact.path)) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "auto-list", children: visible.map((artifact) => /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryRow, {
         artifact,
         now,
         onPreview: onPreviewArtifact,
         onReveal: onRevealWorkspace,
         onLocate: onResumeSession,
-        onOpenExternal
-      }, artifact.path)) })
+        onOpenExternal,
+        onOpen: setDetail
+      }, artifact.path)) }),
+      /* 筛选/搜索变化时由 aria-live 播报结果数（只播数量，不读整张列表）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "sr-only", role: "status", "aria-live": "polite", children: `找到 ${visible.length} 份交付物` })
     ] })
-    ] })
+    ] }) }),
+    detail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(LibraryDetail, {
+      artifact: detail,
+      onClose: () => setDetail(void 0),
+      onPreview: onPreviewArtifact,
+      onReveal: onRevealWorkspace,
+      onResumeSession,
+      onOpenHistory,
+      onContinue,
+      onOpenExternal,
+      onToast
     })
   ] });
 }
@@ -74880,7 +75260,7 @@ function SearchView({ onClose, onOpenHit }) {
   ] });
 }
 
-function FileHistoryView({ onClose, sessions, onToast, onOpenReview, reviewPending }) {
+function FileHistoryView({ onClose, sessions, onToast, onOpenReview, reviewPending, focusPath }) {
   const [list, setList] = reactExports.useState(void 0);
   const [listError, setListError] = reactExports.useState(void 0);
   const [selectedKey, setSelectedKey] = reactExports.useState(void 0);
@@ -74932,6 +75312,22 @@ function FileHistoryView({ onClose, sessions, onToast, onOpenReview, reviewPendi
     }
     if (selectedKey === void 0 || !files.some((f) => f.key === selectedKey)) setSelectedKey(files[0].key);
   }, [list, files, selectedKey]);
+  /*
+   * 「从资料库定位到某个文件」：只在**匹配成功**时改选中。
+   *
+   * - 匹配不到（这个文件没有留下版本 / 已被 200 条上限截掉）时**不改**用户当前的选中 ——
+   *   静默跳到另一个文件比停在原处更让人困惑；
+   * - 用 ref 记「已经处理过哪个 focusPath」：否则用户随后手选别的文件时，这个 effect
+   *   会把他拽回目标文件（依赖里有 files，每次渲染都可能重跑）。
+   */
+  const focusAppliedRef = reactExports.useRef(void 0);
+  reactExports.useEffect(() => {
+    if (list === void 0 || focusPath === void 0) return;
+    if (focusAppliedRef.current === focusPath) return;
+    focusAppliedRef.current = focusPath;
+    const key = versionKeyFor(files, focusPath);
+    if (key !== void 0) setSelectedKey(key);
+  }, [list, files, focusPath]);
   /*
    * 选中的文件换了（或整页刷新）→ 重拉它的版本元数据。
    *
@@ -77655,6 +78051,11 @@ function App() {
   conversationRef.current = conversation;
   const [view, setView] = reactExports.useState("home");
   const [returnView, setReturnView] = reactExports.useState("home");
+  /* 文件历史的「定位到某个文件」请求（来自资料库详情的版本历史）。
+     只存 path；FileHistoryView 载入清单后按归一化路径匹配 key 并选中。
+     侧栏 / 命令面板入口调用 openFileHistory() 时清掉 —— 那两条是「打开这一页」，
+     不该沿用上一次的定位目标。 */
+  const [fileHistoryFocus, setFileHistoryFocus] = reactExports.useState(void 0);
   /*
    * 检索结果的「跳回原消息」请求：{ sessionId, entryId, nonce }。
    * 不直接操作 DOM —— 交给 ChatView 在会话条目就位后自己定位（它才知道折叠状态）。
@@ -78786,6 +79187,30 @@ function App() {
     // 改这里的取值来源时，务必同步这一个数组。
     [resumeTask, revealPanel, openPreview2]
   );
+  /*
+   * 资料库详情的「继续修改」（design.md §3）：在**来源会话的工作目录**开一个新任务，
+   * 预填「先读这份文件，再按要求改」的提示，并切到对话页。
+   *
+   * cwd 来自 `sourceCwdFor`（core 已按「产物路径落在该 cwd 内」判定）；调用方在按钮
+   * 不可用时不会走到这里。**不为「改任意路径的文件」新开读通道** —— 产物在来源工作区
+   * 之外时，详情里禁用并说明原因（AGENTS.md 红线 4）。
+   */
+  const continueArtifact = reactExports.useCallback((artifact) => {
+    const cwd2 = sourceCwdFor(artifact);
+    if (cwd2 === void 0) {
+      showToast("这个产物不在任何来源会话的工作区内，无法继续修改");
+      return;
+    }
+    // 提示里用相对路径（新任务 cwd 已是来源工作区）；绝对路径不必进对话与截图。
+    const prompt = continuePrompt(artifact, cwd2);
+    window.kami.newTask(cwd2).then(() => {
+      resyncSnapshot();
+      setPendingPrefill(prompt);
+      setView("chat");
+    }).catch((error) => {
+      showToast(error instanceof Error ? error.message : String(error));
+    });
+  }, [resyncSnapshot, showToast]);
   /* #292 F8：重命名面板打开且标题为默认（新建任务/未命名）时，从会话首条
    * 用户消息里提关键词给三个建议名。纯本地启发式：取 6-14 字的名词性片段，
    * 不调模型 —— 命名是 300ms 的事，不该花一次推理。 */
@@ -79055,7 +79480,9 @@ function App() {
    * 「文件历史」与「诊断」「统计」同款独立页面：入口（侧栏 + 命令面板）与视图
    * 分支共用这一个动作，两处入口不会各走各的路（命令面板只是「换一个入口」）。
    */
-  const openFileHistory = reactExports.useCallback(() => {
+  const openFileHistory = reactExports.useCallback((path2) => {
+    // path 是可选参数：资料库详情的「版本历史」带要定位的文件；侧栏 / 命令面板不带。
+    setFileHistoryFocus(typeof path2 === "string" && path2 !== "" ? path2 : void 0);
     setReturnView(view === "chat" ? "chat" : "home");
     setView("file-history");
   }, [view]);
@@ -79652,7 +80079,9 @@ function App() {
         sessions: taskList,
         onToast: showToast,
         onOpenReview: openReview,
-        reviewPending
+        reviewPending,
+        // 资料库详情的「版本历史」带过来的目标文件；匹配到才改选中（见该组件内注释）。
+        focusPath: fileHistoryFocus
       }
     ),
     view === "review" && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -79698,7 +80127,10 @@ function App() {
         onRevealWorkspace: revealWorkspace,
         onPreviewArtifact: previewLibraryArtifact,
         onOpenExternal: openArtifact,
-        onNewTask: newTask
+        onNewTask: newTask,
+        onContinue: continueArtifact,
+        onOpenHistory: openFileHistory,
+        onToast: showToast
       }
     ),
     view === "projects" && /* @__PURE__ */ jsxRuntimeExports.jsx(

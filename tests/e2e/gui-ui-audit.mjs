@@ -678,7 +678,9 @@ await h.check("④ 资料库空态：统计块与空态卡上下排列，空态�
 		async () => {
 			const value = await win.evaluate(() => {
 				const body = document.querySelector("main.settings .settings-body");
-				const overview = body?.querySelector(":scope > .data-overview");
+				// 资料库顶部摘要从三格统计改成一行的 .lib-summary（#423）；
+				// 兼容旧选择器，避免这条版式断言随标记改名而失去信号。
+				const overview = body?.querySelector(":scope > .data-overview, :scope > .lib-summary");
 				const empty = body?.querySelector(":scope > .state-empty");
 				if (body === null || overview == null || empty == null) return null;
 				const b = body.getBoundingClientRect();
@@ -692,7 +694,7 @@ await h.check("④ 资料库空态：统计块与空态卡上下排列，空态�
 			});
 			return value === null ? null : value;
 		},
-		{ timeout: 20_000, desc: "资料库同时渲染出 .data-overview 与 .state-empty" },
+		{ timeout: 20_000, desc: "资料库同时渲染出顶部摘要（.lib-summary / .data-overview）与 .state-empty" },
 	);
 	await h.shoot("library-empty-light");
 

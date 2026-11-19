@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "渲染层 Token、焦点与状态双通道纪律"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/e2e/反向验证规范"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "library/versions 数据面约束"}
+{"file": "docs/DESIGN.md", "reason": "卡片、封面与响应式 Token"}
+{"file": "docs/USAGE.md", "reason": "资料库既有说明需同步"}

@@ -119,14 +119,14 @@ function seedSessions() {
 		firstText: "帮我写季度复盘",
 		artifacts: [
 			{ path: UNIQUE_PATH, size: 42, deliveredAt: "2026-10-03T10:00:00.000Z" },
-			{ path: SHARED_PATH, size: 100, deliveredAt: "2026-10-03T10:00:05.000Z" },
+			{ path: SHARED_PATH, size: 1024, deliveredAt: "2026-10-03T10:00:05.000Z" },
 		],
 	});
 	sessionFile({
 		id: "22222222-2222-7222-8222-222222222222",
 		cwd: WS_B,
 		firstText: "做销售表",
-		artifacts: [{ path: SHARED_PATH, size: 200, deliveredAt: "2026-10-03T11:00:00.000Z" }],
+		artifacts: [{ path: SHARED_PATH, size: 2048, deliveredAt: "2026-10-03T11:00:00.000Z" }],
 	});
 }
 
@@ -180,12 +180,26 @@ const readLibrary = () =>
 /** 点页头的「刷新」（重新拉一次 IPC —— 列表数据是拉式的，不会自己变）。 */
 const clickRefresh = () =>
 	win.evaluate(() => {
-		const btn = [...document.querySelectorAll("main.settings .settings-head .mini-btn")].find(
-			(b) => (b.textContent ?? "").trim() === "刷新",
-		);
-		if (btn === undefined) throw new Error("资料库页头找不到「刷新」按钮");
+		const btn = document.querySelector('main.settings .settings-head [aria-label="刷新"]');
+		if (btn === null) throw new Error("资料库页头找不到「刷新」按钮");
 		btn.click();
 	});
+
+/**
+ * 切网格 / 列表。
+ *
+ * 资料库默认是**网格**（#423 成果展厅），本文件从 ③ 起断言的是原有的行能力，
+ * 所以在点任何 `.auto-row` 之前必须先显式切到列表 —— 这本身就是对「两种视图
+ * 可切且保留同一份数据」的一次覆盖。
+ */
+const clickView = (label) =>
+	win.evaluate((text) => {
+		const btn = [...document.querySelectorAll("main.settings .lib-view-switch button")].find(
+			(b) => (b.textContent ?? "").trim() === text,
+		);
+		if (btn === undefined) throw new Error(`资料库页头找不到「${text}」视图切换按钮`);
+		btn.click();
+	}, label);
 
 /** 轮询直到 readLibrary() 满足谓词（谓词必须能返回假值 —— 拿不到就返回 null）。 */
 const waitLibraryState = (pred, desc) =>
@@ -231,7 +245,7 @@ await h.check("② 全新环境：进入资料库是空态（非加载 / 非错�
 	assert.ok(s.empty, `应有空态 .state-empty，实际 loading=${s.loading} error=${s.error}`);
 	assert.equal(s.loading, false, "全新环境不应停在加载态（数据为空列表，不是 undefined）");
 	assert.equal(s.error, false, "全新环境不应是错误态");
-	assert.ok(s.emptyTitle.includes("还没有交付过产物"), `空态标题不对：${JSON.stringify(s.emptyTitle)}`);
+	assert.ok(s.emptyTitle.includes("还没有交付物"), `空态标题不对：${JSON.stringify(s.emptyTitle)}`);
 	assert.ok(
 		s.emptyDesc.includes("让 Agent 做一件事"),
 		`空态缺少「怎样产生产物」的指引：${JSON.stringify(s.emptyDesc)}`,
@@ -239,21 +253,48 @@ await h.check("② 全新环境：进入资料库是空态（非加载 / 非错�
 	assert.ok(s.newTask, "空态应带一个「新建任务」入口（能直接去做）");
 });
 
-// ══ ③ 预置产物 → 列表出现，名称 / 来源会话标题 / 大小正确 ═════════════
-await h.check("③ 预置产物后：列表出现该产物，名称 / 来源会话标题 / 大小正确", async () => {
+// ══ ③ 预置产物 → 默认网格出现，卡片带类型封面与元信息 ═══════════════
+await h.check("③ 预置产物后：默认是网格视图，卡片带类型封面与元信息", async () => {
 	seedSessions();
 	await clickRefresh();
+	const grid = await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const node = document.querySelector("main.settings .lib-grid");
+				if (node === null) return null;
+				const cards = [...node.querySelectorAll(".lib-card")];
+				if (cards.length === 0) return null;
+				return {
+					cards: cards.length,
+					covers: node.querySelectorAll(".lib-card .lib-cover").length,
+					types: cards.map((card) => card.getAttribute("data-type")),
+					names: cards.map((card) => (card.querySelector(".lib-card-name")?.textContent ?? "").trim()),
+				};
+			}),
+		{ timeout: 15_000, desc: "资料库默认网格出现（.lib-grid + .lib-card）" },
+	);
+	await h.shoot("library-grid-light");
+	assert.equal(grid.cards, 2, `预置两个产物应出两张卡，实际 ${grid.cards} 张：${JSON.stringify(grid.names)}`);
+	assert.equal(grid.covers, 2, "每张卡都应有第一方封面（.lib-cover）");
+	assert.ok(grid.types.includes("markdown"), `「唯一报告.md」的类型应是 markdown：${JSON.stringify(grid.types)}`);
+	assert.ok(grid.names.includes("唯一报告.md"), `网格里应有「唯一报告.md」：${JSON.stringify(grid.names)}`);
+	assert.equal(await win.evaluate(() => document.querySelectorAll("main.settings .auto-row").length), 0, "默认网格下不应有列表行");
+});
+
+// ══ ③b 切到列表 → 原有行仍在，名称 / 来源会话标题 / 大小正确 ═════════════
+await h.check("③b 切换到列表视图：原有行仍在，名称 / 来源会话标题 / 大小正确", async () => {
+	await clickView("列表");
 	const state = await waitLibraryState((s) => s.rows.some((row) => row.name === "唯一报告.md"), "列表出现「唯一报告.md」");
 	await h.shoot("library-list-light");
 
 	const row = state.rows.find((r) => r.name === "唯一报告.md");
 	assert.ok(row !== undefined, "列表里应有「唯一报告.md」这一行");
 	assert.ok(row.meta.includes("帮我写季度复盘"), `行内应标出来源会话标题「帮我写季度复盘」：${JSON.stringify(row.meta)}`);
-	assert.ok(row.meta.includes("42 B"), `行内应显示交付时刻的大小「42 B」：${JSON.stringify(row.meta)}`);
-	// 三个动作都在（本行落在来源 cwd 内，故有「预览」）
+	assert.ok(row.meta.includes("研究笔记"), `行内 meta 应补类型标签「研究笔记」：${JSON.stringify(row.meta)}`);
+	// 动作都在（本行落在来源 cwd 内，故有「预览」）；「详情」是键盘/读屏入口。
 	assert.deepEqual(
 		[...row.ops].sort(),
-		["定位到来源会话", "在文件夹中显示", "预览"].sort(),
+		["定位到来源会话", "在文件夹中显示", "预览", "详情"].sort(),
 		`行内操作按钮不对：${JSON.stringify(row.ops)}`,
 	);
 });
@@ -267,8 +308,8 @@ await h.check("⑦ 两个会话交付同一路径：只有一行，且标出「�
 		shared[0].meta.includes("共 2 个会话交付过"),
 		`应标出「共 2 个会话交付过」：${JSON.stringify(shared[0].meta)}`,
 	);
-	// 取更晚一次交付的快照元数据（B 交付时 size 200）
-	assert.ok(shared[0].meta.includes("200 B"), `去重后应保留最近一次交付的 size「200 B」：${JSON.stringify(shared[0].meta)}`);
+	// 取更晚一次交付的快照元数据（B 交付时 size 2048 → 2.0 KB）
+	assert.ok(shared[0].meta.includes("2.0 KB"), `去重后应保留最近一次交付的 size「2.0 KB」：${JSON.stringify(shared[0].meta)}`);
 });
 
 // ══ ⑥ 浅色 + 深色两套主题截图 + 像素断言 ═════════════════════════════
@@ -363,6 +404,12 @@ await h.check("④ 删掉产物文件后刷新：该条标出「文件已不在�
 	await clickNav("资料库");
 	await waitLibrary();
 	await clickRefresh();
+	// 重新进入后视图回到默认网格；先等数据就绪（视图切换器出现），再切列表断言行。
+	await waitUntil(
+		() => win.evaluate(() => document.querySelector("main.settings .lib-view-switch") !== null),
+		{ timeout: 15_000, desc: "刷新后资料库数据就绪（视图切换器出现）" },
+	);
+	await clickView("列表");
 	const state = await waitLibraryState(
 		(s) => s.rows.some((row) => row.name === "唯一报告.md" && row.missed),
 		"「唯一报告.md」被标为失效",
