@@ -13084,6 +13084,10 @@ const IconUser = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, chil
 const IconChevronLeft = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m15 18-6-6 6-6" }) });
 const IconChevronRight = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "m9 18 6-6-6-6" }) });
 const IconMinus = (p) => /* @__PURE__ */ jsxRuntimeExports.jsx(Svg, { ...p, children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M5 12h14" }) });
+const IconBell = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 3a6 6 0 0 0-6 6v3.2l-1.6 3A1 1 0 0 0 5.3 17h13.4a1 1 0 0 0 .9-1.8L18 12.2V9a6 6 0 0 0-6-6Z" }),
+  /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M9.8 19a2.3 2.3 0 0 0 4.4 0" })
+] });
 const IconSettings = (p) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Svg, { ...p, children: [
   /* @__PURE__ */ jsxRuntimeExports.jsx("circle", { cx: "12", cy: "12", r: "3" }),
   /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" })
@@ -13506,6 +13510,8 @@ function Sidebar({
   onRemoveWorkspace,
   onRevealWorkspace,
   onOpenSettings,
+  /* #439 F9：通知中心面板开关。 */
+  onOpenNotifyHistory,
   onOpenDiagnostics,
   onOpenStats,
   onOpenFileHistory,
@@ -15206,6 +15212,18 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconHelp, { size: 15 })
         }
       ),
+      /* #439 第二十六轮 F9：通知中心入口（最近 20 条后台任务通知，内存态）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          className: "footer-btn",
+          "aria-label": "通知中心",
+          title: "通知中心",
+          onClick: onOpenNotifyHistory,
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBell, { size: 15 })
+        }
+      ),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -16191,6 +16209,8 @@ function Composer({
      拆出的每段按顺序排队发送 —— 首条立即发，后续每条等上一条完成后再发
      （onSubmit 的 promise resolve 即视为完成）。队列在组件卸载/新会话时清空。 */
   const queueRef = reactExports.useRef([]);
+  /* #439 F8：曾有过队列项（用于「队列全部完成」的判定）。 */
+  const queueHadItemsRef = reactExports.useRef(false);
   const [queueLen, setQueueLen] = reactExports.useState(0);
   /* #342 第十七轮 F2：被清空草稿的暂存（撤销窗口内可还原）。 */
   const draftUndoRef = reactExports.useRef(null);
@@ -16257,6 +16277,12 @@ function Composer({
       const timer = setTimeout(drainQueue, 600);
       return () => clearTimeout(timer);
     }
+    /* #439 第二十六轮 F8：队列全部发完（含最后一轮流式结束）。queueHadItems
+       记录「这个 Composer 曾经有过队列」，避免首启就 toast。 */
+    if (queueHadItemsRef.current === true) {
+      queueHadItemsRef.current = false;
+      window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "队列中的提问已全部完成" }] }));
+    }
   }, [queueLen, streaming, drainQueue]);
   const submit = (whileStreaming) => {
     const text2 = draft.trim();
@@ -16277,6 +16303,7 @@ function Composer({
     if (parts.length > 1) {
       const [first, ...rest] = parts;
       queueRef.current = rest;
+      queueHadItemsRef.current = true;
       setQueueLen(rest.length);
       void onSubmit(first, images.length > 0 ? images : void 0, whileStreaming).then(() => {
         img.clear();
@@ -36405,6 +36432,34 @@ function ChatView({
   }, []);
   /* #397 第二十四轮 F1：当前模型 contextWindow（占比条分母）。 */
   const modelContextWindow = useModelContextWindow(conversation.state.modelId);
+  /* #439 第二十六轮 F7：流式卡住提醒。流式中每 10s 检查一次「最后一条 assistant
+     文本长度」，60s 无任何增长则提示可能已超时（不自动停止，只提示）。 */
+  reactExports.useEffect(() => {
+    if (streaming !== true) return;
+    let lastLen = -1;
+    let lastChangeAt = Date.now();
+    const timer = window.setInterval(() => {
+      const entries = conversation.entries ?? [];
+      let len = 0;
+      for (let i = entries.length - 1; i >= 0; i -= 1) {
+        const e = entries[i];
+        if (e?.role === "assistant") {
+          len = (e.text ?? "").length;
+          break;
+        }
+      }
+      if (len !== lastLen) {
+        lastLen = len;
+        lastChangeAt = Date.now();
+        return;
+      }
+      if (Date.now() - lastChangeAt >= 60000) {
+        window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "info", text: "回复已 60 秒没有新内容——可能已超时，可点击停止按钮中止" }] }));
+        window.clearInterval(timer);
+      }
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [streaming, conversation.entries]);
   const sessionStats = reactExports.useMemo(() => {
     let turns = 0;
     let chars = 0;
@@ -67580,6 +67635,39 @@ function DesktopSection({ busy }) {
           "当前系统不支持开机自启（完整支持 Windows 与 macOS）"
         )
       ] }),
+      /* #439 第二十六轮 F2/F6：通知免打扰时段。开关 + 起止时间（24h 制），
+         跨零点用 start>end（如 22:00-08:00）。免打扰只静默系统通知，
+         应用内 toast 不受影响。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-list quiet-hours-row", children: [
+        toggleRow(
+          "quietHoursEnabled",
+          "通知免打扰时段",
+          "时段内不发系统通知（应用内提示不受影响）",
+          true,
+          ""
+        ),
+        info2.prefs.quietHoursEnabled === true && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "quiet-hours-times", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "time",
+              defaultValue: String(info2.prefs.quietStart ?? "22:00"),
+              "aria-label": "免打扰开始时间",
+              onBlur: (e) => change("quietStart", e.target.value)
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-foot", children: "至" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "input",
+            {
+              type: "time",
+              defaultValue: String(info2.prefs.quietEnd ?? "08:00"),
+              "aria-label": "免打扰结束时间",
+              onBlur: (e) => change("quietEnd", e.target.value)
+            }
+          )
+        ] })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "托盘「退出」与系统退出是同一条链路：执行会话结束 hooks 并把数据落盘。" })
     ] })
   ] });
@@ -77239,6 +77327,35 @@ const SHORTCUT_SHEET = [
 	] },
 ];
 
+/* #439 第二十六轮 F9：通知中心面板。最近 20 条后台任务通知（内存态——
+   刷新即清，历史回溯交给审计中心；这里只做「刚才错过了什么」）。 */
+function NotifyHistorySheet({ items, onClose }) {
+  const cardRef = useModalFocus();
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", {
+    className: "shortcut-sheet-backdrop",
+    onClick: onClose,
+    children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+      className: "shortcut-sheet",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": "通知中心",
+      ref: cardRef,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shortcut-sheet-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "通知中心" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "shortcut-sheet-close", onClick: onClose, "aria-label": "关闭", children: "✕" })
+        ] }),
+        items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shortcut-sheet-body", children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "还没有通知。后台任务完成时会出现在这里。" }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shortcut-sheet-body", children: /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "notify-history-list", children: items.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "notify-history-item", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `notify-history-kind notify-history-kind-${item.kind}`, children: item.kind === "completed" ? "完成" : "失败" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "notify-history-title", children: item.title }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "notify-history-at", children: new Date(item.at).toLocaleTimeString("zh-CN") })
+        ] }, `${item.id}-${item.at}`)) }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shortcut-sheet-foot", children: "只保留最近 20 条（内存态，重启即清）；完整历史看审计中心。" })
+      ]
+    })
+  });
+}
+
 function ShortcutSheet({ onClose }) {
 	reactExports.useEffect(() => {
 		const onKey = (event) => {
@@ -78174,12 +78291,31 @@ function App() {
         }
         if (event.type === "run_finished" && event.outcome === "completed") {
           const title2 = taskListRef.current?.find((t) => t.id === sessionId)?.title;
-          showToast(title2 === void 0 ? "后台任务已完成" : `任务「${title2}」已完成`, "success");
+          const titleText = title2 === void 0 ? "后台任务" : `任务「${title2}」`;
+          /* #439 第二十六轮 F9/F10：通知历史（内存态最近 20 条）+ 聚合
+             （5 分钟窗口内第 3 条起聚合成一条，避免通知轰炸）。 */
+          notifyHistoryRef.current = [
+            { id: sessionId, title: titleText, kind: "completed", at: Date.now() },
+            ...notifyHistoryRef.current
+          ].slice(0, 20);
+          recentCompletionsRef.current = recentCompletionsRef.current.filter((r) => Date.now() - r.at < 300000);
+          recentCompletionsRef.current.push({ id: sessionId, at: Date.now() });
+          if (recentCompletionsRef.current.length >= 3) {
+            recentCompletionsRef.current = [];
+            showToast("已聚合多个后台任务的完成提醒", "success");
+          } else {
+            showToast(`${titleText}已完成`, "success");
+          }
           playSfx("done");
         } else if (event.type === "run_error") {
           playSfx("error");
           const title2 = taskListRef.current?.find((t) => t.id === sessionId)?.title;
-          showToast(title2 === void 0 ? "后台任务运行失败" : `任务「${title2}」运行失败`, "error");
+          const titleText = title2 === void 0 ? "后台任务" : `任务「${title2}」`;
+          notifyHistoryRef.current = [
+            { id: sessionId, title: titleText, kind: "failed", at: Date.now() },
+            ...notifyHistoryRef.current
+          ].slice(0, 20);
+          showToast(`${titleText}运行失败`, "error");
           markSessionError(sessionId);
         }
         return;
@@ -79084,6 +79220,10 @@ function App() {
    * 新 path 显示骨架，不会整区闪白。
    */
   const [sessionDigests, setSessionDigests] = reactExports.useState(void 0);
+  /* #439 第二十六轮 F9/F10：通知历史（内存态，最近 20 条）+ 聚合窗口的完成记录。 */
+  const notifyHistoryRef = reactExports.useRef([]);
+  const [notifyHistoryOpen, setNotifyHistoryOpen] = reactExports.useState(false);
+  const recentCompletionsRef = reactExports.useRef([]);
   reactExports.useEffect(() => {
     if (recentForHome.length === 0) {
       setSessionDigests(void 0);
@@ -79902,6 +80042,7 @@ function App() {
         onCopyTask: copyTask,
         onPinTask: pinTask,
         sessionDigests,
+        onOpenNotifyHistory: () => setNotifyHistoryOpen(true),
         onExportTask: exportTask,
         onExportMarkdownTask: exportMarkdownTask,
         onExportTxtTask: exportTxtTask,
@@ -80258,6 +80399,8 @@ function App() {
     ),
     /* 快捷键速查表：只展示，不重复绑定（见 SHORTCUT_SHEET 注释）。 */
     shortcutSheetOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(ShortcutSheet, { onClose: () => setShortcutSheetOpen(false) }),
+    /* #439 第二十六轮 F9：通知中心面板。 */
+    notifyHistoryOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(NotifyHistorySheet, { items: notifyHistoryRef.current, onClose: () => setNotifyHistoryOpen(false) }),
     /* round10 F5：图片灯箱（全局单例，事件驱动）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(ImageLightbox, {}),
     focusMode === true && /* @__PURE__ */ jsxRuntimeExports.jsxs(

@@ -20768,3 +20768,69 @@ html[data-sidebar-density='compact'] .space-group-header {
 		gap: var(--space-3);
 	}
 }
+
+/* ── §54 第二十六轮十连（#439 通知与提醒） ─────────────────────── */
+/* F2 免打扰时段行：开关 + 两个 time 输入 */
+.quiet-hours-times {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4) var(--space-3) calc(var(--space-4) + 24px);
+}
+.quiet-hours-times input[type="time"] {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	padding: 2px 8px;
+	font: inherit;
+}
+/* F9 通知历史列表 */
+.notify-history-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+}
+.notify-history-item {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-3);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+}
+.notify-history-kind {
+	font-size: 11px;
+	padding: 1px 8px;
+	border-radius: 999px;
+	flex: none;
+}
+.notify-history-kind-completed {
+	background: color-mix(in srgb, var(--accent) 16%, transparent);
+	color: var(--accent);
+}
+.notify-history-kind-failed {
+	background: color-mix(in srgb, var(--error) 14%, transparent);
+	color: var(--error);
+}
+.notify-history-title {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-sm);
+}
+.notify-history-at {
+	color: var(--text-faint);
+	font-size: 11px;
+	flex: none;
+}
+@media (prefers-reduced-motion: reduce) {
+	.heading-flash-overlay {
+		transition: none;
+	}
+}

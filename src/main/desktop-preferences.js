@@ -25,6 +25,11 @@ const DESKTOP_DEFAULTS = Object.freeze({
 	closeToTray: false,
 	notifyOnComplete: true,
 	launchAtLogin: false,
+	/* #439 第二十六轮 F2：通知免打扰时段（24h 制，跨零点用 start>end 表达）。
+	   免打扰期间系统通知静默（应用内 toast 不受影响）。 */
+	quietHoursEnabled: false,
+	quietStart: "22:00",
+	quietEnd: "08:00",
 });
 
 const DESKTOP_KEYS = Object.keys(DESKTOP_DEFAULTS);

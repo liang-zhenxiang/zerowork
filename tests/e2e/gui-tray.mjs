@@ -121,7 +121,9 @@ await h.check("设置里能打开「通用」并看到「桌面行为」三项�
 	for (const expected of ["关闭窗口时最小化到托盘", "完成任务时通知", "开机自启"]) {
 		assert.ok(titles.includes(expected), `缺少开关「${expected}」。现有：${titles.join(" / ")}`);
 	}
-	assert.equal(rows.length, 3, `应恰好三行开关，实际 ${rows.length} 行`);
+	/* #439 第二十六轮新增「通知免打扰时段」第四行——断言放宽为 ≥3，
+	   三个既有标题仍在（严格三行的时代已过，桌面行为组允许扩展）。 */
+	assert.ok(rows.length >= 3, `应至少三行开关，实际 ${rows.length} 行`);
 	assert.ok(
 		rows.every((row) => row.visible),
 		"有开关在 DOM 里但没渲染出来（getClientRects 为空）",
