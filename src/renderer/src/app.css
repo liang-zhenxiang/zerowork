@@ -15419,7 +15419,7 @@ select:focus-visible,
    下面留一整屏空白，像是页面没加载完。:has() 在 Electron 44 上可用。
    **必须排除「有统计块」的场景**：flex 容器会把 .data-overview 与空态卡
    拉成左右并排（#363 F10 要求数据区不管空不空都显示，两者是上下关系）。 */
-.app> main.settings .settings-body:has(> .state-empty):not(:has(> .data-overview)) {
+.app> main.settings .settings-body:has(> .state-empty):not(:has(> :is(.data-overview, .lib-summary))) {
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -15428,7 +15428,7 @@ select:focus-visible,
 
 /* 有统计块时：统计在上、空态卡在下方居中。空态卡自身的 max-width 与
    auto 左右外边距已经完成水平居中（见上面的 .state-empty 规则）。 */
-.app> main.settings .settings-body:has(> .data-overview) > .state-empty {
+.app> main.settings .settings-body:has(> :is(.data-overview, .lib-summary)) > .state-empty {
 	margin-top: var(--space-6);
 	align-self: center;
 }
@@ -20316,5 +20316,455 @@ html[data-sidebar-density='compact'] .space-group-header {
 	.turn-flash {
 		animation: none;
 		background: transparent;
+	}
+}
+
+/* ── 成果展厅（#423）：资料库的画廊 / 筛选 / 详情 ──────────────────────────
+   封面沿用 .case-cover 的既有语汇（纸片 + 分类色条 + 线条 / 柱子 / 版面），
+   .lib-cover 只改盒子几何与形状，不复制任何视觉值；类型色只取 --cat-1..6。 */
+
+/* 网格 / 列表做成共享圆角的分段控件（视觉上是一组，不是一个按钮旁边再放一个）。 */
+.lib-view-switch {
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	margin-right: var(--space-3);
+	padding: 2px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+}
+
+.lib-view-switch .mini-btn {
+	height: 24px;
+	padding: 0 var(--space-3);
+	border: 0;
+	border-radius: calc(var(--radius-sm) - 1px);
+	background: transparent;
+	font-size: var(--text-meta);
+}
+
+.lib-view-switch .mini-btn:hover:not(:disabled) {
+	background: var(--bg-hover);
+}
+
+.lib-view-switch .mini-btn.active,
+.lib-view-switch .mini-btn.active:hover:not(:disabled) {
+	background: var(--primary-active);
+	color: var(--primary-text);
+}
+
+/* 紧凑摘要：交付物与会话数是第一眼事实，片段 / 模板降为后面小字。 */
+.lib-summary {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: var(--space-2) var(--space-4);
+	margin: var(--space-3) 0 var(--space-4);
+}
+
+.lib-summary-main {
+	font-size: var(--text-body);
+	font-weight: 500;
+	color: var(--text);
+}
+
+.lib-summary-sub {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.lib-toolbar {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	margin-bottom: var(--space-5);
+}
+
+.lib-toolbar-row {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+
+.lib-toolbar-label {
+	flex: 0 0 auto;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 窄窗用下拉代替 chip 行（媒体查询在文件末尾的矮视口块旁）。 */
+.lib-type-select {
+	display: none;
+	align-items: center;
+	gap: var(--space-3);
+}
+
+/* 类型 chip：与 .ex-source-chip 同一套 chip 语汇（28px、--radius-sm、--bg-raised），
+   选中态统一到 --primary-active + --primary-text（DESIGN §2.1 / §7.6）。 */
+.lib-filter-chip {
+	display: inline-flex;
+	align-items: center;
+	height: 28px;
+	padding: var(--space-1) var(--space-4);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	box-sizing: border-box;
+	transition:
+		background var(--dur-fast) var(--ease-standard),
+		color var(--dur-fast) var(--ease-standard),
+		border-color var(--dur-fast) var(--ease-standard);
+}
+
+.lib-filter-chip:hover {
+	background: var(--bg-hover);
+}
+
+.lib-filter-chip.active,
+.lib-filter-chip.active:hover {
+	background: var(--primary-active);
+	border-color: var(--primary-active);
+	color: var(--primary-text);
+	font-weight: 500;
+}
+
+/* 文件名搜索：复用 .ss-field 的框体（边框 / 聚焦环 / 清除键），只收窄成工具行高度。 */
+.lib-search {
+	height: 34px;
+	min-width: 180px;
+	max-width: 280px;
+	padding: 0 var(--space-3);
+	background: var(--bg);
+}
+
+.lib-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+	gap: var(--space-4);
+}
+
+/* 整卡是按钮：封面在上，文件名 / 时间 / 来源会话在下。 */
+.lib-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding: var(--space-4);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	background: var(--bg);
+	text-align: left;
+	transition: background var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
+}
+
+.lib-card:hover {
+	background: var(--bg-hover);
+}
+
+.lib-card:active {
+	transform: scale(0.98);
+}
+
+/* 失效只降封面：文件名 / meta / 徽标保持不透明，信息仍要读得出。
+   左侧 3px danger 混色条是**第二通道**（不是只看颜色 —— 徽标与文字各自也说了）。 */
+.lib-card-missed {
+	border-left: 3px solid color-mix(in srgb, var(--danger) 62%, var(--border));
+}
+
+.lib-card-missed .lib-cover {
+	filter: grayscale(0.85) opacity(0.55);
+}
+
+.lib-card-title {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	min-width: 0;
+}
+
+.lib-card-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-body);
+	font-weight: 600;
+	color: var(--text);
+}
+
+.lib-card-meta,
+.lib-card-source {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 封面几何：卡片定高 96px；纸片形状按类型分家（竖版 / 横版 / 柱状）。 */
+.lib-cover {
+	aspect-ratio: auto;
+	height: 96px;
+	border-radius: var(--radius-md);
+}
+
+.lib-cover .case-cover-sheet {
+	width: 58%;
+	height: 66%;
+	padding: 6px 8px;
+	gap: 4px;
+}
+
+.lib-cover-portrait .case-cover-sheet {
+	width: 44%;
+	height: 82%;
+}
+
+.lib-cover-landscape .case-cover-sheet {
+	width: 62%;
+	height: 62%;
+}
+
+/* 类型色条比案例封面略厚一档：96px 高的卡片上 3px 几乎看不见。 */
+.lib-cover .case-cover-bar-top {
+	height: 4px;
+}
+
+/* 内容线略提亮一档：暗色纸片上 0.16 的灰线读起来像「纸被挖了洞」。 */
+.lib-cover .case-cover-line {
+	opacity: 0.22;
+}
+
+/* 暗色纸片：抬到 --surface-2 并给 1px 淡描边，让「纸」从背景里浮出来。 */
+[data-theme="dark"] .lib-cover .case-cover-sheet {
+	background: var(--surface-2);
+	border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+/* 封面右上角：扩展名角标（MD / PDF / 链接）。 */
+.lib-cover-badge {
+	position: absolute;
+	top: var(--space-2);
+	right: var(--space-2);
+	z-index: 1;
+	padding: 1px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	background: var(--bg);
+	color: var(--text-secondary);
+	font-size: 10px;
+	line-height: 14px;
+	letter-spacing: 0.03em;
+}
+
+/* 封面左下角：类型标签（研究笔记 / 表格 / 幻灯片 …）。 */
+.lib-card-type {
+	position: absolute;
+	left: var(--space-2);
+	bottom: var(--space-2);
+	z-index: 1;
+	padding: 1px var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: 5px;
+	background: var(--bg);
+	color: var(--text-secondary);
+	font-size: 10px;
+	line-height: 14px;
+}
+
+/* 列表行：整行可点开详情。行内按钮自己 stopPropagation，行首是微型类型色块。 */
+.lib-row {
+	cursor: pointer;
+}
+
+.lib-row:focus-visible {
+	outline: 2px solid var(--text-secondary);
+	outline-offset: 2px;
+}
+
+.lib-row-type {
+	position: relative;
+	flex: 0 0 auto;
+	width: 30px;
+	height: 30px;
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--lib-accent) 16%, var(--bg-raised));
+}
+
+.lib-row-type::before {
+	content: "";
+	position: absolute;
+	left: 6px;
+	right: 6px;
+	top: 9px;
+	height: 3px;
+	border-radius: 2px;
+	background: var(--lib-accent);
+}
+
+.lib-row-type::after {
+	content: "";
+	position: absolute;
+	left: 6px;
+	right: 14px;
+	top: 16px;
+	height: 2px;
+	border-radius: 1px;
+	background: var(--lib-accent);
+	opacity: 0.45;
+}
+
+/* 详情：弹窗外壳复用 .ex-modal（背板 / 圆角 / 阴影 / 入场）。
+   内容区独立滚动，动作条固定在底部 —— 详情再长也滚不掉「继续修改」。 */
+.lib-detail {
+	max-width: 640px;
+	padding: 0;
+	gap: 0;
+	overflow: hidden;
+}
+
+.lib-detail-scroll {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	min-height: 0;
+	padding: var(--space-6);
+	overflow-y: auto;
+}
+
+.lib-detail-footer {
+	display: flex;
+	flex: 0 0 auto;
+	flex-direction: column;
+	gap: var(--space-3);
+	padding: var(--space-4) var(--space-6);
+	border-top: 1px solid var(--border);
+	background: var(--bg);
+}
+
+.lib-detail-cover {
+	aspect-ratio: auto;
+	height: 96px;
+	border-radius: var(--radius-md);
+}
+
+.lib-detail-cover .case-cover-sheet {
+	width: 34%;
+	height: 74%;
+	padding: 8px 10px;
+	gap: 5px;
+}
+
+.lib-detail-cover-missed {
+	filter: grayscale(0.85) opacity(0.55);
+}
+
+.lib-detail-name {
+	margin: 0;
+	font-size: var(--text-emphasis);
+	font-weight: 600;
+	overflow-wrap: anywhere;
+}
+
+/* 副标题是「来源工作区名 / 相对路径」：单行省略，中文不在词中断行；
+   完整路径在 title 里，鼠标悬停可查。 */
+.lib-detail-path {
+	display: block;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	word-break: normal;
+	overflow-wrap: normal;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.lib-detail-meta {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+	font-size: var(--text-list);
+	color: var(--text-secondary);
+}
+
+.lib-detail-section {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+
+.lib-detail-label {
+	margin: 0;
+	font-size: var(--text-meta);
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+.lib-detail-sessions {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+
+.lib-detail-session {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-4);
+	font-size: var(--text-list);
+}
+
+.lib-detail-session-title {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.lib-detail-actions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+}
+
+.lib-detail-note {
+	margin: 0;
+	font-size: var(--text-meta);
+	line-height: 1.6;
+	color: var(--text-secondary);
+}
+
+/* 窄窗：11 个类型 chip 会换两三行，改用同高下拉。 */
+@media (max-width: 900px) {
+	.lib-type-chips {
+		display: none;
+	}
+
+	.lib-type-select {
+		display: flex;
+	}
+}
+
+/* 矮视口：先把卡片与封面收一档，筛选行照常换行。 */
+@media (max-height: 760px) {
+	.lib-cover {
+		height: 80px;
+	}
+
+	.lib-detail-cover {
+		height: 96px;
+	}
+
+	.lib-grid {
+		gap: var(--space-3);
 	}
 }
