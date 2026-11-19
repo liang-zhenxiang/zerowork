@@ -4,7 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, delimiter, basename, extname } from "node:path";
 import { URL } from "node:url";
-import { app, Menu, BrowserWindow, session, ipcMain, shell, utilityProcess, globalShortcut, dialog, nativeTheme } from "electron";
+import { app, Menu, BrowserWindow, session, ipcMain, shell, utilityProcess, globalShortcut, dialog, nativeTheme, Tray, Notification, nativeImage } from "electron";
 import {
   DEFAULT_GLOBAL_SHORTCUT,
   INVOKE,
@@ -13,6 +13,8 @@ import {
   OFFICE_EXTENSIONS,
   docKindOf,
 } from "../shared/ipc.js";
+import { DESKTOP_DEFAULTS, readDesktopPreferences, writeDesktopPreferences } from "./desktop-preferences.js";
+import { addRunning, removeRunning, runningCount, shouldHideOnClose, shouldNotifyCompletion } from "./desktop-behavior.js";
 /**
  * 应用的唯一标识。**必须与 `electron-builder.yml` 的 `appId` 完全一致** ——
  * 那个值是安装器的身份（macOS 的 CFBundleIdentifier、Windows 的 AUMID、
@@ -140,6 +142,9 @@ class GlobalToggleShortcutController {
 const MAIN_HANDLED = [
   INVOKE.daemonStatus,
   INVOKE.globalShortcutStatus,
+  // 桌面行为偏好由 main 独占读写（desktop.json），daemon 不知道也不该知道。
+  INVOKE.desktopPrefsGet,
+  INVOKE.desktopPrefsSet,
   /*
    * daemon:shutdown 只由 main 自己在 before-quit 里调（`callDaemon`），
    * **不注册给渲染层**：它在 MAIN_HANDLED 里是为了从批量转发表跳过，
@@ -194,6 +199,212 @@ let toggleShortcut;
 const pending = /* @__PURE__ */ new Map();
 function send(channel, payload) {
   if (window?.isDestroyed() === false) window.webContents.send(channel, payload);
+}
+/*
+ * ── 托盘值守与桌面偏好（#422）──────────────────────────────────────
+ * 三项用户可选的桌面行为：
+ *   · closeToTray      —— 关闭窗口只隐藏到托盘，daemon 与会话继续；
+ *   · notifyOnComplete —— 一轮结束且窗口不在前台时发系统通知；
+ *   · launchAtLogin    —— 登录系统时自动启动。
+ *
+ * 两条硬性质：
+ *   · **退出链路一字不改**。托盘「退出」只调 app.quit()，仍然经过
+ *     before-quit 的 daemonShutdown + 2.5s 兜底 + clean 标记 —— 关窗拦截
+ *     靠 shouldHideOnClose 的 quitting 参数给退出让路，不新增第二套闸。
+ *   · **托盘图标内嵌 data URL**，不新增打包资源（build/ 不进安装包）。
+ *     图标是 16×16 PNG：macOS 用黑色模板图（系统按菜单栏明暗自动着色），
+ *     其余平台用白色字形 + 深色描边（浅色任务栏上也能看清）。
+ */
+const TRAY_ICON_MAC = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAIklEQVR42mNgGJbgPwFMewMIGTyqmZ6ayYrG/7RMB4MUAACpTSzUq6KjCQAAAABJRU5ErkJggg==";
+const TRAY_ICON_DEFAULT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAOElEQVR42mNgGFRAXtP8PzEYrwGEAO0NwIWJMgCXgciaiTZgmGkmKh2gayY5GonRTNAAipPygAAABOoP4P6E9qIAAAAASUVORK5CYII=";
+let desktopPrefs = { ...DESKTOP_DEFAULTS };
+let tray;
+let notificationUnsupportedWarned = false;
+/** 正在运行的 run（按 runId 去重）。托盘菜单只显示数量，不显示会话内容。 */
+const runningRuns = new Set();
+
+/** 完整支持托盘与登录项的平台范围（与 README 的「平台支持」一致）。 */
+function desktopPlatformSupported() {
+  return process.platform === "win32" || process.platform === "darwin";
+}
+
+/**
+ * 实际生效的「关窗到托盘」：平台支持**且**用户开着。
+ * 手改 desktop.json 在 Linux 上打开它也不会生效 —— 与设置页的禁用口径一致，
+ * 不让文件里的值制造一个平台不支持的运行态。
+ */
+function closeToTrayEnabled() {
+  return desktopPlatformSupported() && desktopPrefs.closeToTray === true;
+}
+
+function trayIcon() {
+  const image = nativeImage.createFromDataURL(process.platform === "darwin" ? TRAY_ICON_MAC : TRAY_ICON_DEFAULT);
+  // 模板图只用 alpha 通道：黑色 + alpha 由系统染成菜单栏当前的前景色。
+  if (process.platform === "darwin") image.setTemplateImage(true);
+  return image;
+}
+
+/** 统一唤起窗口：隐藏 → show、最小化 → restore、已销毁 → 重建。 */
+function showWindow() {
+  if (window === void 0 || window.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  if (!window.isVisible()) window.show();
+  window.focus();
+}
+
+/** 托盘菜单的「打开自动化」：唤起窗口并让渲染层切到自动化视图。 */
+function openAutomationsFromTray() {
+  showWindow();
+  send(PUSH.appLaunch, { kind: "open-view", view: "automations" });
+}
+
+function refreshTrayMenu() {
+  if (tray === void 0) return;
+  const count = runningCount(runningRuns);
+  const template = [
+    { label: "显示 ZeroWork", click: () => showWindow() },
+    ...count > 0 ? [{ label: `运行中 ${count} 个任务`, enabled: false }] : [],
+    { label: "打开自动化", click: () => openAutomationsFromTray() },
+    { type: "separator" },
+    // 退出只触发 app.quit()：收尾仍走 before-quit 的既有链路（不新增闸门）。
+    { label: "退出 ZeroWork", click: () => app.quit() }
+  ];
+  tray.setContextMenu(Menu.buildFromTemplate(template));
+}
+
+/**
+ * 建托盘（幂等）。失败时**不吞**：记 warning 与事件日志，应用照常运行；
+ * 设置页会通过 `traySupported` / 实际行为如实反映（e2e 也不依赖托盘对象）。
+ */
+function ensureTray() {
+  if (tray !== void 0) return tray;
+  try {
+    tray = new Tray(trayIcon());
+    tray.setToolTip("ZeroWork");
+    // Windows / Linux：左键点击直接唤起窗口（右键才是菜单）。
+    // macOS 的 setContextMenu 会让左键直接弹菜单，再绑 click 会显得多余。
+    if (process.platform !== "darwin") tray.on("click", () => showWindow());
+    refreshTrayMenu();
+    return tray;
+  } catch (error) {
+    tray = void 0;
+    console.warn("[main] 创建托盘图标失败，关闭窗口到托盘不可用:", error);
+    appendMainEventLog({
+      kind: "tray",
+      event: "create_failed",
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return void 0;
+  }
+}
+
+function destroyTray() {
+  if (tray === void 0) return;
+  try {
+    tray.destroy();
+  } catch {
+    // 已经销毁 / 系统正在退出：没有需要善后的东西。
+  }
+  tray = void 0;
+}
+
+/**
+ * 应用开机自启。平台不在支持范围（Linux）时返回 false —— 调用方与设置页
+ * 都据此说明「不支持」，而不是假装设置成功。
+ */
+function applyLoginItem(enabled) {
+  if (!desktopPlatformSupported()) return false;
+  try {
+    app.setLoginItemSettings({ openAtLogin: enabled });
+    return true;
+  } catch (error) {
+    console.warn("[main] 设置开机自启失败:", error);
+    appendMainEventLog({
+      kind: "login_item",
+      event: "apply_failed",
+      enabled,
+      message: error instanceof Error ? error.message : String(error)
+    });
+    return false;
+  }
+}
+
+/** 设置页读取的能力快照：不支持的能力要能被界面如实说明。 */
+function desktopPrefsSnapshot() {
+  return {
+    prefs: desktopPrefs,
+    notificationsSupported: Notification.isSupported(),
+    loginItemSupported: desktopPlatformSupported(),
+    traySupported: desktopPlatformSupported()
+  };
+}
+
+/** 设置变更后立即生效：托盘的存在与否跟着 closeToTray，登录项跟着 launchAtLogin。 */
+function applyDesktopPreferences() {
+  if (closeToTrayEnabled()) ensureTray();
+  else destroyTray();
+  applyLoginItem(desktopPrefs.launchAtLogin);
+}
+
+/**
+ * 一轮结束时的系统通知。
+ *
+ * **不发会话标题 / 正文**：标题在 daemon 的会话文件里，为一条通知读会话正文
+ * 不划算，也不该让主进程碰这些内容。通知只说明「完成 / 失败」，点击后用
+ * sessionId 回到对应会话（窗口由主进程先显示并聚焦）。
+ */
+function notifyCompletion(event, sessionId) {
+  const verdict = shouldNotifyCompletion({
+    enabled: desktopPrefs.notifyOnComplete,
+    focused: window !== void 0 && window.isDestroyed() === false && window.isFocused(),
+    eventType: event.type,
+    outcome: event.outcome
+  });
+  if (verdict === null) return;
+  if (!Notification.isSupported()) {
+    if (!notificationUnsupportedWarned) {
+      notificationUnsupportedWarned = true;
+      console.warn("[main] 当前系统不支持系统通知，任务完成提醒不会送达（设置页会如实说明）");
+    }
+    return;
+  }
+  try {
+    const notification = new Notification({
+      title: "ZeroWork",
+      // 正文要与「点击回到对应会话」的承诺一致：告诉用户这条通知可以点。
+      // 仍不带会话标题 / 正文（旁路不读会话文件）。
+      body: verdict === "completed" ? "任务已完成 · 点击查看" : "任务执行失败 · 点击查看"
+    });
+    notification.on("click", () => {
+      showWindow();
+      send(PUSH.notificationClick, { sessionId });
+    });
+    notification.show();
+  } catch (error) {
+    console.warn("[main] 发送系统通知失败:", error);
+  }
+}
+
+/**
+ * daemon 推送的旁路：只统计运行数与决定是否通知，**原样转发不变**。
+ * 会话正文完全不经过这里 —— 事件里只有 runId / outcome。
+ */
+function trackSessionEventPush(channel, payload) {
+  if (channel !== PUSH.sessionEvent) return;
+  const event = payload?.event;
+  const sessionId = payload?.sessionId;
+  if (event === void 0 || typeof sessionId !== "string") return;
+  if (event.type === "run_started") {
+    if (addRunning(runningRuns, event.runId)) refreshTrayMenu();
+    return;
+  }
+  if (event.type === "run_finished" || event.type === "run_error") {
+    if (removeRunning(runningRuns, event.runId)) refreshTrayMenu();
+    notifyCompletion(event, sessionId);
+  }
 }
 /*
  * ── 网络代理（spec: proxy-settings）─────────────────────────────────
@@ -349,6 +560,8 @@ function startDaemon() {
         send(PUSH.daemonReady, void 0);
         return;
       case "push":
+        // #422：旁路统计运行数 / 决定是否发通知；事件仍原样转发给渲染层。
+        trackSessionEventPush(frame.channel, frame.payload);
         send(frame.channel, frame.payload);
         return;
       case "response": {
@@ -367,6 +580,12 @@ function startDaemon() {
     daemonStatus = { kind: "down", reason };
     for (const [, slot] of pending) slot.reject(new Error(reason));
     pending.clear();
+    // daemon 退出后那些 run 不会再有终态事件：清空运行计数，否则托盘会一直
+    // 显示一个早已不存在的「运行中 N 个任务」。
+    if (runningRuns.size > 0) {
+      runningRuns.clear();
+      refreshTrayMenu();
+    }
     send(PUSH.daemonDown, { reason });
   });
 }
@@ -476,6 +695,19 @@ function createWindow() {
       sandbox: false
       // preload 需要 require 走 IPC；不开 nodeIntegration 已足够
     }
+  });
+  /*
+   * #422：关闭窗口到托盘。
+   * 只拦「用户关闭」——`quitStarted` 为真时不拦，否则托盘「退出」与系统退出
+   * 会被自己挡住（shouldHideOnClose 的 quitting 参数就是为这条准备的）。
+   * 关闭设置后这里恒放行，行为回到平台默认（Windows / Linux 退出，
+   * macOS 关窗留进程 —— 原有语义不动）。
+   */
+  window.on("close", (event) => {
+    if (!shouldHideOnClose({ closeToTray: closeToTrayEnabled(), quitting: quitStarted })) return;
+    event.preventDefault();
+    window?.hide();
+    ensureTray();
   });
   window.once("ready-to-show", () => window?.show());
   const openExternally = (url) => {
@@ -593,6 +825,17 @@ function registerIpc() {
   }
   ipcMain.handle(INVOKE.daemonStatus, () => daemonStatus);
   ipcMain.handle(INVOKE.globalShortcutStatus, () => globalShortcutStatus);
+  /*
+   * #422 桌面行为偏好：读写全部在 main（desktop.json 是 main 独占的）。
+   * 写入后立即生效（托盘 / 登录项），再把完整状态与能力标志回给渲染层 ——
+   * 设置页不自己猜「这项能不能用」。
+   */
+  ipcMain.handle(INVOKE.desktopPrefsGet, () => desktopPrefsSnapshot());
+  ipcMain.handle(INVOKE.desktopPrefsSet, (_event, patch) => {
+    desktopPrefs = writeDesktopPreferences(patch ?? {});
+    applyDesktopPreferences();
+    return desktopPrefsSnapshot();
+  });
   /* #342 第十七轮 F6：上次退出是否干净。查询即消费（翻转 clean 标记），
      横幅在本次会话内只弹一次。 */
   ipcMain.handle(INVOKE.lastExit, () => {
@@ -765,8 +1008,8 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on("second-instance", (_event, argv) => {
     if (window === void 0) return;
-    if (window.isMinimized()) window.restore();
-    window.focus();
+    // #422：窗口可能正藏在托盘里，showWindow 同时覆盖「最小化 / 隐藏 / 已销毁」。
+    showWindow();
     /* round15 F5：`--new "提问"` 直开新任务。解析第二个实例的 argv，把提问转发渲染层。 */
     const marker = argv.indexOf("--new");
     if (marker !== -1 && typeof argv[marker + 1] === "string" && argv[marker + 1] !== "") {
@@ -780,6 +1023,9 @@ if (!app.requestSingleInstanceLock()) {
     installCsp(process.env["ELECTRON_RENDERER_URL"] !== void 0);
     // 建窗口前定主题：渲染层首帧的媒体查询取值由此决定（见 applyInitialTheme 注释）。
     applyInitialTheme();
+    // #422：桌面行为偏好也必须在建窗口前读好 —— close 处理器一挂上就要用
+    // closeToTray；读失败按默认值，不阻塞启动。
+    desktopPrefs = readDesktopPreferences();
     // 代理先于 daemon 启动应用：daemonEnv() 会把解析结果注入内核，
     // 晚了就只能等下一次重启才生效。
     await applyInitialProxy();
@@ -801,6 +1047,13 @@ if (!app.requestSingleInstanceLock()) {
       Menu.buildFromTemplate(appMenuTemplate(process.platform === "darwin", () => app.showAboutPanel()))
     );
     createWindow();
+    /*
+     * #422：窗口建好后应用托盘与登录项。
+     * 托盘先建还是窗口先建都可以，但「显示 ZeroWork」在窗口存在时才有意义，
+     * 所以放在 createWindow 之后；开机自启每次启动都按落盘值对齐一次。
+     */
+    if (closeToTrayEnabled()) ensureTray();
+    applyLoginItem(desktopPrefs.launchAtLogin);
     // 更新器：窗口就绪后初始化（事件转发需要 webContents；dev 环境内部自守卫）。
     initUpdates(window);
     // 窗口控件符号色随主题（overlay 底全透明不变，见 createWindow 注释）。
@@ -873,5 +1126,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   app.on("will-quit", () => {
     toggleShortcut?.dispose();
+    // 托盘是常驻资源：进程退出前显式销毁，避免 Windows 上留下「幽灵图标」。
+    destroyTray();
   });
 }

@@ -18268,14 +18268,6 @@ function HomeView({
   const [statsFailed, setStatsFailed] = reactExports.useState(false);
   const [statsRetryTick, setStatsRetryTick] = reactExports.useState(0);
   reactExports.useEffect(() => {
-    const off = window.kami.onAppLaunch?.((payload) => {
-      if (payload?.kind !== "new-task" || typeof payload.text !== "string" || payload.text === "") return;
-      setView("home");
-      setPendingPrefill(payload.text);
-    });
-    return () => off?.();
-  }, []);
-  reactExports.useEffect(() => {
     const onStatsRetry = () => setStatsRetryTick((tick) => tick + 1);
     window.addEventListener("zw:stats-retry", onStatsRetry);
     return () => window.removeEventListener("zw:stats-retry", onStatsRetry);
@@ -67453,6 +67445,126 @@ function PermissionSection({ busy }) {
   ] });
 }
 /*
+ * 桌面行为（设置 → 通用 → 权限 / Hooks 之后，#422）。
+ *
+ * 三项开关读写的是 main 独占的 desktop.json，**不是** preferences.json ——
+ * 后者是 daemon 的唯一写入方，两个进程写同一份文件会互相覆盖。
+ *
+ * 平台 / 系统能力不足时（Linux 没有完整支持、系统不支持通知），开关**保留可聚焦**
+ * 并标 `aria-disabled`，用 `aria-describedby` 把原因读给读屏用户听 —— 直接
+ * `disabled` 会把控件移出 Tab 序列，键盘与读屏用户只知道「这里点不了」，
+ * 却永远听不到为什么。视觉上仍灰化。切换是乐观更新：先翻 UI，失败回滚并 toast。
+ */
+function DesktopSection({ busy }) {
+  const [info2, setInfo] = reactExports.useState(void 0);
+  const [error, setError] = reactExports.useState(void 0);
+  /* 按 key 记「正在保存」：只禁用那一行，其余开关仍可立即操作。 */
+  const [pending, setPending] = reactExports.useState(() => new Set());
+  const refresh = reactExports.useCallback(async () => {
+    try {
+      setInfo(await window.kami.getDesktopPrefs());
+      setError(void 0);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void refresh();
+  }, [refresh]);
+  const toast = (type, text) => window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type, text }] }));
+  const change = (key, next) => {
+    const prev = info2;
+    if (prev === void 0 || pending.has(key)) return;
+    setInfo({ ...prev, prefs: { ...prev.prefs, [key]: next } });
+    setPending((current) => new Set(current).add(key));
+    setError(void 0);
+    void window.kami.setDesktopPrefs({ [key]: next }).then((updated) => {
+      // 即时落盘是静默的：成功不弹 toast（开关本身就是反馈）。
+      setInfo(updated);
+    }).catch((e) => {
+      setInfo(prev);
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toast("error", `保存失败：${message}`);
+    }).finally(() => {
+      setPending((current) => {
+        const nextPending = new Set(current);
+        nextPending.delete(key);
+        return nextPending;
+      });
+    });
+  };
+  const toggleRow = (key, label, note, supported, unsupportedNote) => {
+    const checked = info2.prefs[key] === true;
+    const rowPending = pending.has(key);
+    const noteId = `desk-note-${key}`;
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: `desktop-toggle-row${supported ? "" : " is-disabled"}`, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "desktop-toggle-text", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "desktop-toggle-head", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "desktop-toggle-title", children: label }),
+          !supported && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-tag", children: "不支持" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "desktop-toggle-note", id: noteId, children: supported ? note : unsupportedNote })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "skill-switch", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "input",
+          {
+            type: "checkbox",
+            checked,
+            disabled: busy || rowPending,
+            "aria-label": label,
+            "aria-describedby": noteId,
+            "aria-disabled": supported ? void 0 : "true",
+            onChange: (e) => {
+              // 不支持的行保留可聚焦（读屏能读到原因），但点击不改变状态。
+              // 受控组件在「不更新 state」时浏览器仍会先翻转 DOM —— 必须显式还原，
+              // 否则界面显示成已开启、而 desktop.json 里并没有变。
+              if (!supported) {
+                e.currentTarget.checked = checked;
+                return;
+              }
+              change(key, e.currentTarget.checked);
+            }
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "skill-switch-track", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "skill-switch-thumb" }) })
+      ] })
+    ] }, key);
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "桌面行为" }) }),
+    info2 === void 0 ? error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void refresh() }) : /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取桌面行为设置…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-list", children: [
+        toggleRow(
+          "closeToTray",
+          "关闭窗口时最小化到托盘",
+          "窗口隐藏，程序仍在后台运行；要真正退出，请用托盘菜单的「退出」（会完整收尾）",
+          info2.traySupported,
+          "当前系统不支持托盘（完整支持 Windows 与 macOS）"
+        ),
+        toggleRow(
+          "notifyOnComplete",
+          "完成任务时通知",
+          "窗口不在前台时发系统通知，点击回到对应会话",
+          info2.notificationsSupported,
+          "当前系统不支持系统通知"
+        ),
+        toggleRow(
+          "launchAtLogin",
+          "开机自启",
+          "登录后自动启动并打开主窗口",
+          info2.loginItemSupported,
+          "当前系统不支持开机自启（完整支持 Windows 与 macOS）"
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "托盘「退出」与系统退出是同一条链路：执行会话结束 hooks 并把数据落盘。" })
+    ] })
+  ] });
+}
+/*
  * 确定性 hooks（设置 → 通用 → 权限之后）。
  *
  * 与「开局模板」同一套交互（列表 + 内联编辑 + 二次确认删除），因为它要解决的
@@ -68018,6 +68130,8 @@ function GeneralSection({ busy }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx(PermissionSection, { busy }),
     /* Hooks 紧跟权限：同属「边界」心智模型（PRD 决策：不新开一级导航）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(HooksSection, { busy }),
+    /* #422：托盘值守 / 完成通知 / 开机自启 —— 权限与 hooks 之后的「这台机器怎么运行」。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx(DesktopSection, { busy }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(TeamSection, { busy })
   ] });
 }
@@ -77512,6 +77626,12 @@ function CompareView({
     ] }) })
   ] });
 }
+/*
+ * 主进程经 `app:launch` 允许切到的视图白名单。
+ * 托盘菜单只发 automations，但**不信任载荷**：任意字符串不进 state ——
+ * 「只认已知 id」比「主进程不会乱发」可靠得多。
+ */
+const APP_LAUNCH_VIEWS = new Set(["automations"]);
 function App() {
   const [link2, setLink] = reactExports.useState({ kind: "connecting" });
   const [conversation, dispatch] = reactExports.useReducer(
@@ -78609,6 +78729,41 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [resyncSnapshot, restoreFromBucket]
   );
+  /*
+   * #422：两条从主进程进来的「跳转请求」都在 App 顶层处理 —— 它们要切的是
+   * 整个视图，而不是某个子视图的局部状态（放在 HomeView 里连 setView 都够不着）。
+   *
+   * · onAppLaunch：second-instance 的 `--new "提问"`（旧路径）与托盘菜单的
+   *   `{ kind: "open-view", view }`（白名单见 APP_LAUNCH_VIEWS）。
+   * · onNotificationClick：完成通知被点击。窗口已由主进程显示并聚焦，这里只按
+   *   id/path 找到任务并 resumeTask（挂在 resumeTask 之后定义，闭包里拿的是同一个）。
+   */
+  reactExports.useEffect(() => {
+    const offLaunch = window.kami.onAppLaunch?.((payload) => {
+      if (payload?.kind === "new-task" && typeof payload.text === "string" && payload.text !== "") {
+        setView("home");
+        setPendingPrefill(payload.text);
+        return;
+      }
+      if (payload?.kind === "open-view" && APP_LAUNCH_VIEWS.has(payload.view)) {
+        setView(payload.view);
+      }
+    });
+    const offNotify = window.kami.onNotificationClick?.((payload) => {
+      const sessionId = payload?.sessionId;
+      if (typeof sessionId !== "string" || sessionId === "") return;
+      void window.kami.listSessions().then((sessions) => {
+        const target = sessions.find((item) => item.id === sessionId || item.path === sessionId);
+        if (target !== void 0) resumeTask(target.path);
+      }).catch(() => {
+        // 列表拉不到就停在被主进程显示出来的窗口上 —— 通知本身已经送达过了。
+      });
+    });
+    return () => {
+      offLaunch?.();
+      offNotify?.();
+    };
+  }, [resumeTask]);
   /*
    * 资料库的「预览」（design.md §2）：先切到**来源会话**，当前 cwd 随之变成来源 cwd，
    * 再打开右侧预览面板——预览服务（previewBaseUrl + resolveWithinRoot）与文本读取

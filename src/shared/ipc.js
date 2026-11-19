@@ -707,6 +707,18 @@ const INVOKE = {
    */
   globalShortcutStatus: "app:global-shortcut-status",
   /**
+   * 桌面行为偏好（关闭窗口到托盘 / 完成任务时通知 / 开机自启，#422）。
+   * **由 main 本地应答**，读写的也是 main 独占的 `desktop.json` ——
+   * 不转发 daemon：daemon 是 `preferences.json` 的唯一写入方，两份配置
+   * 刻意分开，避免两个进程抢同一个文件（见 `src/main/desktop-preferences.js`）。
+   *
+   * `desktopPrefsGet` 同时返回能力标志（`notificationsSupported` /
+   * `loginItemSupported` / `traySupported`），设置页据此**禁用并说明**，
+   * 而不是让开关看起来能用、点了没反应。
+   */
+  desktopPrefsGet: "desktop:prefs-get",
+  desktopPrefsSet: "desktop:prefs-set",
+  /**
    * 查询 docx 引擎 venv 的四态状态（诊断页状态行）。
    * 只探测不安装 —— 诊断页不该有环境副作用；安装是**用户在设置页点「安装/重置」**的事
    *（core/runtimes/python.ts 的 installPythonRuntime；探测与安装/发布都走托管运行时内核）。
@@ -906,6 +918,12 @@ const PUSH = {
   uiRequest: "ui:request",
   /** 主进程 → 渲染层：second-instance 携带的启动参数（如 --new "提问"）。 */
   appLaunch: "app:launch",
+  /**
+   * 主进程 → 渲染层：用户点了「任务完成」的系统通知（#422）。
+   * payload 为 `{ sessionId }` —— **不含会话标题或正文**（主进程旁路不读会话
+   * 文件）。窗口此时已由主进程显示并聚焦，渲染层只需按 id/path 找到任务并恢复。
+   */
+  notificationClick: "desktop:notification-click",
   /** 权限审批请求，需要用 INVOKE.permissionResponse 应答。 */
   permissionRequest: "permission:request",
   /** 结构化提问请求（questionnaire 工具），需要用 INVOKE.questionnaireResponse 应答。 */

@@ -7952,6 +7952,59 @@ textarea:focus-visible {
 	background: var(--bg-sidebar);
 }
 
+/* 设置 → 通用 → 桌面行为（#422）：三行开关。整行是 <label>，点哪儿都能切换。
+   容器沿用 .provider-list 的边框与圆角；行内是「标题 + 说明」两行文字 + 右侧开关。
+   与 .provider-main 的区别：说明要**整句可读**（尤其「当前系统不支持…」那一句），
+   所以不给它 nowrap + ellipsis —— 被截断的正好是最需要看的那句话。 */
+.desktop-toggle-row {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-3) var(--space-4);
+	border-bottom: 1px solid var(--border);
+	cursor: pointer;
+}
+
+.desktop-toggle-row:last-child {
+	border-bottom: 0;
+}
+
+.desktop-toggle-row:not(.is-disabled):hover {
+	background: var(--bg-sidebar);
+}
+
+/* 平台 / 系统不支持：保留可聚焦（读屏要能读到原因），视觉灰化、不装成可点。 */
+.desktop-toggle-row.is-disabled {
+	cursor: default;
+}
+
+.desktop-toggle-row.is-disabled .skill-switch-track {
+	opacity: 0.5;
+}
+
+.desktop-toggle-text {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	min-width: 0;
+}
+
+.desktop-toggle-head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+.desktop-toggle-title {
+	font-size: var(--text-list);
+	font-weight: 500;
+}
+
+.desktop-toggle-note {
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
 /* 但「本机模型服务」区（设置 → 模型）的行**不是**跳转面：那一行只有右侧按钮是
    动作，挂上行 hover 底会让人去点行本身。上面那条是后代选择器，新区块一旦也用
    .provider-list 就会自动命中 —— 显式关掉。属性选择器（不是类名）：0 个新视觉值。
