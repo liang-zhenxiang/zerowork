@@ -556,6 +556,12 @@ const INVOKE = {
    */
   globalShortcutStatus: "app:global-shortcut-status",
   /**
+   * 桌面行为偏好（关闭窗口到托盘 / 完成任务时通知 / 开机自启，#422）。
+   * main 本地应答，读写 main 独占的 desktop.json（与 preferences.json 分开）。
+   */
+  desktopPrefsGet: "desktop:prefs-get",
+  desktopPrefsSet: "desktop:prefs-set",
+  /**
    * 查询 docx 引擎 venv 的四态状态（诊断页状态行）。
    * 只探测不安装 —— 诊断页不该有环境副作用；安装是**用户在设置页点「安装/重置」**的事
    *（core/runtimes/python.ts 的 installPythonRuntime；探测与安装/发布都走托管运行时内核）。
@@ -681,6 +687,10 @@ const PUSH = {
   taskListChanged: "session:list-changed",
   /** daemon 请求 UI 交互，需要 renderer 用 INVOKE.uiResponse 应答。 */
   uiRequest: "ui:request",
+  /** 主进程 → 渲染层：second-instance 启动参数（--new "提问" / 托盘「打开自动化」）。 */
+  appLaunch: "app:launch",
+  /** 主进程 → 渲染层：用户点了完成通知（payload `{ sessionId }`，#422）。 */
+  notificationClick: "desktop:notification-click",
   /** 权限审批请求，需要用 INVOKE.permissionResponse 应答。 */
   permissionRequest: "permission:request",
   /** 结构化提问请求（questionnaire 工具），需要用 INVOKE.questionnaireResponse 应答。 */
@@ -888,6 +898,9 @@ const bridge = {
   searchSessions: (query, options) => ipcRenderer.invoke(INVOKE.sessionSearch, query, options),
   runLedger: (sessionId) => ipcRenderer.invoke(INVOKE.runLedger, sessionId),
   globalShortcutStatus: () => ipcRenderer.invoke(INVOKE.globalShortcutStatus),
+  /** #422：桌面行为偏好（main 本地应答）。返回值含能力标志，设置页据此禁用开关。 */
+  getDesktopPrefs: () => ipcRenderer.invoke(INVOKE.desktopPrefsGet),
+  setDesktopPrefs: (patch) => ipcRenderer.invoke(INVOKE.desktopPrefsSet, patch),
   docxEnvStatus: () => ipcRenderer.invoke(INVOKE.docxEnvStatus),
   auditList: (category) => ipcRenderer.invoke(INVOKE.auditList, category),
   auditClear: () => ipcRenderer.invoke(INVOKE.auditClear),
@@ -929,8 +942,10 @@ const bridge = {
   onUpdateEvent: (listener) => subscribe(PUSH.updatesEvent, listener),
   onTaskListChanged: (listener) => subscribe(PUSH.taskListChanged, listener),
   onUiRequest: (listener) => subscribe(PUSH.uiRequest, listener),
-  /** second-instance 启动参数（--new "提问" 等）。 */
+  /** second-instance 启动参数（--new "提问" 等）与托盘「打开自动化」。 */
   onAppLaunch: (listener) => subscribe(PUSH.appLaunch, listener),
+  /** 用户点了完成通知（窗口已由主进程显示并聚焦；payload `{ sessionId }`）。 */
+  onNotificationClick: (listener) => subscribe(PUSH.notificationClick, listener),
   onPermissionRequest: (listener) => subscribe(PUSH.permissionRequest, listener),
   onQuestionnaireRequest: (listener) => subscribe(PUSH.questionnaireRequest, listener),
   onDaemonReady: (listener) => subscribe(PUSH.daemonReady, () => listener()),
