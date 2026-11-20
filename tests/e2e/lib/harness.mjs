@@ -456,7 +456,7 @@ export function createHarness(opts) {
 		/** #439 第二十七轮：新功能速览浮层（版本更新后 1.2s 弹出）是模态——
 		   需要点侧栏/顶栏或断言「无模态」的用例先调它关掉。幂等（浮层没出现
 		   就等最多 timeout，仍没有就静默返回）。 */
-		async dismissWhatsNew({ timeout = 8000 } = {}) {
+		async dismissWhatsNew({ timeout = 15000 } = {}) {
 			try {
 				await waitUntil(
 					() => win.evaluate(() => [...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))),
@@ -466,7 +466,10 @@ export function createHarness(opts) {
 					const btn = [...document.querySelectorAll("button")].find((el) => (el.textContent ?? "").includes("不再显示"));
 					btn?.click();
 				});
-				await win.waitForTimeout(600);
+				await waitUntil(
+					() => win.evaluate(() => ![...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))),
+					{ timeout: 6000, desc: "速览浮层关闭" },
+				);
 			} catch {
 				/* 浮层没出现（已看过）——幂等 */
 			}
