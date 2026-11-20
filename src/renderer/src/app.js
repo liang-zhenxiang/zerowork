@@ -18495,13 +18495,7 @@ function HomeView({
     localStorage.getItem("zw:onboarded") !== "1" && /* @__PURE__ */ jsxRuntimeExports.jsx(WelcomeBanner, {}),
     /* #439 第二十七轮 F2：模型配置引导。还没有可用模型时提示直达设置（一次性，
        配好即消失——数据来自 App 的 settingsSnapshot，HomeView 里用 homeModels）。 */
-    ready === true && modelsCount === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "crash-banner model-guide-banner", role: "status", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "crash-banner-text", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "还没有配置模型" }),
-        " —— 配置一个模型后就可以开始第一个任务。"
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "crash-banner-close model-guide-btn", onClick: onOpenSettings, children: "去配置模型" })
-    ] }),
+
     /* #342 F6：崩溃恢复横幅（只在上次异常退出后出现一次）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(CrashBanner, {}),
     /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
@@ -18604,7 +18598,11 @@ function HomeView({
             onClear: onClearResume
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
+            ready === true && modelsCount === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "model-guide-inline", role: "status", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "还没有配置模型——配置后即可开始第一个任务。" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "model-guide-btn", onClick: onOpenSettings, children: "去配置模型" })
+    ] }),
+/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Composer,
             {

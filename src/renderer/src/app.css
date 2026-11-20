@@ -20858,9 +20858,20 @@ html[data-sidebar-density='compact'] .space-group-header {
 }
 
 /* ── §55 第二十七轮十连（#446 首启体验与引导） ─────────────────────── */
-/* F2 模型配置引导条（复用 crash-banner 形态，加按钮样式） */
-.model-guide-banner .model-guide-btn {
+/* F2 模型配置引导行（composer 卡内上方内联，矮视口不把输入卡顶出去） */
+.model-guide-inline {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4);
+	border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--warning) 8%, var(--bg-elevated));
+	font-size: var(--text-sm);
+}
+.model-guide-inline .model-guide-btn {
 	flex: none;
+	margin-left: auto;
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius-sm);
 	background: var(--bg-elevated);
@@ -20870,7 +20881,7 @@ html[data-sidebar-density='compact'] .space-group-header {
 	font-size: var(--text-sm);
 	cursor: pointer;
 }
-.model-guide-banner .model-guide-btn:hover {
+.model-guide-inline .model-guide-btn:hover {
 	border-color: var(--accent);
 	color: var(--accent);
 }

@@ -206,7 +206,7 @@ await h.check("输入卡完整落在 1280×860 首屏内（8 张 Bento 卡不得
 	   无模型环境下必然假红（横幅 + 引导条合计约 150px）。 */
 	const bannersH = await win.evaluate(() => {
 		let h = 0;
-		for (const sel of [".model-guide-banner", ".welcome-banner", ".crash-banner"]) {
+		for (const sel of [".model-guide-inline", ".welcome-banner", ".crash-banner"]) {
 			const el = document.querySelector(sel);
 			if (el !== null) h += Math.round(el.getBoundingClientRect().height) + 12;
 		}
