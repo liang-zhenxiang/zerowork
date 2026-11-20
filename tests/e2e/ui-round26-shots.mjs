@@ -24,6 +24,13 @@ writeFileSync(join(SESSIONS_DIR, "s1.jsonl"), lines.join("\n") + "\n");
 await h.launch();
 const win = h.window();
 await win.waitForTimeout(2400);
+/* #439 第二十七轮：新功能速览浮层会挡住侧栏点击——先关掉。 */
+await waitUntil(() => win.evaluate(() => [...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))), { timeout: 8000, desc: "速览浮层出现" });
+await win.evaluate(() => {
+  const btn = [...document.querySelectorAll("button")].find((el) => (el.textContent ?? "").includes("不再显示"));
+  btn?.click();
+});
+await win.waitForTimeout(600);
 await win.evaluate(async ({ baseUrl, ws }) => {
   const k = globalThis.kami;
   await k.saveCustomProvider({ id: "r26p", name: "R26", baseUrl, api: "openai-completions", authHeader: true, models: [{ id: "r26-model", name: "r26-model", reasoning: false, vision: false, contextWindow: 32000, maxTokens: 8192 }] }, "k");

@@ -20856,3 +20856,49 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition: none;
 	}
 }
+
+/* ── §55 第二十七轮十连（#446 首启体验与引导） ─────────────────────── */
+/* F2 模型配置引导条（复用 crash-banner 形态，加按钮样式） */
+.model-guide-banner .model-guide-btn {
+	flex: none;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+	color: var(--text);
+	padding: 2px 12px;
+	font: inherit;
+	font-size: var(--text-sm);
+	cursor: pointer;
+}
+.model-guide-banner .model-guide-btn:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+/* F4/F8 新功能速览浮层列表 */
+.whats-new-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+}
+.whats-new-item {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: var(--space-3);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+}
+.whats-new-item strong {
+	font-size: var(--text-sm);
+}
+.whats-new-desc {
+	color: var(--text-faint);
+	font-size: 12px;
+}
+/* F9 首启文案切换不跳动 */
+.footer-text {
+	min-width: 6em;
+}
