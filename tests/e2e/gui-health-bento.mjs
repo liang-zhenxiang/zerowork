@@ -188,7 +188,18 @@ await h.check("输入卡完整落在 1280×860 首屏内（8 张 Bento 卡不得
 	// 装不下输入卡（内容自顶部起排，位置与视口高无关）—— 用 innerHeight 会让这条
 	// 断言在 CI 上因环境而红。取 max(实际视口, 860)：本机 860 时它就是 innerHeight，
 	// 矮视口下仍守住 860 的设计预算，且位置本身与视口高无关。
-	const budget = Math.max(box.viewport, 860);
+	/* #439 第二十七轮：无模型时的「去配置模型」引导条与欢迎横幅是首页合法
+	   内容（PRD F2 明确要求）——存在时把它们的实际高度加进预算，否则
+	   无模型环境下必然假红（横幅 + 引导条合计约 150px）。 */
+	const bannersH = await win.evaluate(() => {
+		let h = 0;
+		for (const sel of [".model-guide-banner", ".welcome-banner", ".crash-banner"]) {
+			const el = document.querySelector(sel);
+			if (el !== null) h += Math.round(el.getBoundingClientRect().height) + 12;
+		}
+		return h;
+	});
+	const budget = Math.max(box.viewport, 860) + bannersH;
 	assert.ok(
 		box.top >= 0,
 		`${box.target} 顶 ${box.top} < 0，已被滚动/裁切（首页 scrollH=${box.scrollHeight}）—— 上半部分不可见`,
