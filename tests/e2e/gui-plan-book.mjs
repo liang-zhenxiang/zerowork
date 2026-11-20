@@ -971,9 +971,13 @@ await h.check("50 步滚到底：最后一步的「更多」菜单不被裁切�
 		rows[rows.length - 1]?.scrollIntoView({ block: "center" });
 	});
 	await win.waitForTimeout(400);
-	/* force：CI 慢机上按钮可能有遮挡告警（自动滚动失败），语义已由
-	   「滚进视口 waitUntil + elementFromPoint 命中检查」保证。 */
-	await win.locator('[aria-label="第 50 步的更多操作"]').click({ force: true });
+	/* CI 慢机上命中测试会打到遮挡元素（force click 也不稳）——
+	   直接派发 click 事件触发 React onClick；菜单裁切与命中语义由
+	   后续 elementFromPoint 检查独立验证。 */
+	await win.evaluate(() => {
+		const btn = document.querySelector('[aria-label="第 50 步的更多操作"]');
+		btn?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+	});
 	await waitUntil(async () => (await win.evaluate(() => document.querySelector(".plan-book-menu") !== null)) ? true : null, {
 		timeout: 10_000,
 		desc: "更多菜单打开"
