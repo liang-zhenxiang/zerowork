@@ -402,6 +402,84 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 	await h.waitForSettled();
 });
 
+/*
+ * 窄宽分支（issue #437）：窗口最小宽度 900 下，`.bento-grid` 必须是**单行横滚**，
+ * 而不是退回 2 列 —— 2 列会让 8 张卡排 4 行，能力宫格从 151px 长到 286px，
+ * 在 860 高下把输入卡顶出首屏（实测 composer 底 979 > home 底 854）。
+ *
+ * 单独成一条 check 而不是塞进上一条：它的前提是「860 高」，而 CI runner 的物理屏
+ * 会把窗口钳到 679；前提不成立时必须**显式 SKIP**（check 里 h.skip 会把整条记为
+ * SKIP、不计入 passed），不能把断言放宽成永远绿。
+ */
+const NARROW_LABEL = "P1-①b 首页窄宽 900：宫格单行横滚，composer 仍完整落在首屏";
+await h.check(NARROW_LABEL, async () => {
+	const restoreTo = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+	const actual = await resizeWindow(900, 860);
+	await h.waitForSettled();
+	try {
+		/*
+		 * 高度被钳到 ≤840 时矮视口档（收眉标 / 收能力宫格）会接管布局，
+		 * 「宫格换行顶出输入卡」根本不会发生；宽度没落到 ≤900 时窄宽档也复现不了。
+		 * 两种都跳过，并在报告里留下实际钳制尺寸。
+		 */
+		if (actual.height <= 840 || actual.width > 900) {
+			h.skip(
+				NARROW_LABEL,
+				`窗口被钳制到 ${actual.width}×${actual.height}，900 宽 × 860 高分支在本机不可复现`,
+			);
+		}
+		const state = await win.evaluate(() => {
+			const home = document.querySelector("main.home")?.getBoundingClientRect() ?? null;
+			const composer = document.querySelector(".composer-slot")?.getBoundingClientRect() ?? null;
+			const zone = document.querySelector(".capability-zone");
+			const grid = document.querySelector(".bento-grid");
+			const cards = [...document.querySelectorAll(".bento-card")];
+			return {
+				innerWidth: window.innerWidth,
+				innerHeight: window.innerHeight,
+				zoneDisplay: zone === null ? null : getComputedStyle(zone).display,
+				gridDisplay: grid === null ? null : getComputedStyle(grid).display,
+				gridClientWidth: grid === null ? null : grid.clientWidth,
+				gridScrollWidth: grid === null ? null : grid.scrollWidth,
+				cardCount: cards.length,
+				cardRows: new Set(cards.map((card) => Math.round(card.getBoundingClientRect().top))).size,
+				homeTop: home === null ? null : home.top,
+				homeBottom: home === null ? null : home.bottom,
+				composerTop: composer === null ? null : composer.top,
+				composerBottom: composer === null ? null : composer.bottom,
+			};
+		});
+		const where = `innerWidth=${state.innerWidth} × innerHeight=${state.innerHeight}`;
+		// 先截图后断言：失败时才有窄宽首页的现场。
+		await h.shoot("home-narrow-900-light");
+		assert.ok(state.zoneDisplay !== "none", `${where}：860 高下能力宫格不该被收起`);
+		// 先断用户可见的后果（输入卡溢出），再断造成它的形态 —— 反向验证时
+		// 报错文案直接给出 composer.bottom，而不是一句「display 不是 flex」。
+		assert.ok(
+			state.composerTop >= state.homeTop - 0.5,
+			`输入卡上缘被顶出 .home：composer.top=${state.composerTop.toFixed(1)}，` +
+				`home.top=${state.homeTop.toFixed(1)}（${where}）`,
+		);
+		assert.ok(
+			state.composerBottom <= state.homeBottom + 0.5,
+			`${where} 下输入卡底边超出 .home：composer.bottom=${state.composerBottom.toFixed(1)}，` +
+				`home.bottom=${state.homeBottom.toFixed(1)} —— 主输入框首屏看不到`,
+		);
+		assert.equal(state.gridDisplay, "flex", `${where}：窄宽档的宫格应改为 flex 单行（实际 ${state.gridDisplay}）`);
+		assert.equal(state.cardCount, 8, `${where}：8 张能力卡应全部留在 DOM 中（实际 ${state.cardCount}）`);
+		assert.equal(state.cardRows, 1, `${where}：宫格排成 ${state.cardRows} 行 —— 应单行横滚`);
+		assert.ok(
+			state.gridScrollWidth > state.gridClientWidth,
+			`${where}：宫格没有横向溢出，说明没形成横滚：` +
+				`scrollWidth=${state.gridScrollWidth}，clientWidth=${state.gridClientWidth}`,
+		);
+	} finally {
+		// 无论断言成败都把窗口还给后面的用例（它们假定 1280 宽）。
+		await resizeWindow(restoreTo.width, restoreTo.height);
+		await h.waitForSettled();
+	}
+});
+
 // ══ ② 统计页空态：数据类动作隐藏，恢复动作保留 ═════════════════════════
 await h.check("P1-② 统计空态：隐藏分享卡/本周摘要/导出 CSV，重试首页无 refresh 图标", async () => {
 	await clickNav("统计");

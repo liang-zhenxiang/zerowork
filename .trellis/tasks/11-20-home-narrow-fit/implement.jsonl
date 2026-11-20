@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "首页矮视口与响应式断点纪律"}
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e 断言与反向验证规范"}
+{"file": "docs/DESIGN.md", "reason": "§3.8.1 的矮视口档需同步宽度规则"}

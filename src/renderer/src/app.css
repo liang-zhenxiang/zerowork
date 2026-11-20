@@ -18617,17 +18617,39 @@ mark.find-hit {
 	color: var(--primary-text);
 }
 
-/* 窄窗：4 列会压到读不出描述，退成 2 列且所有卡都不跨列；再窄退成单列。 */
+/* 窄宽（≤900，窗口最小宽度正好是 900）：**不换行退成多行，改横向可滚单行**。
+   此前这里退成 2 列 —— 8 张卡排 4 行，能力宫格从 151px 长到 286px，
+   在 860 高下把输入卡顶出首屏（实测 composer 底 979 > home 底 854，issue #437）。
+   单行横滚与 `.capability-row` / `.ex-cats` 同口径：隐藏滚动条，但保留
+   触摸板横滑与键盘 Tab（滚到卡上会自动 scrollIntoView）。
+   卡片宽度写死而不是按比例分：横向滚动时每张卡的描述仍要读得出来，
+   被压缩的卡只剩省略号。宽卡（首尾两张）仍比普通卡宽 70px，
+   Bento 的「首尾加宽」语义在窄宽下也保留。
+   ≥901 的 5 列 2 行与所有高度档（≤840 / ≤800）不受影响。 */
 @media (max-width: 900px) {
 	.bento-grid {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		display: flex;
+		gap: var(--space-3);
+		overflow-x: auto;
+		scrollbar-width: none;
+	}
+
+	.bento-grid::-webkit-scrollbar {
+		display: none;
+	}
+
+	.bento-card {
+		/* 不参与伸缩：flex 容器会按内容收缩，卡片会被压成只有图标宽。 */
+		flex: 0 0 210px;
 	}
 
 	.bento-card.bento-wide {
-		grid-column: span 1;
+		flex-basis: 280px;
 	}
 }
 
+/* ≤640 在应用里不可达（窗口 minWidth 是 900），这条单列规则仅作兜底：
+   `.bento-grid` 在 ≤900 已经是 flex 单行，grid-template-columns 不再生效。 */
 @media (max-width: 640px) {
 	.bento-grid {
 		grid-template-columns: minmax(0, 1fr);
