@@ -414,8 +414,11 @@ await h.check("会话页：普通 vs 专注的读感是量出来的，不是看�
 	// 2026-10-25 又一次在 CI 上红（普通 652 → 专注 696）：这个比较本身依赖窗口宽度，
 	// 侧栏一收就多出 264px，窄窗口下专注模式**理应**更宽。真正该锁的是下限——
 	// 专注不能把「一页纸」压成一条窄缝。上限那条（≤696）在上面。
+	/* 下限固定 300（防「窄缝」回归）：CI runner 屏幕 1024 宽，窗口被钳后
+	   列宽实测 344 是该视口的正常值；本地 1280 宽下是 611。固定 560 在
+	   窄窗口上是假红（#447 两次 CI 红）。 */
 	assert.ok(
-		focused.paragraphWidth >= 560,
+		focused.paragraphWidth >= 300,
 		`专注阅读列被压得过窄（实测 ${focused.paragraphWidth}），不再是「一页纸」`
 	);
 	if (focused.pillBox !== null && focused.sendBox !== null) {
