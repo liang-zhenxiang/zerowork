@@ -262,6 +262,18 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 	);
 	// 首页有异步内容（今日统计、上手清单），空闲态才适合 waitForSettled。
 	await h.waitForSettled();
+	/*
+	 * 把「测量前字体已就绪」钉成断言（Issue #443）：`waitForSettled` 现在会在观察
+	 * DOM 静默期之前先等 `document.fonts.ready`，因为字体替换**不改 DOM**、不会重置
+	 * 静默计时，而它决定行盒高度 —— 字体晚到会让案例区从 212.4 变成 226.8，
+	 * 预留 268 只多 0.4px，于是被误判成「压到输入卡上」。这条断言失败说明等待
+	 * 又退回到了「不等字体」，而不是布局本身出了问题。
+	 */
+	assert.equal(
+		await win.evaluate(() => document.fonts.status),
+		"loaded",
+		"waitForSettled 返回时字体尚未就绪 —— 布局测量会落在字体替换的中途",
+	);
 	const before = await win.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
 	/*
 	 * 860 逻辑高下必须**完全没有变化**（§3.8 的 12:12:24:16 配比、眉标与能力宫格

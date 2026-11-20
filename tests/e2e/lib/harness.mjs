@@ -441,10 +441,24 @@ export function createHarness(opts) {
 		 *
 		 * 用 DOM 变动静默期作为判据：连续 `quietMs` 毫秒没有任何节点/文本/属性变化，
 		 * 就认为这一屏已经稳定。它对内容无感知，对动画有容忍（动画不停时靠 timeout 兜底）。
+		 *
+		 * ## 观察之前必须先等字体就绪（Issue #443）
+		 *
+		 * **字体替换不改 DOM**，所以字体晚到不会重置静默计时 —— 观察可能在一个
+		 * 「字体还没就绪」的窗口里就宣布稳定。而字体决定行盒高度，随后替换会让布局
+		 * 整体位移：`gui-ui-audit` 的 P1-① 因此偶发量到 226.8 而非稳定的 212.4，
+		 * 预留 268 与「案例高 + 56」只差 0.4px，于是重叠约 14px 的假红。
+		 *
+		 * 所以任何**布局测量**之前都先等 `document.fonts.ready`。它等的是「加载结束」
+		 * 而不是「加载成功」—— 字体加载失败时该 promise 同样 resolve，不会卡死
+		 * （真正的卡死由看门狗兜底）。等完之后再启动观察，静默期覆盖的就是最终布局。
 		 */
 		async waitForSettled({ quietMs = 800, timeout = 60_000 } = {}) {
 			const settled = await win.evaluate(
 				async ({ quietMs, timeout }) => {
+					if (document.fonts !== undefined && document.fonts.status !== "loaded") {
+						await document.fonts.ready;
+					}
 					return await new Promise((resolve) => {
 						let quietTimer = null;
 						let observer = null;
