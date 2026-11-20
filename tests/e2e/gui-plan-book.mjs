@@ -964,8 +964,16 @@ await h.check("50 步滚到底：最后一步的「更多」菜单不被裁切�
 		},
 		{ timeout: 10_000, desc: "最后一步滚进视口" }
 	);
-	await win.locator(".plan-book-step").last().hover();
-	await win.locator('[aria-label="第 50 步的更多操作"]').click();
+	/* CI 慢机上 hover 的自动滚动/稳定性等待会超时（#447 两连红、本地 25/25）——
+       hover 只是「让更多按钮出现」的载体，直接 scrollIntoView 后点击绕开。 */
+	await win.evaluate(() => {
+		const rows = [...document.querySelectorAll(".plan-book-step")];
+		rows[rows.length - 1]?.scrollIntoView({ block: "center" });
+	});
+	await win.waitForTimeout(400);
+	/* force：CI 慢机上按钮可能有遮挡告警（自动滚动失败），语义已由
+	   「滚进视口 waitUntil + elementFromPoint 命中检查」保证。 */
+	await win.locator('[aria-label="第 50 步的更多操作"]').click({ force: true });
 	await waitUntil(async () => (await win.evaluate(() => document.querySelector(".plan-book-menu") !== null)) ? true : null, {
 		timeout: 10_000,
 		desc: "更多菜单打开"
