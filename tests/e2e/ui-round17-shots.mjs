@@ -29,6 +29,8 @@ seed(1, tmp, "十七轮的验证会话", 0);
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(2500);
 
 await h.check("① 撤销归档：归档 toast 带「撤销」按钮", async () => {

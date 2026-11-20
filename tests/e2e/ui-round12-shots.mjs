@@ -31,6 +31,8 @@ let failures = 0;
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(900);
 await win.evaluate(async ({ baseUrl, ws }) => {
   const k = globalThis.kami;

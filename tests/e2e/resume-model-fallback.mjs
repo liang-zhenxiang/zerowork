@@ -87,6 +87,8 @@ console.log(`✓ mock 模型服务已就绪：${mock.port}`);
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 // ── 准备：注册 provider 但**不选全局模型**（本用例的全部前提） ──────────
 await h.check("准备：注册可用服务商、不选全局模型", async () => {

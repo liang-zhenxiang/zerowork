@@ -125,6 +125,8 @@ console.log(`✓ mock 模型服务已就绪:${mock.baseUrl}`);
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 await h.check("注册指向 mock 的 provider 并切模型", async () => {
 	const r = await win.evaluate(async ({ baseUrl, ws }) => {

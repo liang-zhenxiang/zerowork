@@ -27,6 +27,8 @@ mkdirSync(SPACE_B, { recursive: true });
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 /** 在指定工作空间用真实 UI 路径发一条消息（建会话）。 */
 async function sendInSpace(space, text) {

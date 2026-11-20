@@ -33,6 +33,8 @@ const seedTask = async (win, { title, text }, opt = {}) => {
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(600);
 
 // ① 并行面板：mock delayMs=9000，第一个会话还在跑时开第二个 → 真 2 个运行中

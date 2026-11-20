@@ -149,6 +149,8 @@ console.log(`✓ 四台 mock 已就绪：A=${mockA.port} B=${mockB.port} Fail=${
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 /* ══════════════════════════════════════════════════════════════════════
  * 页面侧的探针

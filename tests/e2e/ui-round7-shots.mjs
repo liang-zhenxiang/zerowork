@@ -38,6 +38,8 @@ for (let i = 0; i < 7; i++) seedOne(i);
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 // 挂 mock 模型（发消息前必须已选模型，手法同 ui-round6-shots.mjs）
 await win.evaluate(async ({ baseUrl, ws }) => {

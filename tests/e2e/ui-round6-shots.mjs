@@ -35,6 +35,8 @@ for (let i = 1; i <= 6; i++) {
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await waitUntil(() => win.evaluate(() => globalThis.kami !== undefined), { timeout: 10_000, desc: "kami 就绪" });
 await win.evaluate(async (m) => {
   const k = globalThis.kami;

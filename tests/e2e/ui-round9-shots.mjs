@@ -40,6 +40,8 @@ async function shoot(win, name) {
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(800);
 
 // ── 进入会话：新建任务 + 发一条消息，等回答渲染完 ──

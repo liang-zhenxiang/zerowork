@@ -23,6 +23,8 @@ writeFileSync(join(h.CONFIG_DIR, "preferences.json"), JSON.stringify({ userNickn
 const mock = await startMockModelServer({ models: ["r20-model"], reply: "回复" });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(2200);
 await win.evaluate(async ({ baseUrl, ws }) => {
   const k = globalThis.kami;

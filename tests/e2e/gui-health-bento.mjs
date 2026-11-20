@@ -19,6 +19,8 @@ import { createHarness, waitUntil } from "./lib/harness.mjs";
 const h = createHarness({ name: "health-bento", shots: true });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 /*
  * 矮视口（≤800 逻辑高）下首页会收起 `.capability-zone`（docs/DESIGN.md §3.8.1：

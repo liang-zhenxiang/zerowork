@@ -24,6 +24,8 @@ const TITLE_EDITED = "会议纪要 → 待办";
 const h = createHarness({ name: "prompt-templates", shots: true });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 const sectionText = (label) =>
 	win.evaluate((text) => {

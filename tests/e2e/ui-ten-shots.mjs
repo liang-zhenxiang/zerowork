@@ -18,6 +18,8 @@ const REPLY = ["## 输入卡外槽的样式", "", "```css", CODE, "```", "", "�
 const h = createHarness({ name: "ui-ten-shots", shots: true });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 const failures = [];
 
 async function step(label, fn) {

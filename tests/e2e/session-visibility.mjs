@@ -31,6 +31,8 @@ writeFileSync(resolve(h.WORKSPACE_DIR, "README.md"), "# visibility\n", "utf8");
 const mock = await startMockModelServer({ reply: REPLY, models: ["vis-model"], toolCall: true });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 // 建会话 + 配 provider（照抄 focus-mode 的可用序列）
 await win.evaluate(() => globalThis.kami.newTask());

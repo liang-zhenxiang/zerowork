@@ -36,6 +36,8 @@ async function shoot(win, name) {
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(800);
 
 // 会话：mock + 发消息，等回答

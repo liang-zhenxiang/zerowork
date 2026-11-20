@@ -64,6 +64,8 @@ import { createHarness, waitUntil } from "./lib/harness.mjs";
 const h = createHarness({ name: "library" });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 const SESSIONS_DIR = join(h.CONFIG_DIR, "sessions");
 const WORKSPACE_DIR = h.WORKSPACE_DIR;

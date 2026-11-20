@@ -28,6 +28,8 @@ mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 const currentTheme = () => win.evaluate(() => document.documentElement.dataset.theme ?? null);
 
