@@ -140,6 +140,19 @@ console.log(`✓ mock 模型服务已就绪：${mock.baseUrl}`);
 await h.launch();
 const win = h.window();
 
+/* #439 第二十七轮：新功能速览浮层（版本更新后 1.2s 弹出）本身是 role=dialog
+   模态——不关掉会让「这一页不该出现模态对话框」断言误报。先关掉。 */
+await waitUntil(
+  () => win.evaluate(() => [...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))),
+  { timeout: 8000, desc: "速览浮层出现" },
+);
+await win.evaluate(() => {
+  const btn = [...document.querySelectorAll("button")].find((el) => (el.textContent ?? "").includes("不再显示"));
+  btn?.click();
+});
+await win.waitForTimeout(600);
+
+
 // ── 测量工具 ────────────────────────────────────────────────
 
 /** 读工作区里那个文件的当前内容；读不到返回 undefined（不抛）。 */
