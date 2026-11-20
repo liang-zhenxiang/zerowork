@@ -20874,29 +20874,40 @@ html[data-sidebar-density='compact'] .space-group-header {
 	border-color: var(--accent);
 	color: var(--accent);
 }
-/* F4/F8 新功能速览浮层列表 */
-.whats-new-list {
-	list-style: none;
-	margin: 0;
-	padding: 0;
+/* F4/F8 新功能速览横幅（非模态，右下角固定） */
+.whats-new-banner {
+	position: fixed;
+	right: var(--space-5);
+	bottom: var(--space-5);
+	max-width: 420px;
+	z-index: 35;
 	display: flex;
 	flex-direction: column;
-	gap: var(--space-3);
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	box-shadow: var(--shadow-md);
 }
-.whats-new-item {
+.whats-new-banner-text {
 	display: flex;
 	flex-direction: column;
 	gap: 2px;
-	padding: var(--space-3);
-	border-radius: var(--radius-sm);
-	background: var(--bg-elevated);
+	font-size: 12px;
+	color: var(--text-secondary);
 }
-.whats-new-item strong {
+.whats-new-banner-text strong {
+	color: var(--text);
 	font-size: var(--text-sm);
 }
-.whats-new-desc {
-	color: var(--text-faint);
-	font-size: 12px;
+.whats-new-line em {
+	font-style: normal;
+	color: var(--accent);
+	font-weight: 600;
+}
+.whats-new-line {
+	display: block;
 }
 /* F9 首启文案切换不跳动 */
 .footer-text {

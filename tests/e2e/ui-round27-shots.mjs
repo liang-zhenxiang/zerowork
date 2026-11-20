@@ -24,17 +24,17 @@ const win = h.window();
 await win.waitForTimeout(2400);
 
 await h.check("① 新功能速览浮层：版本更新后一次性弹出", async () => {
-  await waitUntil(() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")), { timeout: 12000, desc: "速览浮层出现" });
-  const items = await win.evaluate(() => document.querySelectorAll(".whats-new-item").length);
+  await waitUntil(() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")), { timeout: 12000, desc: "速览横幅出现" });
+  const items = await win.evaluate(() => document.querySelectorAll(".whats-new-line").length);
   if (items < 3) throw new Error(`速览条目不足：${items}`);
   await h.shoot("01-whats-new");
   await win.evaluate(() => {
-    const btn = [...document.querySelectorAll("button")].find((el) => (el.textContent ?? "").includes("不再显示"));
+    const btn = document.querySelector(".whats-new-banner .welcome-banner-close");
     btn?.click();
   });
   await win.waitForTimeout(500);
   const gone = await win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西") === false);
-  if (!gone) throw new Error("浮层未关闭");
+  if (!gone) throw new Error("横幅未关闭");
   const seen = await win.evaluate(() => window.localStorage.getItem("zw:seen-version") !== null);
   if (!seen) throw new Error("zw:seen-version 未持久化");
 });

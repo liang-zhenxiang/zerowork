@@ -17058,37 +17058,22 @@ const CHANGELOG_FEATURES = [
   { title: "会话内导航", desc: "TL;DR 意图行可点击跳轮、阅读标尺可点击定位、标题锚点点击后就地定位。" }
 ];
 function WhatsNewSheet({ version, onClose }) {
-  /* 不用 useModalFocus：速览浮层是被动信息，抢焦点会打断用户正在做的操作
-     （⌘K 面板、输入框）。Esc/点击背板/「知道了」关闭即可。 */
-  const cardRef = reactExports.useRef(null);
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", {
-    className: "shortcut-sheet-backdrop",
-    onClick: onClose,
-    children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
-      className: "shortcut-sheet",
-      role: "dialog",
-      "aria-modal": "true",
-      "aria-label": "新功能速览",
-      ref: cardRef,
-      children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shortcut-sheet-head", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { children: ["这个版本的新东西 ", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: `V${version}` })] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "shortcut-sheet-close", onClick: onClose, "aria-label": "关闭", children: "✕" })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "shortcut-sheet-body", children: /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "whats-new-list", children: CHANGELOG_FEATURES.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "whats-new-item", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: item.title }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whats-new-desc", children: item.desc })
-        ] }, item.title)) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "shortcut-sheet-foot", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "详细清单见 CHANGELOG 与帮助浮层（⌘/）。" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => {
-            localStorage.setItem("zw:seen-version", version);
-            onClose();
-          }, children: "知道了，不再显示" })
-        ] })
-      ]
-    })
-  });
+  /* #439 第二十七轮 F4/F8：版本更新速览。**非模态横幅**（welcome-banner 同形态）：
+     模态浮层会挡侧栏/顶栏点击、抢焦点，把 e2e 与真实用户第一次操作全部卡住
+     （#447 实证）。横幅常驻右下、不挡内容；关闭即写持久化。 */
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "whats-new-banner", role: "status", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "whats-new-banner-text", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: ["这个版本的新东西 ", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: `V${version}` })] }),
+      CHANGELOG_FEATURES.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "whats-new-line", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: item.title }),
+        ` ${item.desc}`
+      ] }, item.title))
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "welcome-banner-close", "aria-label": "知道了", onClick: () => {
+      localStorage.setItem("zw:seen-version", version);
+      onClose();
+    }, children: "知道了" })
+  ] });
 }
 
 function CrashBanner() {

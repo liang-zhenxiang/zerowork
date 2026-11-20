@@ -44,15 +44,9 @@ const win = h.window();
 
 /* #439 第二十七轮：新功能速览浮层（版本更新后 1.2s 弹出）会压住后续测量——
    等它出现再「知道了，不再显示」。 */
-await waitUntil(
-  () => win.evaluate(() => [...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))),
-  { timeout: 8000, desc: "速览浮层出现" },
-);
-await win.evaluate(() => {
-  const btn = [...document.querySelectorAll("button")].find((el) => (el.textContent ?? "").includes("不再显示"));
-  btn?.click();
-});
-await win.waitForTimeout(600);
+await waitUntil(() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")), { timeout: 10000, desc: "速览横幅出现" });
+await win.evaluate(() => document.querySelector(".whats-new-banner .welcome-banner-close")?.click());
+await win.waitForTimeout(500);
 
 const state = () =>
 	win.evaluate(() => {

@@ -459,16 +459,13 @@ export function createHarness(opts) {
 		async dismissWhatsNew({ timeout = 15000 } = {}) {
 			try {
 				await waitUntil(
-					() => win.evaluate(() => [...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))),
-					{ timeout, desc: "速览浮层出现" },
+					() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")),
+					{ timeout, desc: "速览横幅出现" },
 				);
-				await win.evaluate(() => {
-					const btn = [...document.querySelectorAll("button")].find((el) => (el.textContent ?? "").includes("不再显示"));
-					btn?.click();
-				});
+				await win.evaluate(() => document.querySelector(".whats-new-banner .welcome-banner-close")?.click());
 				await waitUntil(
-					() => win.evaluate(() => ![...document.querySelectorAll("button")].some((el) => (el.textContent ?? "").includes("不再显示"))),
-					{ timeout: 6000, desc: "速览浮层关闭" },
+					() => win.evaluate(() => !(document.body.textContent ?? "").includes("这个版本的新东西")),
+					{ timeout: 6000, desc: "速览横幅关闭" },
 				);
 			} catch {
 				/* 浮层没出现（已看过）——幂等 */
