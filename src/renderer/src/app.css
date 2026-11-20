@@ -20869,6 +20869,13 @@ html[data-sidebar-density='compact'] .space-group-header {
 	background: color-mix(in srgb, var(--warning) 8%, var(--bg-elevated));
 	font-size: var(--text-sm);
 }
+/* 矮视口（<720 逻辑高）：引导行隐藏——首屏预算给输入卡（gui-ui-audit
+   P1-① 的契约），配置模型走设置页。 */
+@media (max-height: 719px) {
+	.model-guide-inline {
+		display: none;
+	}
+}
 .model-guide-inline .model-guide-btn {
 	flex: none;
 	margin-left: auto;
