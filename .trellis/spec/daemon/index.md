@@ -206,6 +206,21 @@ JSZip 在 `loadAsync` 时会把 `skills/../agents/x.md` 清洗成 `agents/x.md` 
 - 安装目录里的 `_pack.json` 是本应用元数据，不属于包内容 —— 备份目录必须放在
   `packs/` **之外**，否则会被 `loadExpertsDir` 当多出来的专家扫描并让整库加载失败。
 
+## 九、新增用户级偏好：读侧白名单 + 读路径现判（2026-11-22，专家停用 #426）
+
+`readPreferences` 是**白名单读取**、`writePreferences` 是**整份覆写**。新键只写进
+writer 而漏了 reader，症状是「写进去、读不回」，且下一次任何偏好保存都会把它悄悄
+抹掉（`updateChannel` 在 2026-10 就是这样丢的）。新增偏好必须同时改三处：
+reader 白名单、writer 的读改写调用、单测的往返用例（空值还要删键，别把 `[]` 留在
+文件里）。
+
+「停用 / 关闭某能力」这类开关，**不要在列表或选择器上过滤就算完成**：真正决定
+行为的是读路径 —— 提示词组装、技能解析、工具面、hidden context。列表过滤只是
+入口，读路径不现判就是假的停用（#426：`setExpert` 拒绝停用 id、compose 按无专家
+组装、`sessionSkills` / `getExpertExtraTools` / `getExpertLabel` 同一判据）。
+已绑定会话**保留绑定、恢复即续**：清空绑定会丢用户的选择，而「绑定还在、能力不
+进模型」才是「先不用它」的语义。
+
 ## 相关
 
 - `docs/ARCHITECTURE.md` —— 进程模型、模块划分、**设计决策与已否决方案**
