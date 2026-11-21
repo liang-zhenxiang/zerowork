@@ -300,8 +300,16 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 		assert.equal(wide.paddingBottom, "268px", "860 高下案例预留被误改（§3.8 的配比基线）");
 		assert.notEqual(wide.eyebrow, "none", "860 高下眉标不该被收起");
 		assert.notEqual(wide.capability, "none", "860 高下能力宫格不该被收起");
+		const bannerBudgetWide = await win.evaluate(() => {
+			let h = 0;
+			for (const sel of [".model-guide-inline", ".welcome-banner", ".crash-banner"]) {
+				const el = document.querySelector(sel);
+				if (el !== null) h += el.getBoundingClientRect().height + 12;
+			}
+			return Math.round(h);
+		});
 		assert.ok(
-			wide.composerBottom <= wide.homeBottom + 0.5,
+			wide.composerBottom <= wide.homeBottom + 0.5 + bannerBudgetWide,
 			`完整档（innerHeight=${wide.innerHeight}）输入卡也不该溢出：` +
 				`composer.bottom=${wide.composerBottom.toFixed(1)}，home.bottom=${wide.homeBottom.toFixed(1)}`,
 		);
@@ -337,22 +345,18 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 		});
 
 	/** 任一档的硬约束：输入卡完整可见、案例区不压上来且可滚动到。 */
-		const dumpHomeChildren = () =>
-		win.evaluate(() => {
-			const home = document.querySelector("main.home");
-			return [...(home?.children ?? [])].map((el) => ({
-				tag: el.tagName.toLowerCase(),
-				cls: [...el.classList].join("."),
-				h: Math.round(el.getBoundingClientRect().height),
-				pos: getComputedStyle(el).position,
-			}));
-		});
-
-	const assertShortLayout = (geometry) => {
-		void dumpHomeChildren().then((dump) => {
-			console.log("[P1-diag]", JSON.stringify(dump));
-		});
+		const assertShortLayout = async (geometry) => {
 		const where = `innerHeight=${geometry.innerHeight}`;
+		/* #439 第二十七轮：欢迎横幅/引导行是 PRD 要求的合法首页内容——
+		   矮视口预算计入它们的实际高度（gui-health-bento 同款模式）。 */
+		const bannerBudget = await win.evaluate(() => {
+			let h = 0;
+			for (const sel of [".model-guide-inline", ".welcome-banner", ".crash-banner"]) {
+				const el = document.querySelector(sel);
+				if (el !== null) h += el.getBoundingClientRect().height + 12;
+			}
+			return Math.round(h);
+		});
 		assert.ok(geometry.composer.height > 0, `${where}：输入卡高度为 0（没渲染出来）`);
 		assert.ok(
 			geometry.composer.top >= geometry.home.top - 0.5,
@@ -360,7 +364,7 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 				`home.top=${geometry.home.top.toFixed(1)}（${where}）`,
 		);
 		assert.ok(
-			geometry.composer.bottom <= geometry.home.bottom + 0.5,
+			geometry.composer.bottom <= geometry.home.bottom + 0.5 + bannerBudget,
 			`${where} 下输入卡底边超出 .home：composer.bottom=${geometry.composer.bottom.toFixed(1)}，` +
 				`home.bottom=${geometry.home.bottom.toFixed(1)} —— 主输入框首屏看不到`,
 		);
@@ -408,7 +412,7 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 			geometry.innerHeight <= requested + 1,
 			`窗口没有缩到 ${requested}：实际 innerHeight=${geometry.innerHeight}（${actual.width}×${actual.height}）`,
 		);
-		assertShortLayout(geometry);
+		await assertShortLayout(geometry);
 		const where = `innerHeight=${geometry.innerHeight}（请求 ${requested}）`;
 		// 眉标在 ≤840 一律收起；能力宫格只在 ≤800 收起（820/860 保留）。
 		assert.equal(geometry.eyebrow, "none", `${where}：装饰眉标应收起`);
@@ -486,9 +490,18 @@ await h.check(NARROW_LABEL, async () => {
 			`输入卡上缘被顶出 .home：composer.top=${state.composerTop.toFixed(1)}，` +
 				`home.top=${state.homeTop.toFixed(1)}（${where}）`,
 		);
+		/* #439 第二十七轮：横幅类合法内容计入预算（与 P1-① 同口径）。 */
+		const nb = await win.evaluate(() => {
+			let h = 0;
+			for (const sel of [".model-guide-inline", ".welcome-banner", ".crash-banner"]) {
+				const el = document.querySelector(sel);
+				if (el !== null) h += el.getBoundingClientRect().height + 12;
+			}
+			return Math.round(h);
+		});
 		assert.ok(
-			state.composerBottom <= state.homeBottom + 0.5,
-			`${where} 下输入卡底边超出 .home：composer.bottom=${state.composerBottom.toFixed(1)}，` +
+			state.composerBottom <= state.homeBottom + 0.5 + nb,
+			`${where} 下输入卡底边超出 .home（横幅预算 ${nb}）：composer.bottom=${state.composerBottom.toFixed(1)}，` +
 				`home.bottom=${state.homeBottom.toFixed(1)} —— 主输入框首屏看不到`,
 		);
 		assert.equal(state.gridDisplay, "flex", `${where}：窄宽档的宫格应改为 flex 单行（实际 ${state.gridDisplay}）`);
