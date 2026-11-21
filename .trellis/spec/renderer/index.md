@@ -116,6 +116,12 @@
 - **焦点指示**用 `--text-secondary`，与全局焦点环同色；**焦点环不得被抹掉**
 - **状态不只靠颜色**：位置、文字、形态各自都能独立表达
 - 骨架自身用 `role="status"` 承担「在读取」语义
+- **自绘下拉一律走 `SelectField`**，不要新写只有鼠标路径的下拉：触发器是
+  `role="combobox"` + `aria-expanded` / `aria-controls` / `aria-activedescendant`，
+  可访问名用 `accessibleName(label, 当前文案)` 带上当前值（调用方已拼值时不重复）；
+  方向键循环移动、Home/End 首末、Enter/Space 选中、Esc 关闭并还焦点给触发器、
+  Tab 关闭不拦截。**高亮不等于选中**：`aria-selected` 只给真正选中的项，
+  移动中的高亮由 `.active` 与 `aria-activedescendant` 表达（#427）
 
 ---
 
