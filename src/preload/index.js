@@ -70,6 +70,11 @@ const INVOKE = {
    * 只带展示字段 —— 人格正文不经 IPC，compose 时 daemon 从专家库自取。
    */
   listExperts: "session:list-experts",
+  /**
+   * 停用 / 恢复一位专家（#426）：用户级偏好，不改专家定义、不删文件。
+   * payload `[expertId, disabled]`，返回新的完整停用清单。
+   */
+  setExpertDisabled: "experts:set-disabled",
   /** 团队任务板投影（只读，spec: add-team-ux-parity 批次 ③）：Ctrl+T 面板的数据源。 */
   getTeamTasks: "session:get-team-tasks",
   /** 切换模型。 */
@@ -739,6 +744,7 @@ const bridge = {
   setInteraction: (interactionId) => ipcRenderer.invoke(INVOKE.setInteraction, interactionId),
   setExpert: (expertId) => ipcRenderer.invoke(INVOKE.setExpert, expertId),
   listExperts: () => ipcRenderer.invoke(INVOKE.listExperts),
+  setExpertDisabled: (expertId, disabled) => ipcRenderer.invoke(INVOKE.setExpertDisabled, expertId, disabled),
   getTeamTasks: () => ipcRenderer.invoke(INVOKE.getTeamTasks),
   setModel: (modelId) => ipcRenderer.invoke(INVOKE.setModel, modelId),
   setThinkingLevel: (level) => ipcRenderer.invoke(INVOKE.setThinkingLevel, level),

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "验收：分层测试与反向验证"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "验收：偏好读改写与 IPC 契约"}

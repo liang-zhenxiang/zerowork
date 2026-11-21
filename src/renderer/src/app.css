@@ -8751,6 +8751,20 @@ textarea:focus-visible {
 	display: inline-flex;
 }
 
+/* 绑定的专家被停用（#426）：chip 仍在（绑定没清），但整体降一档并加一枚
+   虚线小标 —— 状态由文字与形态独立承担，不只看颜色（§7.6）。 */
+.expert-chip-disabled {
+	color: var(--text-secondary);
+}
+
+.expert-chip-badge {
+	padding: 0 var(--space-2);
+	border: 1px dashed var(--border);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
 /* 「+」菜单专家子菜单底部的「更多专家…」：与专家项同款行式，
    顶部一条细分隔线标示它是入口而非一位专家。 */
 .plus-menu-more-experts {
@@ -9885,6 +9899,16 @@ textarea:focus-visible {
 	gap: var(--space-3);
 }
 
+/* 「显示已停用」是视图过滤，不属于排序（#426 评审）：用一条分隔线把它与
+   排序组分开，避免读成排序下拉的一个选项。 */
+.ex-show-disabled {
+	margin-left: var(--space-1);
+	padding-left: var(--space-4);
+	border-left: 1px solid var(--border);
+	display: flex;
+	align-items: center;
+}
+
 .ex-sort-label {
 	font-size: var(--text-meta);
 	color: var(--text-secondary);
@@ -10148,6 +10172,35 @@ textarea:focus-visible {
 	color: var(--text-secondary);
 }
 
+/* 停用标记（#426）：停用不是错误/警告，不借状态色 —— 与来源徽标同一档
+   （细边 + chip 底 + 次文色），虚线边与实线徽标在形态上可区分（§2.1 / §7.6）。 */
+.ex-badge-disabled {
+	display: inline-flex;
+	align-items: center;
+	height: 20px;
+	padding: 0 var(--space-3);
+	border: 1px dashed var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-chip);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+	vertical-align: middle;
+}
+
+.ex-modal-profession .ex-badge-disabled {
+	margin-left: var(--space-2);
+}
+
+/* 停用卡片：虚线边 + 身份色降一档。正文不动 —— 淡出只是补充通道，
+   把必须读到的描述压到次文基准以下等于让用户看不清自己刚停用了什么（§3.4）。 */
+.ex-card-disabled {
+	border-style: dashed;
+}
+
+.ex-card-disabled .ex-cover {
+	opacity: 0.45;
+}
+
 /* 覆盖整卡的「查看详情」按钮：卡片本身**不再是** role=button（里面还有真正的
    「使用」按钮，嵌套按钮对读屏与键盘都是坏结构）。这一颗是独立可聚焦的
    键盘入口，绝对定位铺满整卡接管鼠标点击；焦点环画在整卡边界上。
@@ -10298,6 +10351,18 @@ textarea:focus-visible {
 	margin: 0;
 	font-size: var(--text-list);
 	line-height: 20px;
+	color: var(--text-secondary);
+}
+
+/* 停用说明（#426）：次级辅助面走 --bg-raised、不带边框（§3.7）。
+   文案要说清「与卸载的区别」与「已绑定会话会怎样」—— 停用最容易被误解成删除。 */
+.ex-modal-disabled-note {
+	margin: 0;
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-sm);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+	line-height: 1.6;
 	color: var(--text-secondary);
 }
 

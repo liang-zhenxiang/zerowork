@@ -192,6 +192,74 @@ describe("filterExperts —— 来源 × 标签 × 关键词是「与」关系",
 	});
 });
 
+describe("filterExperts —— 停用项默认排除、可按需包含（#426）", () => {
+	const DISABLED_USER = expert({
+		name: "paused-writer",
+		displayName: "暂停写作助手",
+		profession: "写作",
+		description: "暂时不用的写作专家",
+		displayDescription: "先收起来，随时可以恢复",
+		tags: ["写作", "停用", "等待"],
+		source: "user",
+		disabled: true,
+	});
+	const WITH_DISABLED = [...ALL, DISABLED_USER];
+
+	it("默认（不传 / false）排除 disabled: true 的条目", () => {
+		assert.deepEqual(
+			filterExperts(WITH_DISABLED, {}).map((item) => item.name),
+			ALL.map((item) => item.name),
+		);
+		assert.deepEqual(
+			filterExperts(WITH_DISABLED, { includeDisabled: false }).map((item) => item.name),
+			ALL.map((item) => item.name),
+		);
+	});
+
+	it("includeDisabled: true 时与其它条目一样参与来源 / 标签 / 关键词过滤", () => {
+		assert.deepEqual(
+			filterExperts(WITH_DISABLED, { source: "user", includeDisabled: true }).map((item) => item.name),
+			["my-writer", "paused-writer"],
+		);
+		assert.deepEqual(
+			filterExperts(WITH_DISABLED, { tag: "停用", includeDisabled: true }).map((item) => item.name),
+			["paused-writer"],
+		);
+		assert.deepEqual(
+			filterExperts(WITH_DISABLED, { keyword: "暂停", includeDisabled: true }).map((item) => item.name),
+			["paused-writer"],
+		);
+		// 关掉开关时，它独有的标签也搜不到 —— 与列表同一份可见集合。
+		assert.deepEqual(filterExperts(WITH_DISABLED, { tag: "停用" }), []);
+	});
+
+	it("disabled: false / 缺字段的条目不受影响（只有 true 才算停用）", () => {
+		const explicit = expert({ name: "normal", disabled: false });
+		assert.deepEqual(
+			filterExperts([explicit], {}).map((item) => item.name),
+			["normal"],
+		);
+	});
+
+	it("计数与列表同源：同一组过滤条件传同一个 includeDisabled", () => {
+		const includeDisabled = true;
+		const filtered = filterExperts(WITH_DISABLED, { includeDisabled });
+		assert.equal(sourceCounts(filtered).all, WITH_DISABLED.length);
+		assert.equal(sourceCounts(filtered).user, 2);
+		const hidden = filterExperts(WITH_DISABLED, {});
+		assert.equal(sourceCounts(hidden).all, ALL.length);
+		assert.equal(sourceCounts(hidden).user, 1);
+	});
+
+	it("停用项默认排除了，但排序不会修改它（排序是另一件事）", () => {
+		const sorted = sortExperts(filterExperts(WITH_DISABLED, { source: "user", includeDisabled: true }), "name");
+		assert.deepEqual(
+			sorted.map((item) => item.displayName),
+			["我的写作助手", "暂停写作助手"],
+		);
+	});
+});
+
 describe("sourceCounts —— 计数与列表同源", () => {
 	it("四档计数（未知来源只进「全部」）", () => {
 		const counts = sourceCounts([...ALL, { name: "ghost", source: "mystery" }]);
