@@ -16623,9 +16623,13 @@ function ExpertAvatar({
 }
 function ExpertChip({
   expert,
-  onClear
+  onClear,
+  disabled
 }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "expert-chip", role: "status", title: `当前专家：${expert.displayName}`, children: [
+  /* 绑定的专家被停用（#426）：绑定保留，但这一轮起不再注入人格/私有技能。
+     标记必须看得见，否则用户只会在「模型怎么不按专家说话了」里自己猜。 */
+  const isDisabled = disabled === true;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: `expert-chip${isDisabled ? " expert-chip-disabled" : ""}`, role: "status", title: isDisabled ? `当前专家：${expert.displayName}（已停用，下一轮起不生效；可在能力库的「显示已停用」中恢复）` : `当前专家：${expert.displayName}`, children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertAvatar, { displayName: expert.displayName }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
@@ -16638,7 +16642,9 @@ function ExpertChip({
         children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 12 })
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "expert-chip-name", children: expert.displayName })
+    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "expert-chip-name", children: expert.displayName }),
+    isDisabled && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "expert-chip-badge", children: "已停用" }),
+    isDisabled && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: "；可在能力库的「显示已停用」中恢复" })
   ] });
 }
 function chipsForScene(chips, sceneId) {
@@ -17587,6 +17593,9 @@ function PlusMenu({
   const [open, setOpen] = reactExports.useState(false);
   const [modesOpen, setModesOpen] = reactExports.useState(false);
   const [expertsOpen, setExpertsOpen] = reactExports.useState(false);
+  /* 停用的专家不出现在选择器里（#426）。列表本身仍带 disabled 标记 ——
+     能力库要显示与恢复它们，过滤只发生在「选它」的入口这一侧。 */
+  const availableExperts = experts === void 0 ? void 0 : experts.filter((expert) => expert.disabled !== true);
   const close = () => {
     setOpen(false);
     setModesOpen(false);
@@ -17701,8 +17710,10 @@ function PlusMenu({
                   ]
                 }
               ),
-              expertsOpen && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "plus-menu-sub", children: experts === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取专家…" }) : experts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: "还没有可用专家" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                experts.map((expert) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              expertsOpen && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "plus-menu-sub", children: availableExperts === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取专家…" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                // 全是停用项时不能说「还没有可用专家」（库里还有，只是被收起了），
+                // 且「更多专家…」必须一起留着 —— 它正是去能力库恢复的入口（#426）。
+                availableExperts.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { title: experts.length > 0 ? "可用专家都已停用" : "还没有可用专家" }) : availableExperts.map((expert) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "button",
                   {
                     type: "button",
@@ -18292,6 +18303,7 @@ function HomeView({
   onInteractionChange,
   experts,
   expertId,
+  expertDisabled,
   onSelectExpert,
   prefill,
   onPrefillConsumed,
@@ -18653,7 +18665,7 @@ function HomeView({
                     onChange: onInteractionChange
                   }
                 ),
-                currentExpert !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertChip, { expert: currentExpert, onClear: () => onSelectExpert(void 0) })
+                currentExpert !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertChip, { expert: currentExpert, disabled: expertDisabled === true || currentExpert.disabled === true, onClear: () => onSelectExpert(void 0) })
               ]
             }
           ),
@@ -37414,7 +37426,7 @@ function ChatView({
                         onChange: onInteractionChange
                       }
                     ),
-                    currentExpert !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertChip, { expert: currentExpert, onClear: () => onSelectExpert(void 0) }),
+                    currentExpert !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertChip, { expert: currentExpert, disabled: conversation.state.expertDisabled === true, onClear: () => onSelectExpert(void 0) }),
                     conversation.usageDetail !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ContextUsageRing, { detail: conversation.usageDetail })
                   ]
                 }
@@ -71170,6 +71182,9 @@ function PromptPreviewSection() {
   const [modeId, setModeId] = reactExports.useState("");
   const [styleSel, setStyleSel] = reactExports.useState(FOLLOW_CURRENT_STYLE);
   const [expertSel, setExpertSel] = reactExports.useState("");
+  /* 当前会话绑定的专家已停用（#426）：选择器回落「不选专家」，并在下方
+     说明「按不选专家组装」。恢复后重新打开设置页即恢复。 */
+  const [sessionExpertDisabled, setSessionExpertDisabled] = reactExports.useState(false);
   const [result, setResult] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
   const [fullView, setFullView] = reactExports.useState(false);
@@ -71194,9 +71209,11 @@ function PromptPreviewSection() {
       setSceneId(scenes.some((s) => s.id === snapshot.state.sceneId) ? snapshot.state.sceneId : scenes[0]?.id ?? "");
       setModeId(modes.some((m) => m.id === snapshot.state.interactionId) ? snapshot.state.interactionId : modes[0]?.id ?? "");
       const sessionExpert = snapshot.state.expertId;
-      setExpertSel(
-        sessionExpert !== void 0 && expertList.some((e) => e.name === sessionExpert) ? sessionExpert : ""
-      );
+      const bound = sessionExpert === void 0 ? void 0 : expertList.find((e) => e.name === sessionExpert);
+      // 停用的专家不进下拉，也不作为默认选中（#426）：否则选择器会停在一个
+      // 选项列表里根本不存在的值上。
+      setSessionExpertDisabled(bound?.disabled === true);
+      setExpertSel(bound !== void 0 && bound.disabled !== true ? sessionExpert : "");
       setError(void 0);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -71325,12 +71342,13 @@ function PromptPreviewSection() {
               value: expertSel,
               options: [
                 { value: "", label: "不选专家" },
-                ...experts.map((expert) => ({ value: expert.name, label: expert.displayName }))
+                ...experts.filter((expert) => expert.disabled !== true).map((expert) => ({ value: expert.name, label: expert.displayName }))
               ],
               onChange: (value) => setExpertSel(value)
             }
           )
         ] }),
+        sessionExpertDisabled && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-meta", role: "status", children: "当前会话绑定的专家已停用，预览按「不选专家」组装；在能力库恢复后下一轮自动继续。" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
@@ -72072,6 +72090,9 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
   const [selectedTag, setSelectedTag] = reactExports.useState(void 0);
   const [source, setSource] = reactExports.useState("all");
   const [sortMode, setSortMode] = reactExports.useState("default");
+  /* 「显示已停用」（#426）：停用项默认不在能力库视图里，但它们仍在库里 ——
+     这一档打开后与其它条目一样参与来源 / 标签 / 搜索 / 排序 / 计数。 */
+  const [showDisabled, setShowDisabled] = reactExports.useState(false);
   const [dragOver, setDragOver] = reactExports.useState(false);
   const [listTab, setListTab] = reactExports.useState("experts");
   const [detail, setDetail] = reactExports.useState(void 0);
@@ -72097,7 +72118,9 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
   const allTags = reactExports.useMemo(() => {
     const seen2 = /* @__PURE__ */ new Set();
     const ordered = [];
-    for (const expert of scoped) {
+    // 标签行与列表同一份可见集合：停用项收起时，它独有的标签也不该出现
+    // （否则点进一个标签会得到「没有结果」而不知道为什么）。
+    for (const expert of filterExperts(scoped, { includeDisabled: showDisabled })) {
       for (const tag of expert.tags) {
         if (!seen2.has(tag)) {
           seen2.add(tag);
@@ -72106,7 +72129,14 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
       }
     }
     return ordered;
-  }, [scoped]);
+  }, [scoped, showDisabled]);
+  const disabledCount = reactExports.useMemo(
+    // 与来源 chip 的计数同口径：先吃标签与关键词。数字在按钮上就是「点下去会
+    // 多出几条」，搜索「股票」时不该还挂着库里全部的停用数（#426 评审）。
+    // 来源不参与，理由同 sourceCounts：否则切来源时数字永远与自己相等。
+    () => filterExperts(scoped, { tag: selectedTag, keyword, includeDisabled: true }).filter((e) => e.disabled === true).length,
+    [scoped, selectedTag, keyword]
+  );
   /*
    * 标签行的横向渐隐提示：只在**真的溢出**时给（并区分左右），
    * 不新增常驻滚动条。用 ResizeObserver + scroll 事件，不轮询。
@@ -72232,12 +72262,12 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
    * 可能只有 1 张卡）。来源本身当然不参与计数，否则永远只有当前档非 0。
    */
   const counts = reactExports.useMemo(
-    () => sourceCounts(filterExperts(scoped, { tag: selectedTag, keyword })),
-    [scoped, selectedTag, keyword]
+    () => sourceCounts(filterExperts(scoped, { tag: selectedTag, keyword, includeDisabled: showDisabled })),
+    [scoped, selectedTag, keyword, showDisabled]
   );
   const visibleExperts = reactExports.useMemo(
-    () => sortExperts(filterExperts(scoped, { source, tag: selectedTag, keyword }), sortMode),
-    [scoped, source, selectedTag, keyword, sortMode]
+    () => sortExperts(filterExperts(scoped, { source, tag: selectedTag, keyword, includeDisabled: showDisabled }), sortMode),
+    [scoped, source, selectedTag, keyword, sortMode, showDisabled]
   );
   const filtersActive = source !== "all" || selectedTag !== void 0 || kw !== "";
   const clearFilters = reactExports.useCallback(() => {
@@ -72428,7 +72458,19 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
           value: sortMode,
           options: SORT_MODES.map((option) => ({ value: option.id, label: option.label })),
           onChange: setSortMode
-        })
+        }),
+        // 有停用项才渲染（没有可显示的东西时这颗按钮只会是噪声）。
+        // 它是**视图过滤**，不是排序：用分隔线与「排序」组分开，避免读成排序的一个选项。
+        disabledCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-show-disabled", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: `mini-btn${showDisabled ? " active" : ""}`,
+              "aria-pressed": showDisabled,
+              onClick: () => setShowDisabled((value) => !value),
+              children: `显示已停用（${disabledCount}）`
+            }
+          ) })
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
@@ -72490,6 +72532,11 @@ function ExpertsView({ experts, error, onRetry, onUseExpert, onCreateExpert, onT
             action: /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: clearFilters, children: "清除筛选" })
           }
         )
+      ) : disabledCount > 0 ? (
+        // 全部停用时不能说「专家库为空」（也不分 tab 说「还没有团队型专家」）——
+        // 库里还有东西，只是被用户收起来了。空态给出下一步（打开「显示已停用」），
+        // 而不是让用户以为专家都没了（#426）。
+        /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, { icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconAssistant, { size: 40 }), title: listTab === "teams" ? "所有专家团都已停用" : "所有专家都已停用", description: "打开工具栏的「显示已停用」查看并恢复。" })
       ) : listTab === "teams" ? (
         // 团队专家是数据（声明 expertType: team 即进此页），没有就是真没有，
         // 不再是「即将上线」的占位文案。
@@ -72517,6 +72564,7 @@ function ExpertCard({
 }) {
   const skillCount = Array.isArray(expert.skills) ? expert.skills.length : 0;
   const installedText = expert.source === "pack" ? formatPackDate(expert.packInstalledAt) : "";
+  const isDisabled = expert.disabled === true;
   /*
    * 底部 rail 的内容用「 · 」连成一句：技能数 / 版本 / 安装时间是一个整体，
    * 不是三个可点的 chip。为空时整行不渲染（0 个技能是噪声）。
@@ -72528,7 +72576,7 @@ function ExpertCard({
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
-      className: "ex-card",
+      className: `ex-card${isDisabled ? " ex-card-disabled" : ""}`,
       // 鼠标点整卡仍打开详情；键盘入口是卡内那颗独立的「查看详情」按钮。
       // **外层不再是 role=button**：真按钮套在 role=button 里会让读屏听到
       // 两个「按钮」且「使用」到底算哪个按钮的子项说不清。
@@ -72548,6 +72596,7 @@ function ExpertCard({
         // 否则 margin-top:auto 失去载体，tags 会浮在描述下方而不是卡片底边。
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-card-meta", children: metaParts.join(" · ") }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-card-tags", children: [
+          isDisabled && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-source-badge ex-badge-disabled", children: "已停用" }, "disabled"),
           expert.source === "pack" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-source-badge", children: "能力包" }, "source"),
           expert.source === "user" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-source-badge", children: "自建" }, "source"),
           expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag))
@@ -72558,7 +72607,7 @@ function ExpertCard({
           {
             type: "button",
             className: "ex-card-open",
-            "aria-label": `查看详情：${expert.displayName}`,
+            "aria-label": `查看详情：${expert.displayName}${isDisabled ? "（已停用）" : ""}`,
             onClick: (e) => {
               e.stopPropagation();
               onOpen(expert);
@@ -72566,7 +72615,9 @@ function ExpertCard({
           }
         ),
         // 「使用」是「查看详情」的兄弟节点并压在它之上（z-index），不能被盖住。
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
+        // 停用项**不渲染**它：按钮默认 opacity:0、只在 hover 浮现，留一颗看不见的
+        // 禁用按钮等于给鼠标挖坑（真正可点的入口是详情里的「恢复专家」）。
+        !isDisabled && /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
             type: "button",
@@ -72719,6 +72770,26 @@ function ExpertDetailModal({
   const [confirmRemove, setConfirmRemove] = reactExports.useState(false);
   const [skillsExpanded, setSkillsExpanded] = reactExports.useState(false);
   /*
+   * 停用状态以本地 state 承载（#426）：父组件的 `detail` 是打开那一刻的快照，
+   * 重载或恢复不会替换它。与 `window.kami.setExpertDisabled` 返回的新清单同源，
+   * 界面切在「恢复 / 停用」两态上不会出现按钮与标记各说各话。
+   */
+  const [disabled, setDisabled] = reactExports.useState(expert.disabled === true);
+  const [toggleBusy, setToggleBusy] = reactExports.useState(false);
+  /*
+   * 停用成功后动作行那颗「停用专家」会被卸载，焦点不接管就掉回 body：
+   * 下一次 Tab 会从关闭键重新开始，而不是落在新出现的「恢复专家」上（#426 评审）。
+   * 只在该组件自己触发切换时抢焦点 —— 打开一个本来就停用的专家时，
+   * 焦点仍应交给对话框容器（useModalFocus 的初始位置）。
+   */
+  const primaryActionRef = reactExports.useRef(null);
+  const refocusPrimaryRef = reactExports.useRef(false);
+  reactExports.useEffect(() => {
+    if (!disabled || !refocusPrimaryRef.current) return;
+    refocusPrimaryRef.current = false;
+    primaryActionRef.current?.focus();
+  }, [disabled]);
+  /*
    * 触发「移除能力包」的那颗按钮在确认态会被卸载（确认块是独立一块），
    * 焦点不接管就会掉到 body。确认态出现时把焦点交给「确认移除」。
    */
@@ -72742,6 +72813,31 @@ function ExpertDetailModal({
   const toastError = (result) => {
     const first = result?.errors?.[0];
     onToast?.(first === void 0 ? "操作失败" : `${first.message}${first.file === void 0 ? "" : `（${first.file}）`}`, "error");
+  };
+  /*
+   * 停用 / 恢复：只写用户级偏好，不删除任何文件（#426）。
+   * 成功提示要说清「文件还在」，否则用户会把它与「移除能力包」混为一谈。
+   */
+  const toggleDisabled = async () => {
+    if (toggleBusy || busy) return;
+    setToggleBusy(true);
+    try {
+      const next = !disabled;
+      await window.kami.setExpertDisabled(expert.name, next);
+      if (next) refocusPrimaryRef.current = true;
+      setDisabled(next);
+      onToast?.(
+        next
+          ? `已停用专家「${expert.displayName}」，文件保留，可在能力库恢复`
+          : `已恢复专家「${expert.displayName}」，下一轮起重新生效`,
+        "success"
+      );
+      onReload?.();
+    } catch (e) {
+      onToast?.(e instanceof Error ? e.message : String(e), "error");
+    } finally {
+      setToggleBusy(false);
+    }
   };
   const removePack = async () => {
     if (busy) return;
@@ -72806,7 +72902,7 @@ function ExpertDetailModal({
         className: "ex-modal",
         role: "dialog",
         "aria-modal": "true",
-        "aria-label": `专家详情：${expert.displayName}`,
+        "aria-label": `专家详情：${expert.displayName}${disabled ? "（已停用）" : ""}`,
         tabIndex: -1,
         ref: cardRef,
         onClick: (e) => e.stopPropagation(),
@@ -72815,14 +72911,23 @@ function ExpertDetailModal({
             /* @__PURE__ */ jsxRuntimeExports.jsx(ExpertAvatar, { displayName: expert.displayName, className: "ex-detail-avatar" }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-title", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-name", children: expert.displayName }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-profession", children: expert.profession })
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ex-modal-profession", children: [
+                expert.profession,
+                disabled && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-badge-disabled", children: "已停用" })
+              ] })
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn ex-modal-close", "aria-label": "关闭", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-modal-desc", children: expert.displayDescription }),
+          disabled && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ex-modal-disabled-note", role: "status", children: [
+            "已停用：不删除任何文件。能力库默认视图会收起它，打开工具栏的「显示已停用」仍能找到。已绑定该专家的会话保留绑定，但从下一轮起不再注入人格与私有技能、追加工具也不再生效；恢复后自动继续。"
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-tags", children: expert.tags.map((tag) => /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-tag", children: tag }, tag)) }),
           isTeam && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-meta", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: ["成员 ", expert.agents ?? 0] }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-prompts", children: [
+          // 停用态不渲染起手问题（#426）：它们此刻一件都用不了，却是弹窗里最高
+          // 的一块 —— 矮视口（1280×679，85vh ≈ 577px）下会把唯一的「恢复专家」
+          // 顶到滚动边缘之外。停用说明已经解释了当前状态，恢复后它们原样回来。
+          !disabled && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-prompts", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "ex-modal-prompts-title", children: "专家帮你做" }),
             expert.quickPrompts.map((prompt2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
               "button",
@@ -72860,7 +72965,7 @@ function ExpertDetailModal({
               }
             )
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-actions", children: isPack ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "ex-modal-actions", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [isPack ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: `来源：能力包 ${expert.packId ?? expert.name}${expert.packVersion === void 0 ? "" : `@${expert.packVersion}`}${installedText === "" ? "" : ` · ${installedText}`}` }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
             !confirmRemove && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", onClick: () => setConfirmRemove(true), disabled: busy, children: "移除能力包" })
@@ -72872,6 +72977,20 @@ function ExpertDetailModal({
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ex-modal-source", children: "来源：内置专家 · 可能包含第三方内容，暂不支持导出" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: true, title: "内置专家可能包含第三方内容，再分发授权确认之前不支持导出", children: "导出能力包…" })
+          ] }),
+          /* 停用（#426）：与「移除能力包」分开放，措辞也点明二者不同 ——
+             这个动作不动任何文件，随时可以恢复。停用态不在这一行重复「恢复」：
+             底部主按钮已经是唯一的恢复入口，同一屏放两颗同样的按钮只会让人犹豫。 */
+          !disabled && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "mini-btn ex-modal-disable",
+              onClick: toggleDisabled,
+              disabled: toggleBusy || busy,
+              children: toggleBusy ? "停用中…" : "停用专家"
+            }
+          )
           ] }) }),
           isPack && confirmRemove && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ex-modal-confirm", role: "group", "aria-label": "确认移除能力包", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ex-modal-confirm-title", children: [
@@ -72885,7 +73004,9 @@ function ExpertDetailModal({
               /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", ref: confirmRef, onClick: removePack, disabled: busy, children: busy ? "移除中…" : "确认移除" })
             ] })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", onClick: () => onUse(expert.name), children: "使用专家" })
+          disabled
+            ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", ref: primaryActionRef, onClick: toggleDisabled, disabled: toggleBusy, children: toggleBusy ? "恢复中…" : "恢复专家" })
+            : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ex-modal-use", onClick: () => onUse(expert.name), disabled: toggleBusy, children: "使用专家" })
         ]
       }
     ) })
@@ -80017,7 +80138,7 @@ function App() {
       keywords: [meta.cwd, "空间"],
       run: () => newTaskInSpace(meta.cwd)
     }));
-    const expertEntries = (experts ?? []).map((expert) => ({
+    const expertEntries = (experts ?? []).filter((expert) => expert.disabled !== true).map((expert) => ({
       id: `expert:${expert.name}`,
       kind: "expert",
       title: expert.displayName || expert.name,
@@ -80307,6 +80428,7 @@ function App() {
         onInteractionChange: changeInteraction,
         experts,
         expertId: conversation.state.expertId,
+        expertDisabled: conversation.state.expertDisabled === true,
         onSelectExpert: selectExpert,
         prefill: pendingPrefill,
         onPrefillConsumed: () => setPendingPrefill(void 0),

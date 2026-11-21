@@ -222,6 +222,53 @@ function filterEnabledSkills(skills, overrides) {
   return skills.filter((skill) => isSkillEnabled(skill.name, overrides));
 }
 
+/*
+ * 停用的专家（#426）：用户级偏好，只影响「选择面与提示词组装」两处读路径，
+ * 不写进专家定义、也不删任何文件 —— 卸载能力包与停用专家是两个动作。
+ *
+ * 读侧口径与 skillOverrides 同族：整块非法（不是数组）就整块忽略并留下诊断；
+ * 单条非法只丢那一条；最后全是坏值等于「没停用任何专家」。
+ * 去重是必要的：清单会参与 `includes` 判定，重复项本身无害，但它会原样落盘，
+ * 手改过的文件不该在每次读取时被当作「多位专家」。
+ */
+function readDisabledExperts(value) {
+  if (value === void 0) return void 0;
+  if (!Array.isArray(value)) {
+    console.error("偏好文件的 disabledExperts 应为字符串数组，已整块忽略：", value);
+    return void 0;
+  }
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim() === "") {
+      console.error(`disabledExperts 的条目应为非空字符串，实际是 ${JSON.stringify(entry)}，已忽略该条`);
+      continue;
+    }
+    const id = entry.trim();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out.length === 0 ? void 0 : out;
+}
+
+/**
+ * 写侧：把一位专家加入 / 移出停用清单，返回**下一份偏好对象**（不改入参）。
+ *
+ * 两条与 skillOverrides 同口径的约定：
+ *   · 去重 —— 重复 id 会让清单在落盘后越来越长；
+ *   · 空清单删键 —— 「没停用任何专家」不该在 preferences.json 里留一个 `[]`，
+ *     否则每次读改写都可能把它写回去，文件与缺省态不再逐字节相同。
+ */
+function withExpertDisabled(preferences, expertId, disabled) {
+  const current = Array.isArray(preferences.disabledExperts) ? preferences.disabledExperts : [];
+  const next = disabled
+    ? [.../* @__PURE__ */ new Set([...current, expertId])]
+    : current.filter((entry) => entry !== expertId);
+  const { disabledExperts: _dropped, ...rest } = preferences;
+  return next.length === 0 ? rest : { ...rest, disabledExperts: next };
+}
+
 const EMPTY = { activeModelKey: void 0 };
 
 function getPath$1() {
@@ -284,6 +331,9 @@ function readPreferences() {
     const spawnBudget = optPositiveInt("spawnBudget");
     const subagentTimeoutMs = optPositiveInt("subagentTimeoutMs");
     const skillOverrides = readSkillOverrides(rec["skillOverrides"]);
+    // 停用的专家（#426）：读侧白名单必须显式列出 —— 漏加就是「写进去读不回」，
+    // 与 updateChannel 那次事故同形（见本文件 updateChannel 的注释）。
+    const disabledExperts = readDisabledExperts(rec["disabledExperts"]);
     const runtimes = readRuntimePrefs(rec["runtimes"]);
     /*
      * 确定性 hooks（spec: deterministic-hooks）。
@@ -331,6 +381,7 @@ function readPreferences() {
       ...welcomeGreeting !== void 0 ? { welcomeGreeting } : {},
       ...showChangeDetails !== void 0 ? { showChangeDetails } : {},
       ...skillOverrides !== void 0 ? { skillOverrides } : {},
+      ...disabledExperts !== void 0 ? { disabledExperts } : {},
       ...runtimes !== void 0 ? { runtimes } : {},
       ...proxy !== void 0 ? { proxy } : {},
       ...starterPrompts.length > 0 ? { starterPrompts } : {},
@@ -499,11 +550,13 @@ export {
 	isSkillEnabled,
 	isThemePreference,
 	isUpdateChannel,
+	readDisabledExperts,
 	readPaletteMemory,
 	readHooksConfig,
 	readPermissions,
 	readPreferences,
 	readRuntimePrefs,
 	readSkillOverrides,
+	withExpertDisabled,
 	writePreferences,
 };

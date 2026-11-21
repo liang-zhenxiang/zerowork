@@ -205,6 +205,7 @@ import {
 	readPaletteMemory,
 	readPreferences,
 	validateProxyInput,
+	withExpertDisabled,
 	writePreferences,
 } from "./preferences.js";
 import { PreviewServers } from "./preview-server.js";
@@ -1975,8 +1976,26 @@ function loadExpertsNow() {
   );
 }
 
+/**
+ * 这位专家是否被用户停用（#426）。
+ *
+ * 每处判定都**现读偏好**，不缓存 —— 与 listExperts / 提示词组装同一条读路径：
+ * 停用 / 恢复必须从下一次调用起立即生效，不能等重启或等会话重建。
+ *
+ * 停用只影响「选择面」与「提示词组装」两处读路径（见 setExpert 守卫与
+ * composeSystemPrompt 的调用点）。专家定义本身仍在库里：能力库要能看到它、
+ * 恢复它，团队 / 子代理按定义解析，都不读这份偏好。
+ */
+function isExpertDisabled(expertId) {
+  if (typeof expertId !== "string" || expertId === "") return false;
+  return readPreferences().disabledExperts?.includes(expertId) === true;
+}
+
 async function sessionSkills(expertId) {
-  if (expertId === void 0) return listSkills();
+  // 停用的专家不再提供私有技能（#426）：这是「技能清单段 / use_skill / 手动
+  // /skill: 展开」共用的唯一出口，把判定收在这里，四条读路径不会各漏一处。
+  // 全局技能照常可用 —— 停用去掉的是「这位专家的私有能力」，不是技能功能本身。
+  if (expertId === void 0 || isExpertDisabled(expertId)) return listSkills();
   return listSkills(resolveSessionExpert(loadExpertsNow(), expertId)?.skillsDir);
 }
 
@@ -3172,6 +3191,12 @@ async function createHost(bucket, sessionManager) {
     extraActiveTools: () => mcpClient.registeredToolNames(),
     // 专家绑定与两轴正交，随会话状态一起进宿主（resume/newTask 沿用口径同两轴）。
     ...bucket.conversation.state.expertId === void 0 ? {} : { expertId: bucket.conversation.state.expertId },
+    // 停用判定交给宿主：`get state()` 据此下发 `expertDisabled`，界面在专家
+    // chip 上标「已停用」。绑定**保留**（expertId 仍在），恢复后自动继续。
+    isExpertDisabled: () => {
+      const expertId = bucket.conversation.state.expertId;
+      return expertId !== void 0 && isExpertDisabled(expertId);
+    },
     emit: (event) => emitSessionEvent(bucket, event),
     resources: RESOURCES,
     // 运行台账按真值 sessionId 建（工厂语义见 SessionHostOptions.createLedger）。
@@ -3205,6 +3230,9 @@ async function createHost(bucket, sessionManager) {
     getExpertLabel: () => {
       const expertId = bucket.conversation.state.expertId;
       if (expertId === void 0) return void 0;
+      // 停用的专家不往 hidden context 写「专家」行（#426）：绑定还在，
+      // 但这一轮不需要告诉模型它正在扮演谁。
+      if (isExpertDisabled(expertId)) return void 0;
       try {
         return loadExpertsNow().find((e) => e.name === expertId)?.displayName;
       } catch {
@@ -3217,6 +3245,8 @@ async function createHost(bucket, sessionManager) {
     getExpertExtraTools: () => {
       const expertId = bucket.conversation.state.expertId;
       if (expertId === void 0) return void 0;
+      // 停用即视为无追加工具（#426）：工具面立刻退回模式白名单。
+      if (isExpertDisabled(expertId)) return void 0;
       try {
         return loadExpertsNow().find((e) => e.name === expertId)?.extraTools;
       } catch {
@@ -3402,10 +3432,17 @@ async function createHost(bucket, sessionManager) {
            * 与未归入项目的会话都返回 undefined → 不进注入路径，零开销。
            */
           const projectInstructionsBody = projectsStore.instructionsFor(bucket.sessionFilePath);
+          /*
+           * 停用的专家按「无专家」组装（#426）：人格段与私有技能段都不进提示词。
+           * 绑定本身不清（state.expertId 仍是它），所以恢复后下一轮自动继续注入。
+           * 判定放在这里而不是 getCurrent 里：getCurrent 是两轴与绑定的权威镜像，
+           * 把「一时不可用」混进绑定状态会让「恢复后自动继续」失去依据。
+           */
+          const activeExpertId = expertId !== void 0 && isExpertDisabled(expertId) ? void 0 : expertId;
           const composed = await composeSystemPrompt({
             sceneId,
             interactionId,
-            expertId,
+            expertId: activeExpertId,
             piContext,
             ...projectInstructionsBody === void 0 ? {} : { projectInstructionsBody }
           });
@@ -4218,10 +4255,13 @@ async function buildConversationForBucket(bucket, manager, host) {
   const contextUsage = host.state.contextUsage;
   try {
     const state = bucket.conversation.state;
+    // 与 prompt-switch 的 compose 同一条判据（#426）：停用的专家按「无专家」估算，
+    // 否则上下文用量圆环会把一份根本不会发出的人格算进去。
+    const activeExpertId = state.expertId !== void 0 && isExpertDisabled(state.expertId) ? void 0 : state.expertId;
     const composed = await composeSystemPrompt({
       sceneId: state.sceneId,
       interactionId: state.interactionId,
-      expertId: state.expertId,
+      expertId: activeExpertId,
       piContext: void 0
     });
     bucket.systemPromptTokens = composed.systemTokens;
@@ -5731,7 +5771,17 @@ const handlers = {
    */
   [INVOKE.setExpert]: async ([expertId]) => {
     const id = expertId;
-    if (id !== void 0) requireExpertPersona(loadExpertsNow(), id);
+    if (id !== void 0) {
+      /*
+       * 停用守卫（#426）：**必须**先于「在库里存在」的校验，报错才能指向
+       * 「去能力库恢复」而不是「专家不存在」。已绑定该专家的老会话即使
+       * 保留 expertId，也不能借旧绑定重新选中它 —— 那条路径走的是同一个通道。
+       */
+      if (isExpertDisabled(id)) {
+        throw new Error(`专家「${id}」已停用，请先在能力库恢复后再使用`);
+      }
+      requireExpertPersona(loadExpertsNow(), id);
+    }
     const bucket = currentBucket;
     const hostPromise = bucket.hostPromise;
     if (hostPromise === void 0) {
@@ -5741,30 +5791,103 @@ const handlers = {
     (await hostPromise).setExpert(id);
   },
   /**
+   * 停用 / 恢复一位专家（#426）。
+   *
+   * 语义见 prd：用户级偏好，不改专家定义、不删任何文件。停用后
+   *   ① 选择器不再列出它（渲染层按 listExperts 的 disabled 过滤）；
+   *   ② setExpert 拒绝重新选中（上一段通道）；
+   *   ③ 已绑定它的会话**保留绑定**，从下一轮起不注入人格与私有技能、不追加工具，
+   *      并通过 session_state 的 expertDisabled 告诉界面「它被停用了」。
+   * 恢复时把这条链路上的每一处读路径即时翻回去（偏好现读，无需重建会话）。
+   */
+  [INVOKE.setExpertDisabled]: async ([expertId, disabled]) => {
+    if (typeof expertId !== "string" || expertId.trim() === "") {
+      throw new Error("停用专家需要具体的专家 id");
+    }
+    if (typeof disabled !== "boolean") {
+      throw new Error("停用专家的第二个参数必须是布尔值");
+    }
+    const id = expertId.trim();
+    /*
+     * 只接受库里存在的专家：偏好里散落一个不存在的 id 会让「已停用」
+     * 永远清不掉（能力库里没有它的卡片，用户无处恢复）。删除 / 改名的专家
+     * 由 listExperts 那条读路径自然消失，不该在这里被写进偏好。
+     */
+    if (!loadExpertsNow().some((expert) => expert.name === id)) {
+      throw new Error(`专家「${id}」不在专家库中（可能已被删除或改名）`);
+    }
+    const next = withExpertDisabled(readPreferences(), id, disabled);
+    writePreferences(next);
+    const disabledExperts = next.disabledExperts ?? [];
+    /*
+     * 已绑定该专家的会话：让宿主重应用工具面并重推状态。
+     *   · 有宿主：setExpert 走既有的「即时生效」纪律（工具面重新计算，
+     *     getExpertExtraTools 此刻已能读到新偏好），emitState 带上 expertDisabled；
+     *   · 还没建宿主：只改桶里的状态。工具面与提示词都要等建宿主时才算，
+     *     此刻补 expertDisabled 只是让界面（比如首页的 chip）立刻标记。
+     */
+    const refresh = async (bucket) => {
+      if (bucket.conversation.state.expertId !== id) return;
+      const hostPromise = bucket.hostPromise;
+      if (hostPromise === void 0) {
+        const { expertDisabled: _stale, ...state } = bucket.conversation.state;
+        emitSessionEvent(bucket, {
+          type: "session_state",
+          state: { ...state, ...disabled ? { expertDisabled: true } : {} }
+        });
+        return;
+      }
+      try {
+        (await hostPromise).setExpert(id);
+      } catch (error) {
+        // 单个会话重推失败不该让「偏好已落盘」这件事回报成失败：用户已经
+        // 停用了专家，界面上的标记可以在下一次状态推送时补上。
+        eventLog.append({
+          kind: "ipc_error",
+          channel: INVOKE.setExpertDisabled,
+          message: error instanceof Error ? error.message : String(error)
+        });
+      }
+    };
+    for (const bucket of new Set([currentBucket, ...bucketsById.values()])) {
+      await refresh(bucket);
+    }
+    return { disabledExperts };
+  },
+  /**
    * 专家列表：renderer「专家 ▸」子菜单、对话头部与起手 chips 的展示数据源。
    * 每次现载不缓存（与 setExpert 的校验同一条读路径，用户级覆盖即时生效）；
    * 只映射展示字段，人格正文不下发 —— compose 时 daemon 自取。
+   *
+   * 停用的专家**仍然出现在这里**并带 `disabled: true`（#426）：能力库要能显示
+   * 与恢复它们，选择器则在渲染层按这个标记过滤。不在 daemon 侧过滤，是因为
+   * 「哪些读路径该看不见它」不止一处（选择器 / 命令面板 / 提示词预览），
+   * 而过早丢掉字段会让能力库无从得知它为什么消失。
    */
-  [INVOKE.listExperts]: async () => loadExpertsNow().map((e) => ({
-    name: e.name,
-    displayName: e.displayName,
-    profession: e.profession,
-    description: e.description,
-    displayDescription: e.displayDescription,
-    quickPrompts: e.quickPrompts,
-    tags: e.tags,
-    source: e.source,
-    expertType: e.expertType,
-    // 能力库画廊：技能（名称 + 描述）与团队型专家的成员数。
-    // 只增字段，既有的展示字段与顺序不变。
-    skills: expertSkillSummaries(e.skills),
-    agents: e.agents.length,
-    // 能力包来源才带：详情弹窗据此显示「来源：能力包 <id>@<version>」与移除入口。
-    ...e.packId === void 0 ? {} : { packId: e.packId },
-    ...e.packVersion === void 0 ? {} : { packVersion: e.packVersion },
-    // 能力包安装时间（毫秒）：卡片 meta 与「最近安装」排序用。缺省不带。
-    ...e.packInstalledAt === void 0 ? {} : { packInstalledAt: e.packInstalledAt }
-  })),
+  [INVOKE.listExperts]: async () => {
+    const disabled = new Set(readPreferences().disabledExperts ?? []);
+    return loadExpertsNow().map((e) => ({
+      name: e.name,
+      displayName: e.displayName,
+      profession: e.profession,
+      description: e.description,
+      displayDescription: e.displayDescription,
+      quickPrompts: e.quickPrompts,
+      tags: e.tags,
+      source: e.source,
+      expertType: e.expertType,
+      ...disabled.has(e.name) ? { disabled: true } : {},
+      // 能力库画廊：技能（名称 + 描述）与团队型专家的成员数。
+      // 只增字段，既有的展示字段与顺序不变。
+      skills: expertSkillSummaries(e.skills),
+      agents: e.agents.length,
+      // 能力包来源才带：详情弹窗据此显示「来源：能力包 <id>@<version>」与移除入口。
+      ...e.packId === void 0 ? {} : { packId: e.packId },
+      ...e.packVersion === void 0 ? {} : { packVersion: e.packVersion },
+      // 能力包安装时间（毫秒）：卡片 meta 与「最近安装」排序用。缺省不带。
+      ...e.packInstalledAt === void 0 ? {} : { packInstalledAt: e.packInstalledAt }
+    }));
+  },
   /**
    * 团队任务板投影（spec: add-team-ux-parity 批次 ③）：Ctrl+T 面板的数据源。
    *
@@ -6438,8 +6561,17 @@ const handlers = {
   [INVOKE.promptPreview]: async ([request]) => {
     const preview = request;
     const experts = loadExpertsNow();
-    const expert = resolveSessionExpert(experts, preview.expertId);
-    return buildPromptPreview(RESOURCES, preview, {
+    /*
+     * 停用的专家按「不选专家」预览（#426）：与真实会话走同一条判据 ——
+     * 预览里要是仍带着人格，用户会以为停用没生效。渲染层也会把停用项从
+     * 下拉里去掉，两处一起兜住「旧请求 / 手改状态」。
+     */
+    const requestedExpertId = preview.expertId;
+    const activeExpertId = typeof requestedExpertId === "string" && isExpertDisabled(requestedExpertId)
+      ? void 0
+      : requestedExpertId;
+    const expert = resolveSessionExpert(experts, activeExpertId);
+    return buildPromptPreview(RESOURCES, { ...preview, expertId: activeExpertId }, {
       /*
        * 技能清单要过**同一份**启用过滤（enabledSkills 用的也是这个纯函数）：
        * 预览里出现一个「此刻发消息根本看不到」的技能，就是与真实组装的静默漂移。

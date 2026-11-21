@@ -7,7 +7,8 @@
  *
  * 条目形状由调用方给（daemon 的 `listExperts` 投影）：
  * `{ name, displayName, profession, description, displayDescription, tags,
- *    source: "builtin" | "user" | "pack", expertType, packVersion?, packInstalledAt? }`。
+ *    source: "builtin" | "user" | "pack", expertType, disabled?, packVersion?,
+ *    packInstalledAt? }`。
  * core 不认识 React，也不猜测缺失字段的语义 —— 缺字段一律按「没有」处理，
  * 不伪造安装时间或描述。
  */
@@ -44,16 +45,21 @@ function matchesKeyword(expert, keyword) {
 }
 
 /**
- * 来源 × 标签 × 关键词三者是**与**关系。
+ * 来源 × 标签 × 关键词三者是**与**关系；停用项默认不出现在默认视图里（#426）。
  *
  * 此前界面在有关键词时直接忽略标签（`if (kw !== "") ... else ...`），
  * 于是「搜索里再也选不了分类」。这里统一成可叠加的过滤，调用方不必再记分支。
+ *
+ * `includeDisabled` 是能力库「显示已停用」开关的唯一接口：默认 false 时排除
+ * `disabled: true` 的条目（它们仍在库里，只是不在默认视图）。计数与列表**必须**
+ * 传同一个值 —— 否则「内置 3」点开只有 2 张卡。
  */
-export function filterExperts(experts, { source = "all", tag, keyword = "" } = {}) {
+export function filterExperts(experts, { source = "all", tag, keyword = "", includeDisabled = false } = {}) {
 	const list = Array.isArray(experts) ? experts : [];
 	const wanted = SOURCE_IDS.has(source) && source !== "all" ? source : undefined;
 	const kw = typeof keyword === "string" ? keyword.trim().toLowerCase() : "";
 	return list.filter((expert) => {
+		if (includeDisabled !== true && expert?.disabled === true) return false;
 		if (wanted !== undefined && expert?.source !== wanted) return false;
 		if (tag !== undefined && !(Array.isArray(expert?.tags) && expert.tags.includes(tag))) return false;
 		return matchesKeyword(expert ?? {}, kw);

@@ -704,6 +704,12 @@ class SessionHost {
       interactionId: this.interactionId,
       // 无专家时缺省（不占字段），与 SessionState.expertId 的可选契约一致。
       ...this.expertId === void 0 ? {} : { expertId: this.expertId },
+      /*
+       * 绑定的专家被用户停用（#426）：绑定**保留**（上面仍下发 expertId），
+       * 只额外标记「此刻不生效」，界面据此在 chip 上标「已停用」并给恢复指引。
+       * 常态不占字段 —— 与 expertId / delegateMode 同款的可选契约。
+       */
+      ...this.expertId !== void 0 && this.options.isExpertDisabled?.() === true ? { expertDisabled: true } : {},
       // 委派模式：常态不占字段（与 expertId 同款）。
       ...this.delegateMode ? { delegateMode: true } : {},
       modelId: model === void 0 ? void 0 : toModelKey(model.provider, model.id),

@@ -95,6 +95,15 @@ const INVOKE = {
    * 只带展示字段 —— 人格正文不经 IPC，compose 时 daemon 从专家库自取。
    */
   listExperts: "session:list-experts",
+  /**
+   * 停用 / 恢复一位专家（#426）。
+   *
+   * 停用是**用户级偏好**（preferences.json 的 disabledExperts），不改专家定义、
+   * 不删任何文件 —— 与「卸载能力包」是两个动作。写入后 daemon 会重推所有
+   * 绑定该专家的会话状态（`expertDisabled`），并让下一轮提示词不再注入人格与
+   * 私有技能。payload `[expertId, disabled]`；返回新的完整停用清单。
+   */
+  setExpertDisabled: "experts:set-disabled",
   /** 团队任务板投影（只读，spec: add-team-ux-parity 批次 ③）：Ctrl+T 面板的数据源。 */
   getTeamTasks: "session:get-team-tasks",
   /** 切换模型。 */

@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 层模块边界与偏好/会话状态纪律"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "组件状态、可访问性与视觉约束"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/e2e/反向验证规范与等待纪律"}
+{"file": "docs/DESIGN.md", "reason": "停用态卡片与开关的视觉档位"}
