@@ -226,11 +226,11 @@ await h.check("暗色主题下依然是「一页纸」（切主题不丢状态�
 		desc: "先退出专注，才能点到侧栏的设置"
 	});
 	await win.evaluate(() => document.querySelector('[aria-label="设置"]').click());
-	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="外观"]') !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label^="外观"]') !== null), {
 		timeout: 20_000,
 		desc: "外观选择器渲染"
 	});
-	await win.evaluate(() => document.querySelector('[aria-label="外观"]').click());
+	await win.evaluate(() => document.querySelector('[aria-label^="外观"]').click());
 	await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), {
 		timeout: 10_000,
 		desc: "外观下拉展开"
@@ -281,11 +281,11 @@ await h.check("暗色主题下依然是「一页纸」（切主题不丢状态�
  */
 const pickTheme = async (label) => {
 	await win.evaluate(() => document.querySelector('[aria-label="设置"]').click());
-	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="外观"]') !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label^="外观"]') !== null), {
 		timeout: 20_000,
 		desc: "外观选择器渲染"
 	});
-	await win.evaluate(() => document.querySelector('[aria-label="外观"]').click());
+	await win.evaluate(() => document.querySelector('[aria-label^="外观"]').click());
 	await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), {
 		timeout: 10_000,
 		desc: "外观下拉展开"

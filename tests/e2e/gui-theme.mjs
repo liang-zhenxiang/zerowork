@@ -39,12 +39,12 @@ const currentTheme = () => win.evaluate(() => document.documentElement.dataset.t
 async function pickTheme(label) {
 	// 等 SelectField 真渲染出来（它的出现依赖 getThemePreference 的 IPC 回包；
 	// CI 慢机上曾在渲染前就点——报「找不到外观选择器」的 5/8 flake，2026-10-02）。
-	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="外观"]') !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label^="外观"]') !== null), {
 		timeout: 15_000,
 		desc: '「外观」选择器渲染（IPC 回包后）',
 	});
 	await win.evaluate(() => {
-		const trigger = document.querySelector('[aria-label="外观"]');
+		const trigger = document.querySelector('[aria-label^="外观"]');
 		if (trigger === null) throw new Error('找不到「外观」选择器（AppearanceSection 未渲染？）');
 		trigger.click();
 	});

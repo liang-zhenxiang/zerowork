@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "组件状态、焦点与可访问性纪律"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/e2e/反向验证规范"}
+{"file": "docs/DESIGN.md", "reason": "下拉控件的视觉与交互约束"}

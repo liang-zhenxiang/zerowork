@@ -127,7 +127,7 @@ await h.check("设置 → 通用有更新区（徽章/渠道/按钮）", async (
 		async () => {
 			const state = await win.evaluate(() => ({
 				badge: document.querySelector(".settings-section-badge")?.textContent ?? null,
-				channel: document.querySelector('[aria-label="更新渠道"]') !== null,
+				channel: document.querySelector('[aria-label^="更新渠道"]') !== null,
 				checkBtn: [...document.querySelectorAll("button")].some((b) => b.textContent === "立即检查"),
 			}));
 			// 三项都到齐才算「更新区渲染完成」：徽章与选择器来自同一次 IPC 回包，
@@ -183,7 +183,7 @@ await h.check("立即检查发现新版本（stable yml 的 99.0.0）", async ()
 // ── ③ 切 Beta 渠道 ───────────────────────────────────────────
 await h.check("切到 Beta 后改吃 beta.yml（98.0.0）", async () => {
 	await win.evaluate(() => {
-		const trigger = document.querySelector('[aria-label="更新渠道"]');
+		const trigger = document.querySelector('[aria-label^="更新渠道"]');
 		if (trigger === null) throw new Error("找不到渠道选择器");
 		trigger.click();
 	});
@@ -226,7 +226,7 @@ await h.check("重开设置、再写一次无关偏好后仍是 Beta", async () 
 	});
 	await openSettingsGeneral();
 	const channelText = await waitUntil(
-		() => win.evaluate(() => document.querySelector('[aria-label="更新渠道"]')?.textContent ?? null),
+		() => win.evaluate(() => document.querySelector('[aria-label^="更新渠道"]')?.textContent ?? null),
 		{ timeout: 20_000, interval: 300, desc: "更新渠道选择器渲染" },
 	);
 	assert.ok(String(channelText).includes("Beta"), `重开设置后渠道回退成了：${channelText}`);
@@ -243,7 +243,7 @@ await h.check("重开设置、再写一次无关偏好后仍是 Beta", async () 
 await h.check("切回稳定版回到 latest.yml", async () => {
 	const stableHitsBefore = feedHits.filter((u) => u === STABLE_CHANNEL_FILE).length;
 	await win.evaluate(() => {
-		const trigger = document.querySelector('[aria-label="更新渠道"]');
+		const trigger = document.querySelector('[aria-label^="更新渠道"]');
 		trigger.click();
 	});
 	await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), {
