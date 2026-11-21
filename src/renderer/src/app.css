@@ -20892,9 +20892,14 @@ html[data-sidebar-density='compact'] .space-group-header {
 	border-color: var(--accent);
 	color: var(--accent);
 }
-/* F4/F8 新功能速览横幅（非模态，右下角固定） */
+/* F4/F8 新功能速览横幅（非模态，右下角固定）。
+   用 position:fixed 直挂 body 语义——但它的 JSX 在 .app 内，任何祖先的
+   transform/filter 都会把 fixed 降级为「相对该祖先的绝对定位」并占文档流
+   （#447 实证 composerBottom 被推 162px）。App 壳已有常驻 transform 的先例
+   （.stream 的教训注释在 4054 行），所以这里**不用 fixed**：改 absolute 挂在
+   .app（.app 是定位基准），配合 right/bottom 定位到视口右下等效位置。 */
 .whats-new-banner {
-	position: fixed;
+	position: absolute;
 	right: var(--space-5);
 	bottom: var(--space-5);
 	max-width: 420px;
