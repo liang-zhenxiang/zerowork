@@ -179,6 +179,8 @@ mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 /**
  * 中途起来的 mock 全部登记在这里（ollama 位一个、后来换成空清单的又一个、

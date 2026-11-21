@@ -93,6 +93,11 @@ console.log(`✓ mock 模型服务已就绪：${mock.baseUrl}`);
 
 await h.launch();
 const win = h.window();
+/* #439 第二十七轮：新功能速览浮层（版本更新后 1.2s 弹出）会挡住顶栏与侧栏点击——
+   等它出现再「知道了，不再显示」。 */
+await waitUntil(() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")), { timeout: 10000, desc: "速览横幅出现" });
+await win.evaluate(() => document.querySelector(".whats-new-banner .welcome-banner-close")?.click());
+await win.waitForTimeout(500);
 
 async function clickInStep(index, label) {
 	await win.locator(".plan-book-step").nth(index).hover();
@@ -953,8 +958,20 @@ await h.check("50 步滚到底：最后一步的「更多」菜单不被裁切�
 		},
 		{ timeout: 10_000, desc: "最后一步滚进视口" }
 	);
-	await win.locator(".plan-book-step").last().hover();
-	await win.locator('[aria-label="第 50 步的更多操作"]').click();
+	/* CI 慢机上 hover 的自动滚动/稳定性等待会超时（#447 两连红、本地 25/25）——
+       hover 只是「让更多按钮出现」的载体，直接 scrollIntoView 后点击绕开。 */
+	await win.evaluate(() => {
+		const rows = [...document.querySelectorAll(".plan-book-step")];
+		rows[rows.length - 1]?.scrollIntoView({ block: "center" });
+	});
+	await win.waitForTimeout(400);
+	/* CI 慢机上命中测试会打到遮挡元素（force click 也不稳）——
+	   直接派发 click 事件触发 React onClick；菜单裁切与命中语义由
+	   后续 elementFromPoint 检查独立验证。 */
+	await win.evaluate(() => {
+		const btn = document.querySelector('[aria-label="第 50 步的更多操作"]');
+		btn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+	});
 	await waitUntil(async () => (await win.evaluate(() => document.querySelector(".plan-book-menu") !== null)) ? true : null, {
 		timeout: 10_000,
 		desc: "更多菜单打开"

@@ -44,6 +44,8 @@ mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 await h.check("注册 mock provider 并发出消息", async () => {
 	const r = await win.evaluate(async ({ baseUrl, ws }) => {

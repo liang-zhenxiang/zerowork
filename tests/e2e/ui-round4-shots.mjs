@@ -15,6 +15,8 @@ writeFileSync(resolve(h.WORKSPACE_DIR, "README.md"), "# r4\n", "utf8");
 const mock = await startMockModelServer({ reply: REPLY, models: ["r4-model"], toolCall: true });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 // 首页静态三张：快捷入口 / placeholder 轮播 / 案例卡
 await h.check("首页快捷入口一排胶囊", async () => {

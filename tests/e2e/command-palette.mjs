@@ -104,6 +104,8 @@ gsSeedSession("gsbb", "dddddddd-dddd-7ddd-8ddd-dddddddddddd", [
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 // macOS 用 ⌘（Meta），Windows/Linux 用 Ctrl —— 与 app.js 的 PALETTE_MOD 同口径。
 const MOD = process.platform === "darwin" ? "Meta" : "Control";

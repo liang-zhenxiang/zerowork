@@ -67,6 +67,8 @@ console.log(`✓ mock 模型服务已就绪：${mock.port}`);
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 /* ── 准备：配 provider（不选全局模型）、设工作空间 ── */
 await h.check("准备：注册服务商与工作空间（不选全局模型，会话用自身模型回落）", async () => {

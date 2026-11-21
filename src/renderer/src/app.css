@@ -20856,3 +20856,83 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition: none;
 	}
 }
+
+/* ── §55 第二十七轮十连（#446 首启体验与引导） ─────────────────────── */
+/* F2 模型配置引导行（composer 卡内上方内联，矮视口不把输入卡顶出去） */
+.model-guide-inline {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	padding: var(--space-2) var(--space-4);
+	border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+	border-radius: var(--radius-sm);
+	background: color-mix(in srgb, var(--warning) 8%, var(--bg-elevated));
+	font-size: var(--text-sm);
+}
+/* 矮视口（<720 逻辑高）：引导行隐藏——首屏预算给输入卡（gui-ui-audit
+   P1-① 的契约），配置模型走设置页。 */
+@media (max-height: 719px) {
+	.model-guide-inline {
+		display: none;
+	}
+}
+.model-guide-inline .model-guide-btn {
+	flex: none;
+	margin-left: auto;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+	color: var(--text);
+	padding: 2px 12px;
+	font: inherit;
+	font-size: var(--text-sm);
+	cursor: pointer;
+}
+.model-guide-inline .model-guide-btn:hover {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+/* F4/F8 新功能速览横幅（非模态，右下角固定）。
+   用 position:fixed 直挂 body 语义——但它的 JSX 在 .app 内，任何祖先的
+   transform/filter 都会把 fixed 降级为「相对该祖先的绝对定位」并占文档流
+   （#447 实证 composerBottom 被推 162px）。App 壳已有常驻 transform 的先例
+   （.stream 的教训注释在 4054 行），所以这里**不用 fixed**：改 absolute 挂在
+   .app（.app 是定位基准），配合 right/bottom 定位到视口右下等效位置。 */
+.whats-new-banner {
+	position: absolute;
+	right: var(--space-5);
+	bottom: var(--space-5);
+	max-width: 420px;
+	z-index: 35;
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius-md);
+	background: var(--bg-elevated);
+	box-shadow: var(--shadow-md);
+}
+.whats-new-banner-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+.whats-new-banner-text strong {
+	color: var(--text);
+	font-size: var(--text-sm);
+}
+.whats-new-line em {
+	font-style: normal;
+	color: var(--accent);
+	font-weight: 600;
+}
+.whats-new-line {
+	display: block;
+}
+/* F9 首启文案切换不跳动 */
+.footer-text {
+	min-width: 6em;
+}

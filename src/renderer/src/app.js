@@ -13713,6 +13713,16 @@ function Sidebar({
   const [labelStore, setLabelStore] = reactExports.useState({});
   /* round14 F9：帮助浮层开合（快捷键表/文档/诊断三入口聚合）。 */
   const [helpOpen, setHelpOpen] = reactExports.useState(false);
+  /* #439 第二十七轮 F9：连接耗时。>2s 换更具体的启动文案（首启要准备运行时）。 */
+  const connectStartRef = reactExports.useRef(Date.now());
+  const [connectElapsed, setConnectElapsed] = reactExports.useState(0);
+  reactExports.useEffect(() => {
+    if (link2.kind !== "connecting") return;
+    const timer = window.setInterval(() => {
+      setConnectElapsed(Date.now() - connectStartRef.current);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [link2.kind]);
   /* round14 F3：每日回归摘要（昨日完成任务数）。App 侧 usageStats effect 写入
      localStorage，侧栏只读——数据在另一个作用域，props 穿透不值得。 */
   const [yesterdayDone, setYesterdayDone] = reactExports.useState(0);
@@ -15196,7 +15206,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       /* @__PURE__ */ jsxRuntimeExports.jsx("img", { className: "footer-brand", src: APP_LOGO, width: 22, height: 22, alt: "" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `link-dot link-dot-${link2.kind}` }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "footer-text", children: [
-        link2.kind === "connecting" && "正在启动…",
+        link2.kind === "connecting" && (connectElapsed >= 2000 ? "首次启动正在准备运行时，稍等片刻…" : "正在启动…"),
         link2.kind === "ready" && "已就绪",
         link2.kind === "down" && `已断开：${link2.reason}`
       ] }),
@@ -17038,6 +17048,34 @@ function WelcomeBanner() {
 /* #342 第十七轮 F6：崩溃恢复横幅。首启 invoke 一次 lastExit；unclean=true
    时显示「上次未正常关闭」，用户点「知道了」即收起。查询即消费（main 侧翻转
    标记），同一次开机不会重复弹。 */
+/* #439 第二十七轮 F4/F8：新功能速览浮层。版本更新后（localStorage 的
+   zw:seen-version ≠ 当前版本）一次性弹出，列出本版本可感知的新能力；
+   「知道了」写 zw:seen-version=当前版本永不再弹（跳过持久化）。内容随版本
+   手工维护——发布时在 CHANGELOG_FEATURES 里补一段即可。 */
+const CHANGELOG_FEATURES = [
+  { title: "任务完成免打扰时段", desc: "设置 → 通用 → 桌面行为：免打扰期间不发系统通知。" },
+  { title: "通知中心", desc: "侧栏铃铛查看最近 20 条后台任务通知。" },
+  { title: "会话内导航", desc: "TL;DR 意图行可点击跳轮、阅读标尺可点击定位、标题锚点点击后就地定位。" }
+];
+function WhatsNewSheet({ version, onClose }) {
+  /* #439 第二十七轮 F4/F8：版本更新速览。**非模态横幅**（welcome-banner 同形态）：
+     模态浮层会挡侧栏/顶栏点击、抢焦点，把 e2e 与真实用户第一次操作全部卡住
+     （#447 实证）。横幅常驻右下、不挡内容；关闭即写持久化。 */
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "whats-new-banner", role: "status", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "whats-new-banner-text", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: ["这个版本的新东西 ", /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-section-badge", children: `V${version}` })] }),
+      CHANGELOG_FEATURES.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "whats-new-line", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("em", { children: item.title }),
+        ` ${item.desc}`
+      ] }, item.title))
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "welcome-banner-close", "aria-label": "知道了", onClick: () => {
+      localStorage.setItem("zw:seen-version", version);
+      onClose();
+    }, children: "知道了" })
+  ] });
+}
+
 function CrashBanner() {
   const [show, setShow] = reactExports.useState(false);
   reactExports.useEffect(() => {
@@ -18258,6 +18296,7 @@ function HomeView({
   prefill,
   onPrefillConsumed,
   onSceneChange,
+    modelsCount,
   onOpenSettings,
   onOpenCompare,
   onError,
@@ -18454,6 +18493,9 @@ function HomeView({
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "token-meter-label", children: ["今日 ", formatNum(today.tokens), " tok"] })
       ] }) : null,
     localStorage.getItem("zw:onboarded") !== "1" && /* @__PURE__ */ jsxRuntimeExports.jsx(WelcomeBanner, {}),
+    /* #439 第二十七轮 F2：模型配置引导。还没有可用模型时提示直达设置（一次性，
+       配好即消失——数据来自 App 的 settingsSnapshot，HomeView 里用 homeModels）。 */
+
     /* #342 F6：崩溃恢复横幅（只在上次异常退出后出现一次）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(CrashBanner, {}),
     /* @__PURE__ */ jsxRuntimeExports.jsx(TypingTitle, { text: HOME_TITLE }),
@@ -18556,7 +18598,11 @@ function HomeView({
             onClear: onClearResume
           }
         ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
+            ready === true && modelsCount === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "model-guide-inline", role: "status", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "还没有配置模型——配置后即可开始第一个任务。" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "model-guide-btn", onClick: onOpenSettings, children: "去配置模型" })
+    ] }),
+/* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "composer-slot", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Composer,
             {
@@ -71293,7 +71339,16 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
     configDir !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "settings-foot", children: [
       "配置目录：",
       configDir
-    ] })
+    ] }),
+    /* #439 第二十七轮 F4/F8：本版本新东西（原速览浮层——模态会挡首次操作，
+       改为关于页分组）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-section", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "本版本新东西" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "whats-new-list", children: CHANGELOG_FEATURES.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "whats-new-item", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: item.title }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whats-new-desc", children: item.desc })
+      ] }, item.title)) })
+    ] }),
   ] });
 }
 const NAV_ITEMS = [
@@ -79223,6 +79278,66 @@ function App() {
   /* #439 第二十六轮 F9/F10：通知历史（内存态，最近 20 条）+ 聚合窗口的完成记录。 */
   const notifyHistoryRef = reactExports.useRef([]);
   const [notifyHistoryOpen, setNotifyHistoryOpen] = reactExports.useState(false);
+  /* #439 第二十七轮 F2：可用模型数（0 → 首页显示「去配置模型」引导条）。 */
+  const [modelsCount, setModelsCount] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    /* 配置模型后引导条要消失——快照是拉取式，这里 15s 轮询（归零后停止）。 */
+    let alive = true;
+    const pull = () => window.kami.settingsSnapshot().then((snap) => {
+      if (!alive) return;
+      const count = (snap?.models ?? []).filter((model) => model.available).length;
+      setModelsCount(count);
+      return count;
+    }).catch(() => {
+    });
+    void pull();
+    const timer = window.setInterval(() => {
+      void pull().then((count) => {
+        if (count !== void 0 && count > 0) window.clearInterval(timer);
+      });
+    }, 15000);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+  /* #439 第二十七轮 F4/F8：新功能速览浮层。挂载后 1.2s 再判定（避开启动竞态）。 */
+  const [whatsNewVersion, setWhatsNewVersion] = reactExports.useState(void 0);
+  reactExports.useEffect(() => {
+    /* #439 第二十七轮 F4/F8：两路判定——timer（1.2s）与 ready 后再查一次。
+       任一时刻 localStorage 里 zw:seen-version ≠ 当前版本就弹。 */
+    const check = () => {
+      try {
+        const current = window.kami?.appVersion ?? __APP_VERSION__;
+        if (typeof current === "string" && current !== "" && localStorage.getItem("zw:seen-version") !== current) {
+          setWhatsNewVersion(current);
+          return true;
+        }
+      } catch {
+      }
+      return false;
+    };
+    const timer = window.setTimeout(check, 1200);
+    const readyTimer = window.setTimeout(check, 4000);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearTimeout(readyTimer);
+    };
+  }, [link2.kind]);
+  reactExports.useEffect(() => {
+    if (link2.kind !== "ready") return;
+    const check = () => {
+      try {
+        const current = window.kami?.appVersion ?? __APP_VERSION__;
+        if (typeof current === "string" && current !== "" && localStorage.getItem("zw:seen-version") !== current) {
+          setWhatsNewVersion(current);
+        }
+      } catch {
+      }
+    };
+    const timer = window.setTimeout(check, 2000);
+    return () => window.clearTimeout(timer);
+  }, [link2.kind]);
   const recentCompletionsRef = reactExports.useRef([]);
   reactExports.useEffect(() => {
     if (recentForHome.length === 0) {
@@ -80072,6 +80187,7 @@ function App() {
     view === "home" && /* @__PURE__ */ jsxRuntimeExports.jsx(
       HomeView,
       {
+        modelsCount,
         ready: link2.kind === "ready",
         scenes: conversation.availableScenes,
         sceneId: conversation.state.sceneId,
@@ -80401,6 +80517,9 @@ function App() {
     shortcutSheetOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(ShortcutSheet, { onClose: () => setShortcutSheetOpen(false) }),
     /* #439 第二十六轮 F9：通知中心面板。 */
     notifyHistoryOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(NotifyHistorySheet, { items: notifyHistoryRef.current, onClose: () => setNotifyHistoryOpen(false) }),
+    /* #439 第二十七轮 F4/F8：新功能速览浮层（版本更新后一次性）。
+       ⌘K 面板打开时不弹（useModalFocus 会抢焦点），面板关了再弹。 */
+    whatsNewVersion !== void 0 && !shortcutSheetOpen && /* @__PURE__ */ jsxRuntimeExports.jsx(WhatsNewSheet, { version: whatsNewVersion, onClose: () => setWhatsNewVersion(void 0) }),
     /* round10 F5：图片灯箱（全局单例，事件驱动）。 */
     /* @__PURE__ */ jsxRuntimeExports.jsx(ImageLightbox, {}),
     focusMode === true && /* @__PURE__ */ jsxRuntimeExports.jsxs(

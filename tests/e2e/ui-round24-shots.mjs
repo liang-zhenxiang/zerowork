@@ -24,6 +24,8 @@ writeFileSync(join(SESSIONS_DIR, "s1.jsonl"), lines.join("\n") + "\n");
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await win.waitForTimeout(2200);
 await win.evaluate(async ({ baseUrl, ws }) => {
   const k = globalThis.kami;

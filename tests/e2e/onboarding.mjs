@@ -28,6 +28,8 @@ const mock = await startMockModelServer({ reply: "ONBOARDING_OK" });
 const h = createHarness({ name: "onboarding" });
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 // ── 读回界面的小工具 ─────────────────────────────────
 //

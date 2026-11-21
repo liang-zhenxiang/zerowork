@@ -75,6 +75,8 @@ seedSession(2, S2, "部署脚本改好了吗", [
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 const clickNav = async (label) => {
 	const ok = await win.evaluate((text) => {

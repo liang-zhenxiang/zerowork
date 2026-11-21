@@ -274,6 +274,8 @@ const mock = await startMockModel();
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 await h.snap("home");
 
 /** 等 mock 收到第 n 轮请求 —— 「消息真的发出去了」是比固定等待可靠的信号。 */

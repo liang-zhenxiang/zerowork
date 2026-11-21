@@ -121,9 +121,13 @@ function slotRingRect(geo, imgH) {
 	};
 }
 
-/** 主背景采样带：在槽左侧、主列 padding 内的一块小方块（纯 --bg）。 */
-function bgRect(geo) {
-	return { x: geo.slot.x - 18, y: geo.slot.y + geo.slot.h / 2, w: 8, h: 8 };
+/** 主背景采样带：在槽左侧、主列 padding 内的一块小方块（纯 --bg）。
+    #439 第二十七轮：无模型时首页多出「去配置模型」引导条，slot 的文档坐标
+    更靠下——截图截的是视口，y 可能超图。clamp 进图像（采样语义不变：
+    槽左侧同竖直位置的主背景）。 */
+function bgRect(geo, imgH) {
+	const y = Math.min(geo.slot.y + geo.slot.h / 2 - 4, imgH - 10);
+	return { x: geo.slot.x - 18, y: Math.max(0, y), w: 8, h: 8 };
 }
 
 /** 切主题：走与应用同一条路（localStorage 镜像 + data-theme 属性 + 真源落盘）。 */
@@ -173,7 +177,7 @@ await scrollComposerIntoView();
 const light = await h.shoot("home-light");
 const lightGeo = await readGeometry();
 const lightRing = regionMean(light.img, slotRingRect(lightGeo, light.img.height), lightGeo.vw);
-const lightBg = regionMean(light.img, bgRect(lightGeo), lightGeo.vw);
+const lightBg = regionMean(light.img, bgRect(lightGeo, light.img.height), lightGeo.vw);
 
 await h.check("浅色下输入卡外槽是实心极浅面（渐变只在描边上，不回到底色）", async () => {
 	const bgImage = await win.evaluate(
@@ -203,7 +207,7 @@ await scrollComposerIntoView();
 const dark = await h.shoot("home-dark");
 const darkGeo = await readGeometry();
 const darkRing = regionMean(dark.img, slotRingRect(darkGeo, dark.img.height), darkGeo.vw);
-const darkBg = regionMean(dark.img, bgRect(darkGeo), darkGeo.vw);
+const darkBg = regionMean(dark.img, bgRect(darkGeo, dark.img.height), darkGeo.vw);
 
 await h.check("深色下输入卡外槽只是略亮一档的面，不是一圈亮边", () => {
 	// 用「对比度比」而不是「绝对亮度差」：绝对差会随整幅画布的亮度漂移 ——

@@ -181,6 +181,8 @@ console.log(`✓ mock 模型服务已就绪：${mock.baseUrl}`);
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 await h.snap("home");
 

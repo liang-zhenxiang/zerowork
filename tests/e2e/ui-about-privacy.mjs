@@ -65,6 +65,8 @@ const h = createHarness({ name: "ui-about-privacy", shots: true });
 const mock = await startMockModel();
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 await h.check("菜单「关于」里有打开 GitHub 仓库的条目，且与设置页共用同一地址", async () => {
 	const main = readFileSync(resolve(root, "src/main/index.js"), "utf8");

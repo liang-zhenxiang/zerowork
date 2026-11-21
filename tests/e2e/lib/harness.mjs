@@ -453,6 +453,25 @@ export function createHarness(opts) {
 		 * 而不是「加载成功」—— 字体加载失败时该 promise 同样 resolve，不会卡死
 		 * （真正的卡死由看门狗兜底）。等完之后再启动观察，静默期覆盖的就是最终布局。
 		 */
+		/** #439 第二十七轮：新功能速览浮层（版本更新后 1.2s 弹出）是模态——
+		   需要点侧栏/顶栏或断言「无模态」的用例先调它关掉。幂等（浮层没出现
+		   就等最多 timeout，仍没有就静默返回）。 */
+		async dismissWhatsNew({ timeout = 15000 } = {}) {
+			try {
+				await waitUntil(
+					() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")),
+					{ timeout, desc: "速览横幅出现" },
+				);
+				await win.evaluate(() => document.querySelector(".whats-new-banner .welcome-banner-close")?.click());
+				await waitUntil(
+					() => win.evaluate(() => !(document.body.textContent ?? "").includes("这个版本的新东西")),
+					{ timeout: 6000, desc: "速览横幅关闭" },
+				);
+			} catch {
+				/* 浮层没出现（已看过）——幂等 */
+			}
+		},
+
 		async waitForSettled({ quietMs = 800, timeout = 60_000 } = {}) {
 			const settled = await win.evaluate(
 				async ({ quietMs, timeout }) => {

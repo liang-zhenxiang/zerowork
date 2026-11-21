@@ -48,6 +48,8 @@ mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 
 await h.launch();
 const win = h.window();
+await h.dismissWhatsNew();
+
 
 await h.check("齿轮按钮能打开设置对话框", async () => {
 	await win.evaluate(() => {
