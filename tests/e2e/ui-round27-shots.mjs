@@ -23,20 +23,23 @@ await h.launch();
 const win = h.window();
 await win.waitForTimeout(2400);
 
-await h.check("① 新功能速览浮层：版本更新后一次性弹出", async () => {
-  await waitUntil(() => win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西")), { timeout: 12000, desc: "速览横幅出现" });
-  const items = await win.evaluate(() => document.querySelectorAll(".whats-new-line").length);
+await h.check("① 关于页「本版本新东西」列表", async () => {
+  await win.evaluate(() => {
+    const button = document.querySelector('[aria-label="设置"]');
+    if (button === null) throw new Error("找不到设置按钮");
+    button.click();
+  });
+  await waitUntil(() => win.evaluate(() => document.querySelector(".settings-card") !== null), { timeout: 10000, desc: "设置对话框挂上" });
+  await win.evaluate(() => {
+    const items = [...document.querySelectorAll(".settings-nav-item")];
+    const hit = items.find((item) => (item.textContent ?? "").trim() === "关于");
+    if (hit === void 0) throw new Error("设置侧栏里找不到「关于」");
+    hit.click();
+  });
+  await waitUntil(() => win.evaluate(() => (document.body.textContent ?? "").includes("本版本新东西")), { timeout: 8000, desc: "本版本新东西分组出现" });
+  const items = await win.evaluate(() => document.querySelectorAll(".whats-new-item").length);
   if (items < 3) throw new Error(`速览条目不足：${items}`);
   await h.shoot("01-whats-new");
-  await win.evaluate(() => {
-    const btn = document.querySelector(".whats-new-banner .welcome-banner-close");
-    btn?.click();
-  });
-  await win.waitForTimeout(500);
-  const gone = await win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西") === false);
-  if (!gone) throw new Error("横幅未关闭");
-  const seen = await win.evaluate(() => window.localStorage.getItem("zw:seen-version") !== null);
-  if (!seen) throw new Error("zw:seen-version 未持久化");
 });
 
 await h.check("② 配置模型后引导条消失（刷新后不再弹速览）", async () => {
@@ -49,8 +52,8 @@ await h.check("② 配置模型后引导条消失（刷新后不再弹速览）"
   }, { baseUrl: mock.baseUrl, ws: h.WORKSPACE_DIR });
   // 引导条随 modelsCount 轮询（≤15s）消失
   await waitUntil(() => win.evaluate(() => document.querySelector(".model-guide-banner") === null), { timeout: 18000, desc: "引导条随模型配置消失" });
-  const sheetGone = await win.evaluate(() => (document.body.textContent ?? "").includes("这个版本的新东西") === false);
-  if (!sheetGone) throw new Error("刷新后速览浮层又弹了（持久化失效）");
+  const stillListed = await win.evaluate(() => (document.body.textContent ?? "").includes("本版本新东西"));
+  if (!stillListed) throw new Error("关于页新东西列表消失");
   await h.shoot("02-after-config");
 });
 

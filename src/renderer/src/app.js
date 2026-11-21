@@ -71339,7 +71339,16 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
     configDir !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "settings-foot", children: [
       "配置目录：",
       configDir
-    ] })
+    ] }),
+    /* #439 第二十七轮 F4/F8：本版本新东西（原速览浮层——模态会挡首次操作，
+       改为关于页分组）。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-section", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("header", { className: "settings-section-head", children: /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "本版本新东西" }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "whats-new-list", children: CHANGELOG_FEATURES.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "whats-new-item", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: item.title }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whats-new-desc", children: item.desc })
+      ] }, item.title)) })
+    ] }),
   ] });
 }
 const NAV_ITEMS = [
