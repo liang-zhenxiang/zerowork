@@ -337,7 +337,21 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 		});
 
 	/** 任一档的硬约束：输入卡完整可见、案例区不压上来且可滚动到。 */
+		const dumpHomeChildren = () =>
+		win.evaluate(() => {
+			const home = document.querySelector("main.home");
+			return [...(home?.children ?? [])].map((el) => ({
+				tag: el.tagName.toLowerCase(),
+				cls: [...el.classList].join("."),
+				h: Math.round(el.getBoundingClientRect().height),
+				pos: getComputedStyle(el).position,
+			}));
+		});
+
 	const assertShortLayout = (geometry) => {
+		void dumpHomeChildren().then((dump) => {
+			console.log("[P1-diag]", JSON.stringify(dump));
+		});
 		const where = `innerHeight=${geometry.innerHeight}`;
 		assert.ok(geometry.composer.height > 0, `${where}：输入卡高度为 0（没渲染出来）`);
 		assert.ok(
