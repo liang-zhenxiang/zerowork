@@ -68,11 +68,11 @@ async function closeSettings() {
 
 async function pickTheme(label) {
 	// 等 SelectField 真渲染出来（它的出现依赖 getThemePreference 的 IPC 回包）。
-	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="外观"]') !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label^="外观"]') !== null), {
 		timeout: 15_000,
 		desc: "「外观」选择器渲染（IPC 回包后）"
 	});
-	await win.evaluate(() => document.querySelector('[aria-label="外观"]').click());
+	await win.evaluate(() => document.querySelector('[aria-label^="外观"]').click());
 	await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), { timeout: 10_000, desc: "外观下拉展开" });
 	await win.evaluate((target) => {
 		const listbox = document.querySelector('[role="listbox"]');

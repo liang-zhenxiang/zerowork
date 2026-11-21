@@ -12011,6 +12011,13 @@ textarea:focus-visible {
 	background: var(--bg-hover);
 }
 
+/* 键盘高亮项：与鼠标 hover 共用同一个底色（--bg-hover），不新开颜色档。
+   高亮不是选中 —— 选中态仍由行尾 ✓ 与 aria-selected 承担，两者可以同时出现
+   在两项上（高亮在「名称」、选中在「默认」），读屏据此区分「移动中」与「已选」。 */
+.provider-option.active {
+	background: var(--bg-hover);
+}
+
 .provider-option-name {
 	flex: 1 1 auto;
 	overflow: hidden;

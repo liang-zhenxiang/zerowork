@@ -32172,6 +32172,15 @@ import {
 	pathsFromDropText,
 	isPackDropPath
 } from "./expert-gallery-core.js";
+// 自绘下拉（SelectField）的纯逻辑：高亮索引的移动 / 循环 / 首末，以及可访问名
+// 「标签 + 当前值且不重复」的归一化。单测直接 import 这一份 —— 界面上这些只表现
+// 为「方向键跳了一格 / 读屏多念一遍当前值」，是 GUI 断言最说不清的一类。
+import {
+	accessibleName,
+	edgeActiveIndex,
+	initialActiveIndex,
+	moveActiveIndex
+} from "./select-field-core.js";
 // 计划书（Plan Book）的纯逻辑：解析、步骤操作、LCS 差异、Markdown 导出。
 // 单测直接 import 这一份 —— 界面上只表现为「顺序 / 文案对不对」，GUI 断言说不清，
 // 所以那些不变量都在 plan-core.test.mjs 里钉死，组件只负责摆位置。
@@ -66702,7 +66711,13 @@ const WEB_SEARCH_PROVIDERS = [
 ];
 function SelectField({ value, options, onChange, disabled, ariaLabel, placeholder }) {
   const [open, setOpen] = reactExports.useState(false);
+  const [activeIndex, setActiveIndex] = reactExports.useState(0);
   const rootRef = reactExports.useRef(null);
+  const triggerRef = reactExports.useRef(null);
+  // useId 让同一页的多个 SelectField 各有独立的选项 id（`aria-activedescendant`
+  // 与 `aria-controls` 都靠它定位），不靠调用方传 key。
+  const listId = reactExports.useId();
+  const optionId = (index) => `${listId}-${index}`;
   reactExports.useEffect(() => {
     if (!open) return;
     const onPointerDown = (event) => {
@@ -66711,45 +66726,136 @@ function SelectField({ value, options, onChange, disabled, ariaLabel, placeholde
     window.addEventListener("mousedown", onPointerDown);
     return () => window.removeEventListener("mousedown", onPointerDown);
   }, [open]);
+  // 选项数量变化（筛选条件变了、会话被删了）时把高亮夹回合法范围：
+  // 越界的 activeIndex 会让 aria-activedescendant 指向一个不存在的 id。
+  reactExports.useEffect(() => {
+    setActiveIndex((index) => options.length === 0 ? 0 : Math.min(Math.max(index, 0), options.length - 1));
+  }, [options.length]);
+  // 高亮随键盘移动滚进面板可视区。用 getElementById 而不是 ref 数组 ——
+  // 选项是条件渲染的，id 是唯一稳定的定位口径。
+  reactExports.useEffect(() => {
+    if (!open || activeIndex < 0 || activeIndex >= options.length) return;
+    document.getElementById(optionId(activeIndex))?.scrollIntoView({ block: "nearest" });
+  }, [open, activeIndex, listId, options.length]);
   const current = options.find((option) => option.value === value);
+  const displayText = current?.label ?? placeholder ?? "请选择";
+  const openAt = (index) => {
+    setActiveIndex(index);
+    setOpen(true);
+  };
+  const closeAndFocus = () => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  };
+  const onKeyDown = (event) => {
+    if (disabled) return;
+    if (event.key === "Escape") {
+      // 只在展开时接管：关闭态的 Escape 要继续冒泡给外层弹窗。
+      if (!open) return;
+      event.stopPropagation();
+      event.preventDefault();
+      closeAndFocus();
+      return;
+    }
+    if (event.key === "Tab") {
+      // Tab 正常离开，只负责把面板收起来（不拦默认行为）。
+      if (open) setOpen(false);
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (!open) openAt(initialActiveIndex(options, value));
+      else if (options.length > 0) setActiveIndex((index) => moveActiveIndex(index, 1, options.length));
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) openAt(current === void 0 ? edgeActiveIndex("end", options.length) : options.indexOf(current));
+      else if (options.length > 0) setActiveIndex((index) => moveActiveIndex(index, -1, options.length));
+      return;
+    }
+    if (event.key === "Home" && open) {
+      event.preventDefault();
+      setActiveIndex(edgeActiveIndex("home", options.length));
+      return;
+    }
+    if (event.key === "End" && open) {
+      event.preventDefault();
+      setActiveIndex(edgeActiveIndex("end", options.length));
+      return;
+    }
+    if (event.key === " " && open) {
+      // 展开态的 Space 与 Enter 等价：选中高亮项。关闭态放行默认行为（button
+      // 的 click 会打开面板），所以这里只在 open 时接管。
+      event.preventDefault();
+      const option = options[activeIndex];
+      if (option !== void 0) onChange(option.value);
+      closeAndFocus();
+      return;
+    }
+    if (event.key === "Enter") {
+      // 触发器是 <button>：不拦的话 keydown 之后浏览器还会合成一次 click，
+      // 于是「Enter 选中并关闭」会被紧跟着的 toggle 又打开一次。
+      event.preventDefault();
+      if (!open) {
+        openAt(initialActiveIndex(options, value));
+        return;
+      }
+      const option = options[activeIndex];
+      if (option !== void 0) onChange(option.value);
+      closeAndFocus();
+    }
+  };
+  const toggle = () => {
+    if (disabled) return;
+    if (open) setOpen(false);
+    else openAt(initialActiveIndex(options, value));
+  };
+  // 高亮 ≠ 选中：aria-selected 只给真正选中的项（见下方 option），高亮由
+  // .active class 与 aria-activedescendant 表达，读屏不会把「移动中」当「已选」。
+  const activeOptionId = open && activeIndex >= 0 && activeIndex < options.length ? optionId(activeIndex) : void 0;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "div",
     {
       className: "select-field",
       ref: rootRef,
-      onKeyDown: (event) => {
-        if (event.key === "Escape" && open) {
-          event.stopPropagation();
-          setOpen(false);
-        }
-      },
+      onKeyDown,
       children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
           {
             type: "button",
+            ref: triggerRef,
             className: `provider-select-trigger${current === void 0 ? " placeholder" : ""}`,
+            role: "combobox",
             "aria-haspopup": "listbox",
             "aria-expanded": open,
-            "aria-label": ariaLabel,
+            "aria-controls": listId,
+            "aria-activedescendant": activeOptionId,
+            "aria-label": accessibleName(ariaLabel, displayText),
             disabled,
-            onClick: () => setOpen((v) => !v),
+            onClick: toggle,
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-select-label", children: current?.label ?? placeholder ?? "请选择" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(IconChevronDown, { size: 13 })
             ]
           }
         ),
-        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-select-panel", role: "listbox", "aria-label": ariaLabel, children: options.map((option) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        open && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "provider-select-panel", role: "listbox", id: listId, "aria-label": ariaLabel, children: options.map((option, index) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
           {
             type: "button",
             role: "option",
+            id: optionId(index),
+            // 焦点始终留在触发器，由 aria-activedescendant 指向高亮项 ——
+            // 否则每按一次方向键焦点都要在面板与触发器之间搬一次。
+            tabIndex: -1,
             "aria-selected": option.value === value,
-            className: "provider-option",
+            className: `provider-option${index === activeIndex ? " active" : ""}`,
+            onMouseEnter: () => setActiveIndex(index),
             onClick: () => {
               onChange(option.value);
-              setOpen(false);
+              closeAndFocus();
             },
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "provider-option-name", children: option.label }),

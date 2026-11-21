@@ -40,7 +40,7 @@ async function openSettingsGeneral() {
 	// h2 是同步渲染的，但选择器要等 getProxy() 返回后才出现（ProxySection
 	// 的 config === undefined 走加载态）。只等 h2 会在启动较慢时读到中间态，
 	// 表现为「代理模式选择器不在」——main 上真实失败过一次（#339 合并后）。
-	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label="代理模式"]') !== null), {
+	await waitUntil(() => win.evaluate(() => document.querySelector('[aria-label^="代理模式"]') !== null), {
 		timeout: 30_000,
 		interval: 300,
 		desc: "代理模式选择器渲染",
@@ -50,7 +50,7 @@ async function openSettingsGeneral() {
 /** 选代理模式（自定义 SelectField：点触发器 → 点选项）。 */
 async function chooseMode(label) {
 	await win.evaluate(() => {
-		const trigger = document.querySelector('[aria-label="代理模式"]');
+		const trigger = document.querySelector('[aria-label^="代理模式"]');
 		if (trigger === null) throw new Error("找不到代理模式选择器");
 		trigger.click();
 	});
@@ -101,7 +101,7 @@ async function clickSave() {
 await h.check("设置 → 通用有「网络代理」区块，默认直连", async () => {
 	await openSettingsGeneral();
 	const state = await win.evaluate(() => {
-		const select = document.querySelector('[aria-label="代理模式"]');
+		const select = document.querySelector('[aria-label^="代理模式"]');
 		return {
 			hasSelect: select !== null,
 			text: select?.textContent ?? "",
@@ -202,7 +202,7 @@ await h.check("SOCKS 地址被拒绝且偏好不变", async () => {
 // ── ⑤ 切回直连 ───────────────────────────────────────────────
 await h.check("切回「直连」后持久化生效", async () => {
 	await waitUntil(
-		() => win.evaluate(() => document.querySelector('[aria-label="代理模式"]') !== null),
+		() => win.evaluate(() => document.querySelector('[aria-label^="代理模式"]') !== null),
 		{ timeout: 30_000, interval: 300, desc: "代理模式选择器恢复" },
 	);
 	await chooseMode("直连");

@@ -162,7 +162,7 @@ async function settleAnimations(selector) {
 /** 在 hook 编辑区的「事件」下拉里按文案选中一个事件。 */
 async function pickHookEvent(text) {
 	await win.evaluate(() => {
-		const trigger = document.querySelector('[aria-label="Hook 事件"]');
+		const trigger = document.querySelector('[aria-label^="Hook 事件"]');
 		if (trigger === null) throw new Error("编辑区里没有事件下拉");
 		trigger.click();
 	});
@@ -432,7 +432,7 @@ await h.check("事件下拉出现四个生命周期事件；选中后 matcher �
 	await clickInSection("Hooks", ".starter-add");
 	await waitUntil(() => sectionReady("Hooks", ".starter-editor"), { timeout: 10_000, desc: "hook 编辑区展开" });
 	await win.evaluate(() => {
-		const trigger = document.querySelector('[aria-label="Hook 事件"]');
+		const trigger = document.querySelector('[aria-label^="Hook 事件"]');
 		if (trigger === null) throw new Error("编辑区里没有事件下拉");
 		trigger.click();
 	});
@@ -758,7 +758,7 @@ await h.check("非法条目在预览里标出第几条与原因，并禁用导�
 
 await h.check("暗色下 hooks 分组与试运行卡片可读", async () => {
 	const pickDark = async () => {
-		await win.evaluate(() => document.querySelector('[aria-label="外观"]').click());
+		await win.evaluate(() => document.querySelector('[aria-label^="外观"]').click());
 		await waitUntil(() => win.evaluate(() => document.querySelector('[role="listbox"]') !== null), {
 			timeout: 10_000,
 			desc: "外观下拉展开",
