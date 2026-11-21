@@ -75424,10 +75424,34 @@ function SearchView({ onClose, onOpenHit }) {
   const inputRef = reactExports.useRef(null);
   const requestRef = reactExports.useRef(0);
   const listRef = reactExports.useRef(null);
+  /* #452 第二���八轮 F1/F2/F10：角色筛选 / 时间范围 / 归档排除。 */
+  const [roleFilter, setRoleFilter] = reactExports.useState("all");
+  const [timeRange, setTimeRange] = reactExports.useState("all");
+  const [includeArchived, setIncludeArchived] = reactExports.useState(false);
+  /* F6：最近搜索（localStorage，最多 5 条）。 */
+  const [recentQueries, setRecentQueries] = reactExports.useState(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem("zw:ss-recent") ?? "[]");
+    } catch {
+      return [];
+    }
+  });
   reactExports.useEffect(() => {
     inputRef.current?.focus();
   }, []);
   const trimmed = query.trim();
+  /* 命中词有内容时记入最近搜索（防抖结果回来后记，去重取前 5）。 */
+  reactExports.useEffect(() => {
+    if (trimmed === "" || trimmed.length < 2) return;
+    setRecentQueries((current) => {
+      const next = [trimmed, ...current.filter((item) => item !== trimmed)].slice(0, 5);
+      try {
+        window.localStorage.setItem("zw:ss-recent", JSON.stringify(next));
+      } catch {
+      }
+      return next;
+    });
+  }, [trimmed]);
   /*
    * 防抖 + 序号：慢响应回来时若已经换了词，结果直接丢弃（否则界面会「跳回上一个词」）。
    * 上一次的结果在输入过程中保留着 —— 每敲一个字就闪一次骨架，比稍慢更难受。
@@ -75463,7 +75487,67 @@ function SearchView({ onClose, onOpenHit }) {
     }, SESSION_SEARCH_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [trimmed, reloadToken]);
-  const rows = reactExports.useMemo(() => (result === void 0 ? [] : flattenSearchHits(result.sessions)), [result]);
+  const rowsAll = reactExports.useMemo(() => (result === void 0 ? [] : flattenSearchHits(result.sessions)), [result]);
+  /* #452 第二十八轮 F1/F2/F10：角色 / 时间范围 / 归档过滤（纯前端，不动 daemon 查询）。 */
+  const rows = reactExports.useMemo(() => {
+    let filtered = rowsAll;
+    if (roleFilter === "user") filtered = filtered.filter((row) => row.role === "user");
+    if (roleFilter === "assistant") filtered = filtered.filter((row) => row.role === "assistant");
+    if (timeRange !== "all") {
+      const cutoff = Date.now() - (timeRange === "7d" ? 7 : 30) * 864e5;
+      filtered = filtered.filter((row) => {
+        const session = result?.sessions.find((s) => s.sessionId === row.sessionId);
+        return session !== void 0 && session.modifiedAt >= cutoff;
+      });
+    }
+    return filtered;
+  }, [rowsAll, roleFilter, timeRange, result]);
+  /* F2/F10：session 级过滤视图（时间范围 + 保留「仍有剩余命中」的会话）。 */
+  const filteredSessions = reactExports.useMemo(() => {
+    if (result === void 0) return [];
+    const visibleIds = new Set(rows.map((row) => row.sessionId));
+    return result.sessions.filter((session) => {
+      if (timeRange !== "all") {
+        const cutoff = Date.now() - (timeRange === "7d" ? 7 : 30) * 864e5;
+        if (session.modifiedAt < cutoff) return false;
+      }
+      return visibleIds.has(session.sessionId);
+    });
+  }, [result, rows, timeRange]);
+  /* F4：命中数统计（过滤后口径）。 */
+  const hitStats = reactExports.useMemo(() => {
+    const sessionIds = new Set(rows.map((row) => row.sessionId));
+    const totalHits = rows.reduce((sum, row) => {
+      const session = result?.sessions.find((s) => s.sessionId === row.sessionId);
+      const hit = session?.hits.find((h) => h.entryId === row.entryId);
+      return sum + (hit?.matchCount ?? (hit?.matches?.length ?? 1));
+    }, 0);
+    return { sessions: sessionIds.size, hits: Math.max(totalHits, rows.length) };
+  }, [rows, result]);
+  /* F5：单条命中计数（关键字在摘要中的出现次数）。 */
+  const countMatches = reactExports.useCallback((snippet) => {
+    if (trimmed === "") return 0;
+    const needle = trimmed.toLowerCase();
+    const hay = snippet.toLowerCase();
+    let count = 0;
+    let pos = hay.indexOf(needle);
+    while (pos !== -1) {
+      count += 1;
+      pos = hay.indexOf(needle, pos + needle.length);
+    }
+    return count;
+  }, [trimmed]);
+  /* F9：命中列表复制为 Markdown。 */
+  const copyResults = reactExports.useCallback(() => {
+    const lines = ["# 会话检索结果", "", `- 关键词：${trimmed}`, `- 时间：${new Date().toLocaleString("zh-CN")}`, ""];
+    for (const row of rows) {
+      const session = result?.sessions.find((s) => s.sessionId === row.sessionId);
+      lines.push(`- [${roleLabel(row.role)}] ${session?.title ?? row.sessionId}：${row.snippet}`);
+    }
+    navigator.clipboard.writeText(lines.join("\n")).catch(() => {
+    });
+    window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: `已复制 ${rows.length} 条命中为 Markdown` }] }));
+  }, [rows, result, trimmed]);
   const activeKey = rows[activeIndex]?.key;
   reactExports.useEffect(() => {
     if (activeKey === void 0) return;
@@ -75554,7 +75638,7 @@ function SearchView({ onClose, onOpenHit }) {
           "检索中"
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "ss-results", ref: listRef, children: result.sessions.map((session) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "ss-session", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "ss-results", ref: listRef, children: filteredSessions.map((session) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "ss-session", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-session-head", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-session-title", title: session.title, children: session.title }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "ss-session-meta", children: [
@@ -75566,7 +75650,7 @@ function SearchView({ onClose, onOpenHit }) {
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-hits", children: [
-          session.hits.map((hit) => {
+          session.hits.filter((hit) => roleFilter === "all" || hit.role === roleFilter).map((hit) => {
             const key = `${session.sessionId}:${hit.entryId}`;
             const index = indexByKey.get(key) ?? -1;
             const segments = buildHighlightSegments(hit.snippet, hit.matches);
@@ -75575,6 +75659,7 @@ function SearchView({ onClose, onOpenHit }) {
               className: index === activeIndex ? "ss-hit is-active" : "ss-hit",
               "data-search-key": key,
               "aria-label": `${roleLabel(hit.role)}：${hit.snippet}`,
+              title: `关键字出现 ${countMatches(hit.snippet)} 次`,
               "aria-current": index === activeIndex ? "true" : void 0,
               onClick: () => openRow(rows[index]),
               children: [
@@ -75623,6 +75708,33 @@ function SearchView({ onClose, onOpenHit }) {
           "Esc 清空或返回",
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-hint-sep", "aria-hidden": "true", children: "·" }),
           "↑↓ 选择"
+        ] }),
+        /* #452 第二十八轮 F4：命中数统计行（过滤后口径）。 */
+        rows.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-stats", children: [
+          "共 ",
+          hitStats.hits,
+          " 处命中 · ",
+          hitStats.sessions,
+          " 个会话"
+        ] }),
+        /* #452 第二十八轮 F1/F2/F10：筛选 chips（角色 / 时间 / 归档）。 */
+        trimmed !== "" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-filters", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-filter-group", role: "group", "aria-label": "角色筛选", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: roleFilter === "all" ? "ss-chip is-active" : "ss-chip", onClick: () => setRoleFilter("all"), children: "全部" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: roleFilter === "user" ? "ss-chip is-active" : "ss-chip", onClick: () => setRoleFilter("user"), children: "我发的" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: roleFilter === "assistant" ? "ss-chip is-active" : "ss-chip", onClick: () => setRoleFilter("assistant"), children: "它答的" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-filter-group", role: "group", "aria-label": "时间范围筛选", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "all" ? "ss-chip is-active" : "ss-chip", onClick: () => setTimeRange("all"), children: "全部时间" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "7d" ? "ss-chip is-active" : "ss-chip", onClick: () => setTimeRange("7d"), children: "7 天内" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "30d" ? "ss-chip is-active" : "ss-chip", onClick: () => setTimeRange("30d"), children: "30 天内" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-chip", title: "复制命中列表为 Markdown", onClick: copyResults, children: "复制结果" })
+        ] }),
+        /* #452 第二十八轮 F6：最近搜索（最多 5 条，点击回填）。 */
+        trimmed === "" && recentQueries.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ss-recent", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-recent-label", children: "最近搜索" }),
+          recentQueries.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-chip", onClick: () => setQuery(item), children: item }, item))
         ] })
       ] }),
       body
