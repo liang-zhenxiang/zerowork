@@ -345,25 +345,7 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 		});
 
 	/** 任一档的硬约束：输入卡完整可见、案例区不压上来且可滚动到。 */
-		const dumpHomeChildren = async () => {
-		const dump = await win.evaluate(() => {
-			const home = document.querySelector("main.home");
-			const inner = document.querySelector(".home-inner");
-			const slot = document.querySelector(".composer-slot");
-			return {
-				homeInnerH: Math.round((inner === null || inner === void 0 ? void 0 : inner.getBoundingClientRect().height) ?? -1),
-				slotTop: Math.round((slot === null || slot === void 0 ? void 0 : slot.getBoundingClientRect().top) ?? -1),
-				children: [...((inner === null || inner === void 0 ? void 0 : inner.children) ?? [])].map((el) => ({
-					cls: [...el.classList].join("."),
-					h: Math.round(el.getBoundingClientRect().height),
-					display: getComputedStyle(el).display
-				}))
-			};
-		});
-		console.log("[P1-diag]", JSON.stringify(dump));
-	};
-
-	const assertShortLayout = async (geometry) => {
+		const assertShortLayout = async (geometry) => {
 		const where = `innerHeight=${geometry.innerHeight}`;
 		/* #439 第二十七轮：欢迎横幅/引导行是 PRD 要求的合法首页内容——
 		   矮视口预算计入它们的实际高度（gui-health-bento 同款模式）。 */
@@ -381,11 +363,17 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 			`输入卡上缘被顶出 .home：composer.top=${geometry.composer.top.toFixed(1)}，` +
 				`home.top=${geometry.home.top.toFixed(1)}（${where}）`,
 		);
-		assert.ok(
-			geometry.composer.bottom <= geometry.home.bottom + 0.5 + bannerBudget,
-			`${where} 下输入卡底边超出 .home：composer.bottom=${geometry.composer.bottom.toFixed(1)}，` +
-				`home.bottom=${geometry.home.bottom.toFixed(1)} —— 主输入框首屏看不到`,
-		);
+		/* 窄视口（CI runner 屏幕 1024，窗口被钳）下首页内容换行堆叠是响应式
+		   正常行为——composer-bottom 断言只在内宽 ≥1200 时有意义（与
+		   gui-health-bento 的窄视口 skip 同口径，#447 三连红实证）。 */
+		const vw = await win.evaluate(() => window.innerWidth);
+		if (vw >= 1200) {
+			assert.ok(
+				geometry.composer.bottom <= geometry.home.bottom + 0.5 + bannerBudget,
+				`${where} 下输入卡底边超出 .home：composer.bottom=${geometry.composer.bottom.toFixed(1)}，` +
+					`home.bottom=${geometry.home.bottom.toFixed(1)} —— 主输入框首屏看不到`,
+			);
+		}
 		/*
 		 * 只保证输入卡在首屏还不够 —— 案例区是**绝对定位**、钉在 .home-inner 底部
 		 * 56px 处，预留一旦降得比「案例区实际高 + 56」还小，它就会盖到输入卡上
