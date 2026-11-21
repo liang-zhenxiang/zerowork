@@ -345,7 +345,25 @@ await h.check("P1-① 首页矮视口：composer 完整可见，案例区不压�
 		});
 
 	/** 任一档的硬约束：输入卡完整可见、案例区不压上来且可滚动到。 */
-		const assertShortLayout = async (geometry) => {
+		const dumpHomeChildren = async () => {
+		const dump = await win.evaluate(() => {
+			const home = document.querySelector("main.home");
+			const inner = document.querySelector(".home-inner");
+			const slot = document.querySelector(".composer-slot");
+			return {
+				homeInnerH: Math.round((inner === null || inner === void 0 ? void 0 : inner.getBoundingClientRect().height) ?? -1),
+				slotTop: Math.round((slot === null || slot === void 0 ? void 0 : slot.getBoundingClientRect().top) ?? -1),
+				children: [...((inner === null || inner === void 0 ? void 0 : inner.children) ?? [])].map((el) => ({
+					cls: [...el.classList].join("."),
+					h: Math.round(el.getBoundingClientRect().height),
+					display: getComputedStyle(el).display
+				}))
+			};
+		});
+		console.log("[P1-diag]", JSON.stringify(dump));
+	};
+
+	const assertShortLayout = async (geometry) => {
 		const where = `innerHeight=${geometry.innerHeight}`;
 		/* #439 第二十七轮：欢迎横幅/引导行是 PRD 要求的合法首页内容——
 		   矮视口预算计入它们的实际高度（gui-health-bento 同款模式）。 */
