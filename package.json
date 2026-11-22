@@ -144,18 +144,18 @@
     "test:gui:doc-edit-base": "node tests/e2e/gui-doc-edit-base.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.2",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@mozilla/readability": "^0.6.0",
     "electron-updater": "^6.8.11",
     "jsonc-parser": "^3.3.1",
     "jszip": "3.10.2",
-    "koffi": "3.3.7",
+    "koffi": "3.3.8",
     "linkedom": "^0.18.15",
-    "officeparser": "^8.7.0",
+    "officeparser": "^8.8.0",
     "pdfjs-dist": "6.5.438",
     "turndown": "^7.2.5",
-    "typebox": "^1.4.6",
+    "typebox": "^1.4.7",
     "undici": "8.12.4"
   },
   "devDependencies": {
