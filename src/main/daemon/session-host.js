@@ -84,6 +84,7 @@ class SessionHost {
     this.interactionId = interactionId;
     this.expertId = expertId;
     this.skills = skills;
+    this.docEditMode = options.docEditMode === true;
     this.ledger = options.createLedger?.(session.sessionId);
     if (this.ledger !== void 0) this.installRequestSnapshot();
   }
@@ -650,6 +651,13 @@ class SessionHost {
    */
   /** 委派模式开关（会话内策略，语义见 setDelegateMode）。 */
   delegateMode = false;
+  /**
+   * 修订模式开关（#456，会话内策略，不持久化）。
+   *
+   * 只决定 `session_state` 里带不带这个字段 —— 真正的拦截在 daemon 装配的
+   * `doc-edits.js` 扩展里，它按所属桶的状态现读（开关即时生效，不重建宿主）。
+   */
+  docEditMode = false;
   effectiveToolNames() {
     const mode = this.options.resources.modes.find((m) => m.id === this.interactionId);
     const base = mode === void 0 ? [...DEFAULT_TOOLS] : [...mode.tools];
@@ -671,6 +679,17 @@ class SessionHost {
     if (this.options.toolsOverride === void 0) {
       this.session.setActiveToolsByName([...this.effectiveToolNames()]);
     }
+    this.emitState();
+  }
+  /**
+   * 开关修订模式（#456）。
+   *
+   * 只改字段并重推状态 —— **不动工具面、不动提示词**：工具仍然可用，只是
+   * 拦截扩展会把写操作折成待审建议；提示词字节保持稳定（KV 缓存的同一口径
+   * 见 setDelegateMode 的注释）。
+   */
+  setDocEditMode(enabled) {
+    this.docEditMode = enabled === true;
     this.emitState();
   }
   /** 当前技能描述符，供 daemon 组装提示词的技能段。 */
@@ -712,6 +731,8 @@ class SessionHost {
       ...this.expertId !== void 0 && this.options.isExpertDisabled?.() === true ? { expertDisabled: true } : {},
       // 委派模式：常态不占字段（与 expertId 同款）。
       ...this.delegateMode ? { delegateMode: true } : {},
+      // 修订模式：常态不占字段（同上）。
+      ...this.docEditMode ? { docEditMode: true } : {},
       modelId: model === void 0 ? void 0 : toModelKey(model.provider, model.id),
       // 不能透传 pi 的 session.isStreaming：pi 要到 finally 的 _emitAgentSettled
       // 才把它置 false（agent-session.ts:631/1113），agent_end 事件分发时它仍是 true。
@@ -1146,6 +1167,16 @@ class SessionHost {
         this.pendingChanges.delete(event.toolCallId);
         const outcome = toolOutcomeFrom(event.isError, toolResultDetails(event.result));
         const detail = toolResultText(event.result);
+        /*
+         * 修订模式拦下的写入（#456）：建议已落盘、文件没动，只是 pi 只能把它
+         * 当 isError 报回来。拦截扩展在 tool_call 时按 toolCallId 登记，
+         * 这里按同一个 id 认领 —— live 事件里拿不到可靠的原因文本
+         * （block 的 result 在 pi 侧是后补的），靠文本匹配会漏。
+         * 卡片按「待审建议」渲染，台账记 blocked（不是错误）。
+         */
+        const pendingReview = event.isError === true &&
+          (event.toolName === "write" || event.toolName === "edit") &&
+          this.options.isDocEditBlocked?.(event.toolCallId) === true;
         const ledgerTool = this.openLedgerTools.get(event.toolCallId);
         this.openLedgerTools.delete(event.toolCallId);
         if (ledgerTool === void 0) {
@@ -1160,7 +1191,7 @@ class SessionHost {
             summary: ledgerTool.summary,
             startedAt: ledgerTool.startedAt,
             endedAt: Date.now(),
-            outcome
+            outcome: pendingReview ? "blocked" : outcome
           });
         }
         const sources = event.toolName === "web_search" ? parseSources(toolResultDetails(event.result)) : void 0;
@@ -1201,9 +1232,10 @@ class SessionHost {
             // 完成标签：write/edit 按新建/覆盖分 已生成/已修改，
             // 其余工具走 已读取/已列出…。started 缺失说明漏了 start 事件
             // （理论上不该发生），回落到工具名而不是编一个假标签。
-            label: stash !== void 0 ? writeDoneLabel(stash.changeType, outcome) : started === void 0 ? event.toolName : doneLabel(event.toolName, outcome),
+            label: pendingReview ? "已存为待审建议" : stash !== void 0 ? writeDoneLabel(stash.changeType, outcome) : started === void 0 ? event.toolName : doneLabel(event.toolName, outcome),
             summary: started?.summary ?? "",
             outcome,
+            ...pendingReview ? { pendingReview: true } : {},
             detail: detail === "" ? void 0 : detail,
             // hover 提示从执行态卡继承（summarizeArgs 只在 start 拿到 args）。
             ...started?.summaryTitle === void 0 ? {} : { summaryTitle: started.summaryTitle },

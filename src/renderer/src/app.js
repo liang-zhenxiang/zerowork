@@ -17577,6 +17577,44 @@ function PermissionMenu({ onOpenSettings, onError }) {
     ] })
   ] });
 }
+/**
+ * 修订模式开关（#456）。
+ *
+ * 会话级、默认关。开启后 AI 的写入不直接覆盖文件，而是先生成**待审建议**
+ * （接受后由后续版本写回，见 #457 / #458）。
+ *
+ * 放在「更多操作」菜单里而不是输入卡底行：底行在右侧面板打开时只有约 480px，
+ * 再塞一个带文字的开关会把「默认权限」挤成两行（实测 103px → 80px）。
+ * 菜单条目的空间足够把「它是什么、开着会怎样」一次说清。
+ *
+ * 状态只读 `session_state.docEditMode`（daemon 回推），不在本地乐观改 ——
+ * 界面显示的就是真正生效的那一档，与推理强度切换同一条口径。
+ */
+function DocEditSwitch({
+  enabled,
+  onChange
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "button",
+    {
+      type: "button",
+      className: "plus-menu-item plus-menu-switch-item",
+      role: "switch",
+      "aria-checked": enabled,
+      "aria-label": "修订模式：AI 的写入会先存为待审建议，文件暂不修改（仅 .md / .txt）",
+      title: "写入先存为待审建议，文件暂不修改；接受后才写入文件",
+      onClick: () => onChange(!enabled),
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(IconEdit, { size: 15 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "plus-menu-switch-text", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "修订模式" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plus-menu-switch-desc", children: enabled ? "已开启：写入先存为待审建议，文件暂不修改（仅 .md / .txt）" : "写入先存为待审建议，文件暂不修改（仅 .md / .txt）" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plus-menu-switch-track", "aria-hidden": "true", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "plus-menu-switch-thumb" }) })
+      ]
+    }
+  );
+}
 function PlusMenu({
   modes,
   currentId,
@@ -17588,7 +17626,9 @@ function PlusMenu({
   onPickFiles,
   onOpenSkills,
   onOpenConnectors,
-  onTodo
+  onTodo,
+  docEditMode,
+  onDocEditModeChange
 }) {
   const [open, setOpen] = reactExports.useState(false);
   const [modesOpen, setModesOpen] = reactExports.useState(false);
@@ -17644,6 +17684,7 @@ function PlusMenu({
             ]
           }
         ),
+        onDocEditModeChange !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(DocEditSwitch, { enabled: docEditMode === true, onChange: onDocEditModeChange }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "div",
           {
@@ -18304,6 +18345,8 @@ function HomeView({
   experts,
   expertId,
   expertDisabled,
+  docEditMode,
+  onDocEditModeChange,
   onSelectExpert,
   prefill,
   onPrefillConsumed,
@@ -18654,7 +18697,9 @@ function HomeView({
                     onPickFiles: () => void composerRef.current?.pickFiles(),
                     onOpenSkills,
                     onOpenConnectors,
-                    onTodo
+                    onTodo,
+                    docEditMode: docEditMode === true,
+                    ...onDocEditModeChange === void 0 ? {} : { onDocEditModeChange }
                   }
                 ),
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -35022,16 +35067,17 @@ function TurnTraceBar({ trace, onFocusEntry }) {
   if (trace === void 0 || trace.empty) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "turn-trace", "aria-label": "本轮工作轨迹", children: trace.segments.map((seg, index2) => {
     const bad = seg.status === "bad";
+    const pending = seg.status === "pending";
     const running = seg.status === "running";
     const Icon = toolIconOf(TRACE_KIND_ICON_TOOL[seg.kind] ?? "");
-    const ariaLabel = `${seg.label}${seg.count > 1 ? `，${seg.count} 次调用` : ""}${bad ? "，有失败或被拦截" : running ? "，进行中" : ""}`;
+    const ariaLabel = `${seg.label}${seg.count > 1 ? `，${seg.count} 次调用` : ""}${bad ? "，有失败或被拦截" : pending ? "，已存为待审建议" : running ? "，进行中" : ""}`;
     return /* @__PURE__ */ jsxRuntimeExports.jsxs(reactExports.Fragment, { children: [
       index2 > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "trace-conn", "aria-hidden": "true" }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
         {
           type: "button",
-          className: bad ? "trace-seg bad" : running ? "trace-seg running" : "trace-seg",
+          className: bad ? "trace-seg bad" : pending ? "trace-seg pending" : running ? "trace-seg running" : "trace-seg",
           title: seg.title,
           "aria-label": ariaLabel,
           onClick: () => onFocusEntry(seg.entryIds[0]),
@@ -35056,14 +35102,14 @@ function ActivityRail({ view, onFocusEntry }) {
   if (trace === void 0 || trace.empty || trace.segments.length === 0) return null;
   return /* @__PURE__ */ jsxRuntimeExports.jsx("aside", { className: "activity-rail", "aria-label": "本轮活动", children: trace.segments.map((seg, index2) => {
     const Icon = toolIconOf(TRACE_KIND_ICON_TOOL[seg.kind] ?? "");
-    const stateClass = seg.status === "bad" ? " bad" : seg.status === "running" ? " running" : "";
+    const stateClass = seg.status === "bad" ? " bad" : seg.status === "pending" ? " pending" : seg.status === "running" ? " running" : "";
     return /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
         type: "button",
         className: `rail-item${stateClass}`,
         title: seg.tooltipLines?.join("\n") ?? seg.label,
-        "aria-label": `${seg.label}${seg.count > 1 ? `，${seg.count} 次` : ""}${seg.status === "bad" ? "，有失败" : seg.status === "running" ? "，进行中" : ""}`,
+        "aria-label": `${seg.label}${seg.count > 1 ? `，${seg.count} 次` : ""}${seg.status === "bad" ? "，有失败" : seg.status === "pending" ? "，已存为待审建议" : seg.status === "running" ? "，进行中" : ""}`,
         onClick: () => onFocusEntry(seg.entryIds[0]),
         children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Icon, { size: 14, className: "rail-item-icon" }),
@@ -35085,7 +35131,9 @@ function ToolEntry({ card, showChangeDetails }) {
   const hasCommandLine = card.summaryTitle !== void 0;
   const expandable = hasDetail || hasCommandLine || webSources !== void 0;
   const running = card.outcome === void 0 || card.generating === true;
-  const failed = card.outcome !== void 0 && card.outcome !== "ok";
+  /* 修订模式拦下的写入（#456）：建议已落盘、文件未动 —— 不是失败，别画红。 */
+  const pendingReview = card.pendingReview === true;
+  const failed = card.outcome !== void 0 && card.outcome !== "ok" && !pendingReview;
   const ToolIcon = failed ? FAILED_ICON : toolIconOf(card.toolName);
   const blockedCommand = blockedCommandOf(card);
   // data-entry-id 是轨迹条「点击定位」的锚点（trace-core 的 entryIds 指到这里），
@@ -35100,7 +35148,7 @@ function ToolEntry({ card, showChangeDetails }) {
         title: expandable ? open ? "收起" : "展开详情" : void 0,
         onClick: () => setOpen((v) => !v),
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `tool-dot ${outcomeClass(card.outcome)}` }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: `tool-dot ${pendingReview ? "pending" : outcomeClass(card.outcome)}` }),
           !running && /* @__PURE__ */ jsxRuntimeExports.jsx(ToolIcon, { size: 14, className: failed ? "tool-icon failed" : "tool-icon" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: running ? "tool-label text-shimmer" : "tool-label", children: card.label }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "tool-summary", title: card.summaryTitle, children: card.summary }),
@@ -36159,6 +36207,7 @@ function ChatView({
   onAbort,
   onQueueRewrite,
   onInteractionChange,
+  onDocEditModeChange,
   experts,
   onSelectExpert,
   onOpenExperts,
@@ -37288,6 +37337,10 @@ function ChatView({
           )
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("footer", { className: "chat-composer", children: [
+          conversation.state.docEditMode === true && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "doc-edit-hint", role: "status", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "doc-edit-hint-dot", "aria-hidden": "true" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "修订模式已开启：写入先存为待审建议，文件暂不修改（仅 .md / .txt），接受后才写入文件。" })
+          ] }),
           queuedItems.map(({ text: text2, kind, rest, insertNow }) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "queued-chip", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "queued-chip-label", children: kind === "steering" ? "将插入" : "排队中" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "queued-chip-text", title: text2, children: text2 }),
@@ -37414,7 +37467,9 @@ function ChatView({
                         onPickFiles: () => void composerRef.current?.pickFiles(),
                         onOpenSkills,
                         onOpenConnectors,
-                        onTodo
+                        onTodo,
+                        docEditMode: conversation.state.docEditMode === true,
+                        ...onDocEditModeChange === void 0 ? {} : { onDocEditModeChange }
                       }
                     ),
                     /* @__PURE__ */ jsxRuntimeExports.jsx(PermissionMenu, { onOpenSettings, onError }),
@@ -79381,6 +79436,20 @@ function App() {
     },
     [link2.kind, showToast]
   );
+  /*
+   * 修订模式开关（#456）：会话级、默认关、不持久化。
+   * 不本地乐观改 —— 以 daemon 回推的 session_state 为准（与 setThinkingLevel
+   * 同一条口径：界面显示的就是真正生效的那一档）。
+   */
+  const changeDocEditMode = reactExports.useCallback(
+    (enabled) => {
+      if (link2.kind !== "ready") return;
+      window.kami.setDocEditMode(enabled).catch((error) => {
+        showToast(error instanceof Error ? error.message : String(error));
+      });
+    },
+    [link2.kind, showToast]
+  );
   /* ── 计划书（Plan Book）─────────────────────────────────────────── */
   const [planBookOpen, setPlanBookOpen] = reactExports.useState(false);
   const openPlanBook = reactExports.useCallback(() => {
@@ -80541,6 +80610,8 @@ function App() {
         experts,
         expertId: conversation.state.expertId,
         expertDisabled: conversation.state.expertDisabled === true,
+        docEditMode: conversation.state.docEditMode === true,
+        onDocEditModeChange: changeDocEditMode,
         onSelectExpert: selectExpert,
         prefill: pendingPrefill,
         onPrefillConsumed: () => setPendingPrefill(void 0),
@@ -80581,6 +80652,7 @@ function App() {
         },
         onQueueRewrite: rewriteQueue,
         onInteractionChange: changeInteraction,
+        onDocEditModeChange: changeDocEditMode,
         turnFoldCache: turnFoldCacheRef,
         focusEntry: searchFocus,
         currentSessionPath,

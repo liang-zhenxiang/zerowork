@@ -181,3 +181,19 @@ describe("类别常量", () => {
 		}
 	});
 });
+
+describe("修订模式拦下的写入（#456）", () => {
+	it("pendingReview 段是 pending，不计入 bad", () => {
+		const trace = buildTurnTrace([tool("t1", "write", "error", { pendingReview: true })]);
+		expect(trace.segments[0].status).toBe("pending");
+		expect(trace.totals.bad).toBe(0);
+	});
+
+	it("同 kind 的待审段不与失败段合并", () => {
+		const trace = buildTurnTrace([
+			tool("t1", "write", "error", { pendingReview: true }),
+			tool("t2", "write", "error")
+		]);
+		expect(trace.segments.map((s) => s.status)).toEqual(["pending", "bad"]);
+	});
+});

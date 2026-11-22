@@ -278,6 +278,13 @@ import {
 	createDocxExtractTool,
 } from "./doc-extract.js";
 import {
+	createDocEditExtension,
+	deleteProposal,
+	isDocEditId,
+	listProposals,
+	readProposal,
+} from "./doc-edits.js";
+import {
 	defaultProtectedDirs,
 	rememberRuleFromApproval,
 } from "./permission-rules.js";
@@ -3180,6 +3187,12 @@ async function createHost(bucket, sessionManager) {
    * 「拦住它的规则」与「记审计的规则」不是同一份，属于不可解释的行为。
    */
   const sessionHookSet = hookSetForCwd(cwd, bucket.worktree);
+  /*
+   * 修订模式（#456）：拦截扩展在 tool_call 时登记被拦下的 toolCallId，
+   * 宿主在 tool_execution_end 时认领。live 事件里 block 的结果文本不可靠，
+   * 不能靠原因前缀匹配；这个 Set 是两者之间唯一的回执通道。
+   */
+  const docEditBlocked = new Set();
   const host = await SessionHost.create({
     catalog,
     modelKey,
@@ -3197,6 +3210,13 @@ async function createHost(bucket, sessionManager) {
       const expertId = bucket.conversation.state.expertId;
       return expertId !== void 0 && isExpertDisabled(expertId);
     },
+    /*
+     * 修订模式（#456）：会话级开关，不持久化（重启后默认关 —— 避免「上次开了
+     * 修订模式，这次忘了」）。宿主只负责把它带进 session_state；真正的拦截
+     * 由下方 createDocEditExtension 按**桶状态现读**，两者共用同一份真相。
+     */
+    docEditMode: bucket.conversation.state.docEditMode === true,
+    isDocEditBlocked: (toolCallId) => typeof toolCallId === "string" && docEditBlocked.delete(toolCallId),
     emit: (event) => emitSessionEvent(bucket, event),
     resources: RESOURCES,
     // 运行台账按真值 sessionId 建（工厂语义见 SessionHostOptions.createLedger）。
@@ -3346,9 +3366,28 @@ async function createHost(bucket, sessionManager) {
         }
       }),
       /*
+       * 修订模式（#456）：开启时把 write / edit 变成**待审建议**，不落盘。
+       *
+       * **必须排在权限门之后**：权限 / hook 拒绝是终局，被拒的调用不该留下一条
+       * 「看起来可以接受」的建议。它也排在 spill 之前 —— 虽然 spill 挂在
+       * tool_result 链上、与这里的 tool_call 链不冲突，但同数组按「判定 → 执行 →
+       * 结果」的顺序读起来才是可复核的。
+       *
+       * isEnabled 按**所属桶**的状态现读：开关一改，下一次工具调用立即生效，
+       * 不需要重建宿主（与权限门的 getSettings getter 同款范式）。
+       */
+      createDocEditExtension({
+        cwd,
+        isEnabled: () => bucket.conversation.state.docEditMode === true,
+        getSessionId: () => adoptedSessionId(bucket),
+        onBlocked: ({ toolCallId }) => {
+          if (typeof toolCallId === "string" && toolCallId !== "") docEditBlocked.add(toolCallId);
+        }
+      }),
+      /*
        * 工具结果 spill（spec: adopt-dsh-disciplines Task 2.1）：**所有会话都装**，
-       * 紧跟在权限门之后读起来最顺 —— 权限门管「这条调用能不能跑」，
-       * 本钩子管「跑完的结果回给模型多少」（超限落盘 + 给路径，不再丢信息）。
+       * 排在权限判定与修订拦截之后读起来最顺 —— 前两者管「这条调用能不能跑 /
+       * 要不要先变成建议」，本钩子管「跑完的结果回给模型多少」（超限落盘 + 给路径，不再丢信息）。
        *
        * 落盘目录按会话 cwd 走：模型要用 read/grep 把结果读回去，
        * 放配置目录会被文件工具的禁读规则挡住（见 config-paths.getSpillsDir）。
@@ -5944,6 +5983,54 @@ const handlers = {
       return;
     }
     (await hostPromise).setThinkingLevel(level);
+  },
+  /*
+   * 修订模式（#456）：会话级开关，默认关、**不持久化**（重启后回到关）。
+   *
+   * 真正决定行为的是装配在会话里的拦截扩展，它按桶状态现读 —— 所以这里只需要
+   * 把开关写进状态：有宿主时由宿主重推（带 docEditMode），宿主还没建时直接
+   * 发一条 session_state。关闭时**把字段整个去掉**，维持「常态不占字段」的
+   * 可选契约（与 expertId / delegateMode 同款）。
+   */
+  [INVOKE.setDocEditMode]: async ([enabled]) => {
+    if (typeof enabled !== "boolean") {
+      throw new Error("修订模式开关只接受布尔值");
+    }
+    const bucket = currentBucket;
+    if (bucket.hostPromise !== void 0) {
+      (await bucket.hostPromise).setDocEditMode(enabled);
+    } else {
+      const { docEditMode: _previous, ...rest } = bucket.conversation.state;
+      emitSessionEvent(bucket, {
+        type: "session_state",
+        state: enabled ? { ...rest, docEditMode: true } : rest
+      });
+    }
+    return { docEditMode: enabled };
+  },
+  /** 待审修订建议的元数据列表（按创建时间倒序；坏记录跳过，不炸整页）。 */
+  [INVOKE.listDocEdits]: async () => listProposals().entries,
+  /** 读一条完整建议（含前后全文与 hunk）；不存在报可读错误。 */
+  [INVOKE.readDocEdit]: async ([id]) => {
+    if (!isDocEditId(id)) {
+      throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+    }
+    const proposal = readProposal(id);
+    if (proposal === void 0) {
+      throw new Error(`找不到修订建议（或它的记录已损坏）：${id}`);
+    }
+    return proposal;
+  },
+  /** 删除一条建议；不存在报可读错误（与读同一条口径）。 */
+  [INVOKE.deleteDocEdit]: async ([id]) => {
+    if (!isDocEditId(id)) {
+      throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+    }
+    const result = deleteProposal(id);
+    if (!result.deleted) {
+      throw new Error(`找不到修订建议：${id}`);
+    }
+    return { deleted: true };
   },
   /* ── 联网搜索配置 ───────────────────────────────────────────────── */
   [INVOKE.getWebSearchConfig]: async () => {

@@ -5378,6 +5378,25 @@ textarea:focus-visible {
 	background: var(--danger);
 }
 
+/* 修订模式拦下的写入不是失败（#456）：建议已落盘、文件未动，用品牌色而不是危险色。 */
+.tool-dot.pending {
+	background: var(--accent);
+}
+
+.trace-seg.pending {
+	color: var(--accent);
+	font-weight: 600;
+	border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+	background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.trace-seg.pending:hover {
+	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.rail-item.pending { color: var(--accent); }
+
 @keyframes tool-pulse {
 	50% {
 		opacity: 0.25;
@@ -8683,6 +8702,82 @@ textarea:focus-visible {
 .mode-chip-clear:hover {
 	background: var(--bg-raised);
 	color: var(--text);
+}
+
+/* ── 「更多操作」里的修订模式开关（#456）─────────────────────────────
+   为什么放在菜单里而不是输入卡底行：底行在右侧面板打开时只有约 480px，
+   一个带文字的开关会把「默认权限」挤成两行（实测 103px → 80px）。
+   轨道尺寸与配色照既有 .mcp-switch / .skill-switch（32×18、thumb 14、
+   off 轨道 --border、thumb --bg + 阴影），不新造一套开关视觉。
+   状态不只靠颜色：轨道填色 + thumb 位置 + aria-checked 三个通道同时表达。 */
+.plus-menu-switch-item {
+	align-items: flex-start;
+	white-space: normal;
+}
+
+.plus-menu-switch-text {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+}
+
+.plus-menu-switch-desc {
+	font-size: var(--text-meta);
+	line-height: 1.45;
+	color: var(--text-secondary);
+}
+
+.plus-menu-switch-track {
+	position: relative;
+	flex: none;
+	margin-left: auto;
+	margin-top: 1px;
+	width: 32px;
+	height: 18px;
+	border-radius: var(--radius-full);
+	background: var(--border);
+	transition: background var(--dur-fast) var(--ease-standard);
+}
+
+.plus-menu-item[aria-checked="true"] .plus-menu-switch-track {
+	background: var(--primary-active);
+}
+
+.plus-menu-switch-thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 14px;
+	height: 14px;
+	border-radius: var(--radius-full);
+	background: var(--bg);
+	box-shadow: 0 1px 3px rgb(0 0 0 / 20%);
+	transition: transform var(--dur-fast) var(--ease-standard);
+}
+
+.plus-menu-item[aria-checked="true"] .plus-menu-switch-thumb {
+	transform: translateX(14px);
+}
+
+/* 开启说明：一行，挂在输入卡上方。文案说清「写入要经接受」这条语义，
+   不靠用户回忆开关的名字。 */
+.doc-edit-hint {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	margin-bottom: var(--space-2);
+	padding: 0 var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.doc-edit-hint-dot {
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	background: var(--primary-active);
 }
 
 /* ── composer-bar 当前专家 chip ─────────────────────────────────── */

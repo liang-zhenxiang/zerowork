@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { isDocEditBlockText } from "../../shared/doc-edit.js";
 import { delimiter } from "node:path";
 import { dirname } from "node:path";
 import { extname } from "node:path";
@@ -783,6 +784,12 @@ function buildConversationEntries(entries, resolveToolLabel) {
         if (block.type !== "toolCall") continue;
         const result = results.get(block.id);
         const outcome = result === void 0 ? "aborted" : toolOutcomeFrom(result.isError, result.details);
+        const detail = result === void 0 ? void 0 : detailOf$1(result, block.name);
+        /*
+         * 修订模式拦下的写入（#456）：pi 把它报成 isError，但文件其实没动、
+         * 建议已落盘 —— 回放时按原因前缀认出来，标成待审而不是失败。
+         */
+        const pendingReview = isDocEditBlockText(detail);
         const todos = block.name === "todo_write" ? parseTodoArgs(block.arguments) : void 0;
         const sources = block.name === "web_search" && result !== void 0 ? parseSources(result.details) : void 0;
         const argSummary = summarizeArgs(block.arguments);
@@ -790,10 +797,11 @@ function buildConversationEntries(entries, resolveToolLabel) {
           id: block.id,
           role: "tool",
           toolName: block.name,
-          label: resolveToolLabel?.(block.name, outcome) ?? block.name,
+          label: pendingReview ? "已存为待审建议" : resolveToolLabel?.(block.name, outcome) ?? block.name,
           summary: argSummary.summary,
           outcome,
-          detail: result === void 0 ? void 0 : detailOf$1(result, block.name),
+          detail,
+          ...pendingReview ? { pendingReview: true } : {},
           // 摘要顶掉了入参原值（shell 的描述顶掉命令）时把原值带上，卡头 hover
           // 才看得到 —— 与 live 路径逐字一致（session-host 的 tool_started）。
           ...argSummary.title === void 0 ? {} : { summaryTitle: argSummary.title },
