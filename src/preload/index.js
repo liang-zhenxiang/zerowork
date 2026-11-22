@@ -154,6 +154,7 @@ const INVOKE = {
    * 与 sessionExport（HTML）同形：path 定位会话，返回 { outputPath }。
    */
   sessionExportMarkdown: "session:export-markdown",
+  sessionPlainText: "session:plain-text",
   /**
    * 资料库：汇总全部会话交付过的产物（跨会话去重，带来源会话与失效标记）。
    * **拉式**：只在用户打开资料库页面时调用。
@@ -790,6 +791,8 @@ const bridge = {
   exportSession: (path) => ipcRenderer.invoke(INVOKE.sessionExport, path),
   shareStatsCard: (base64Png, kind, ext) => ipcRenderer.invoke(INVOKE.statsShare, base64Png, kind, ext),
   exportSessionMarkdown: (path) => ipcRenderer.invoke(INVOKE.sessionExportMarkdown, path),
+  /** #463 第二十九轮 F2：会话纯文本全文。 */
+  sessionPlainText: (path) => ipcRenderer.invoke(INVOKE.sessionPlainText, path),
   exportSessionTxt: (path) => ipcRenderer.invoke(INVOKE.sessionExportTxt, path),
   listExports: () => ipcRenderer.invoke(INVOKE.exportsList),
   listLibrary: () => ipcRenderer.invoke(INVOKE.libraryList),

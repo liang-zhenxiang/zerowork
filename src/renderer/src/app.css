@@ -21158,3 +21158,47 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition: none;
 	}
 }
+
+/* ── §57 第二十九轮十连（#463 会话管理细节） ─────────────────────── */
+/* F9 双击重命名复用 .task-rename-input（既有样式） */
+/* F10 行悬浮操作按钮组：默认透明，hover 行时浮出 */
+.row-hover-actions {
+	position: absolute;
+	right: var(--space-2);
+	top: 50%;
+	transform: translateY(-50%);
+	display: flex;
+	gap: 4px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity var(--dur-fast) var(--ease-standard);
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	padding: 2px;
+	z-index: 2;
+}
+.task-item:hover .row-hover-actions,
+.task-item:focus-within .row-hover-actions {
+	opacity: 1;
+	pointer-events: auto;
+}
+.row-hover-btn {
+	border: none;
+	background: transparent;
+	color: var(--text-secondary);
+	font-size: 11px;
+	padding: 2px 8px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.row-hover-btn:hover {
+	background: var(--accent-soft, var(--bg));
+	color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+	.row-hover-actions {
+		transition: none;
+	}
+}

@@ -5757,6 +5757,37 @@ const handlers = {
     writeFileSync(outputPath, `${header2}\n${plain}\n\n由 ZeroWork 生成 · v${process.env.ZEROWORK_APP_VERSION ?? "0.0.0-dev"}\n`, "utf8");
     return { outputPath };
   },
+  /* #463 第二十九轮 F2：会话纯文本全文（行菜单「复制全文」用）。与 Txt 导出
+     同源同剥-markdown 逻辑，但不落盘——返回 { text }，渲染层写剪贴板。 */
+  [INVOKE.sessionPlainText]: async ([path]) => {
+    const target = path;
+    const pathError = validateSessionFilePath(target, getSessionsDir());
+    if (pathError !== void 0) throw new Error(pathError);
+    const bucket = findBucketByFile(target);
+    const hostPromise = bucket?.hostPromise;
+    const resolvedTarget = resolve(target);
+    const summary = (await listSessions()).find((s) => resolve(s.path) === resolvedTarget);
+    let entries;
+    if (hostPromise !== void 0) {
+      const host = await hostPromise;
+      entries = host.branchEntries();
+    } else {
+      const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+      const manager = SessionManager.open(target, getSessionsDir());
+      entries = manager.getBranch();
+    }
+    if (!hasExportableContent(entries)) throw new Error("该会话还没有内容可复制");
+    const title = summary?.title ?? "";
+    const blocks = renderSessionBlocks(entries);
+    const plain = blocks
+      .map((block) => block
+        .replace(/^#{1,6} /gm, "")
+        .replace(/^---$/gm, "")
+        .replace(/\*\*([^*]+)\*\*/g, "$1")
+        .replace(/`([^`]+)`/g, "$1"))
+      .join("\n\n");
+    return { text: `${title || "会话记录"}\n\n${plain}` };
+  },
   /* #315 round12 F8：导出产物列表。名字/大小/修改时间，最近 20 个（新在前）。 */
   [INVOKE.exportsList]: async () => {
     const exportsDir = join(getEffectiveWorkspaceRoot(), "exports");
