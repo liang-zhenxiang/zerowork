@@ -13901,6 +13901,10 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
       className: rowClass,
       "data-path": task.path,
       draggable: true,
+      /* #463 第二十九轮 F9：双击行 = 重命名（行菜单里的重命名入口保留）。 */
+      onDoubleClick: () => {
+        setEditingPath(task.path);
+      },
       onDragStart: () => {
         dragPathRef.current = task.path;
       },
@@ -14075,6 +14079,28 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
                 onExportMarkdownTask(task.path);
               },
               children: "导出为 Markdown"
+            }
+          ),
+          /* #463 第二十九轮 F2：复制全文（纯文本进剪贴板，不落盘）。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            "button",
+            {
+              type: "button",
+              className: "space-menu-item",
+              title: "复制全文（纯文本进剪贴板）",
+              onClick: () => {
+                setMenuPath(void 0);
+                void window.kami.sessionPlainText(task.path).then((r) => {
+                  navigator.clipboard.writeText(r.text).then(() => {
+                    window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: `已复制「${task.title}」全文（${r.text.length} 字）` }] }));
+                  }).catch(() => {
+                    window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: "写入剪贴板失败" }] }));
+                  });
+                }).catch((e) => {
+                  window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "error", text: e instanceof Error ? e.message : String(e) }] }));
+                });
+              },
+              children: "复制全文"
             }
           ),
           /* #315 round12 F6：纯文本导出。 */
@@ -14367,8 +14393,30 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
             }
           )
         ] })
-      ] })
-    ] }, task.path);
+      ] }),
+      /* #463 第二十九轮 F10：悬浮操作按钮组（hover 显示：归档/置顶/复制全文）。
+         常驻按钮喧宾夺主；hover 浮出 + opacity 过渡。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "row-hover-actions", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "row-hover-btn", "aria-label": "归档", title: "归档", onClick: (e) => {
+          e.stopPropagation();
+          onArchiveTask(task.path);
+        }, children: "归档" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "row-hover-btn", "aria-label": "置顶", title: task.pinned ? "取消置顶" : "置顶", onClick: (e) => {
+          e.stopPropagation();
+          onPinTask(task.path);
+        }, children: task.pinned ? "取消置顶" : "置顶" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "row-hover-btn", "aria-label": "复制全文", title: "复制全文", onClick: (e) => {
+          e.stopPropagation();
+          void window.kami.sessionPlainText(task.path).then((r) => {
+            navigator.clipboard.writeText(r.text).then(() => {
+              showToast(`已复制「${task.title}」全文`);
+            }).catch(() => {
+            });
+          }).catch(() => {
+          });
+        }, children: "复制全文" })
+      ] }),
+] }, task.path);
   };
   const renderSpaceGroup = (group) => {
     const collapsed = collapsedCwds.has(group.cwd);
