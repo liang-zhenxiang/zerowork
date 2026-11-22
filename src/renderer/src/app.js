@@ -14993,7 +14993,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
         !planningCollapsed && PLANNED_NAV_ITEMS.map(renderNavItem)
       ] })
     ] }),
-    /* #379 第二���二轮 F4：滚到近底部自动翻页。仅响应**用户手势滚动**
+/* #379 第二十二轮 F4：滚到近底部自动翻页。仅响应**用户手势滚动**
        （wheel/touchstart 后 3s 内）——程序化 scrollIntoView（既有 e2e 的
        菜单定位、focus 管理都会用）不触发翻页，避免放宽窗口破坏「折叠到
        N 行」的契约（session-pin ⑤④⑦ 在 CI 矮视口实测撞过）。 */
@@ -32613,7 +32613,7 @@ const Markdown = React.memo(function Markdown2({
   /* #312 F6：传入后 h2/h3 出现 ⚓ 按钮，点击复制 `${base}#${slug}` 深链。 */
   headingAnchorBase
 }) {
-  /* #379 第二���二轮 F6：大文本分段。>100KB 的回复（模型偶尔的巨型输出）
+/* #379 第二十二轮 F6：大文本分段。>100KB 的回复（模型偶尔的巨型输出）
      解析 markdown 是毫秒级到百毫秒级的热点；先渲前 50KB（按行边界截断，
      避免切在语法中间），「渲染完整内容」按钮点击后再全量。 */
   const [fullRender, setFullRender] = reactExports.useState(false);
@@ -70918,7 +70918,7 @@ function DataManagementSection() {
       ] }, item.name)) })
     ] }),
     error !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error, onRetry: () => void load() }) : sessions === void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取会话…" }) : archived.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-foot", children: "没有已归档的任务。在任务行的 ⋯ 菜单里选择「归档」即可收进这里。" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-      /* #354 第十��轮 F7：清理空会话。两段式：先查数量做确认摘要，确认后执行。 */
+/* #354 第十三轮 F7：清理空会话。两段式：先查数量做确认摘要，确认后执行。 */
       /* #354 第十九轮 F5：归档区搜索（>5 条才显示，纯前端过滤）。 */
       archived.length > 5 && /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
         type: "text",
@@ -75424,7 +75424,7 @@ function SearchView({ onClose, onOpenHit }) {
   const inputRef = reactExports.useRef(null);
   const requestRef = reactExports.useRef(0);
   const listRef = reactExports.useRef(null);
-  /* #452 第二���八轮 F1/F2/F10：角色筛选 / 时间范围 / 归档排除。 */
+  /* #452 第二十八轮 F1/F2/F10：角色筛选 / 时间范围 / 归档排除。 */
   const [roleFilter, setRoleFilter] = reactExports.useState("all");
   const [timeRange, setTimeRange] = reactExports.useState("all");
   const [includeArchived, setIncludeArchived] = reactExports.useState(false);
@@ -78546,7 +78546,7 @@ function App() {
     initialConversation
   );
   const viewCacheRef = reactExports.useRef(/* @__PURE__ */ new Map());
-  /* #379 第二���二轮 F9：会话视图缓存上限（近似 LRU——Map 保持插入序，
+  /* #379 第二十二轮 F9：会话视图缓存上限（近似 LRU——Map 保持插入序，
      触达即重插到尾部）。超 20 条时淘汰最旧；无限增长在长会话重度使用下
      每条可达数 MB，20 条 ≈ 几十 MB 是可接受的内存上限。 */
   const touchViewCache = reactExports.useCallback((sessionId) => {
