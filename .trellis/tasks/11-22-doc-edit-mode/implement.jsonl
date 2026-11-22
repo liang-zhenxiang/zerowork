@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "daemon 模块边界、偏好/状态与工具拦截纪律"}
+{"file": ".trellis/spec/renderer/index.md", "reason": "开关与状态表达、可访问性约束"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/最小 e2e/反向验证规范"}
+{"file": "docs/ARCHITECTURE.md", "reason": "工具调用链、权限门与扩展顺序"}

@@ -111,6 +111,8 @@ function kindOfEntry(entry) {
 function entryStatus(entry) {
 	// outcome 未定 = 还在跑（与 ToolEntry 的 running 判定同口径）。
 	if (entry.outcome === undefined) return "running";
+	// 修订模式拦下的写入不是失败：建议已落盘、文件未动（#456）。
+	if (entry.pendingReview === true) return "pending";
 	return entry.outcome === "ok" ? "ok" : "bad";
 }
 
@@ -179,7 +181,7 @@ function finalizeSegments(segments, calls, bad) {
 	const byKind = /* @__PURE__ */ new Map();
 	const merged = [];
 	for (const seg of segments) {
-		const key = seg.status === "bad" ? `${seg.kind}:bad` : seg.kind;
+		const key = seg.status === "bad" || seg.status === "pending" ? `${seg.kind}:${seg.status}` : seg.kind;
 		const prev = byKind.get(key);
 		if (prev === void 0) {
 			byKind.set(key, seg);

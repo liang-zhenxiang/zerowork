@@ -86,6 +86,17 @@ const INVOKE = {
    */
   setThinkingLevel: "session:set-thinking-level",
   /**
+   * 修订模式开关（#456）：会话级、默认关、**不持久化**。payload `[enabled]`。
+   * 开启后 write / edit 变成待审建议（不落盘），阻塞原因见 daemon/doc-edits.js。
+   */
+  setDocEditMode: "session:set-doc-edit-mode",
+  /** 待审修订建议列表（元数据，按创建时间倒序）。 */
+  listDocEdits: "session:list-doc-edits",
+  /** 读一条完整建议（before / after / ops / hunks）。入参 id。 */
+  readDocEdit: "session:read-doc-edit",
+  /** 删除一条建议。入参 id。 */
+  deleteDocEdit: "session:delete-doc-edit",
+  /**
    * 历史会话列表（全部工作目录，含临时任务）。
    * title / isTempTask 等展示字段由 daemon 组装好，UI 不再推导。
    */
@@ -748,6 +759,10 @@ const bridge = {
   getTeamTasks: () => ipcRenderer.invoke(INVOKE.getTeamTasks),
   setModel: (modelId) => ipcRenderer.invoke(INVOKE.setModel, modelId),
   setThinkingLevel: (level) => ipcRenderer.invoke(INVOKE.setThinkingLevel, level),
+  setDocEditMode: (enabled) => ipcRenderer.invoke(INVOKE.setDocEditMode, enabled),
+  listDocEdits: () => ipcRenderer.invoke(INVOKE.listDocEdits),
+  readDocEdit: (id) => ipcRenderer.invoke(INVOKE.readDocEdit, id),
+  deleteDocEdit: (id) => ipcRenderer.invoke(INVOKE.deleteDocEdit, id),
   listSessions: () => ipcRenderer.invoke(INVOKE.sessionList),
   // 首页「继续推进」的交接摘要：paths 是 SessionSummary.path 数组（首页可见的几张卡）。
   sessionDigest: (paths) => ipcRenderer.invoke(INVOKE.sessionDigest, paths),

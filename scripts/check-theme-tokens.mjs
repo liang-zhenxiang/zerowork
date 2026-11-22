@@ -463,10 +463,10 @@ const COLOR_LITERAL_ALLOWED = [
 		reason: "档外阴影：「纸」的抬升（DESIGN §10.3.2，同值两处）",
 	},
 	{
-		selector: /^\.mcp-switch-thumb$|^\.skill-switch-thumb$/,
+		selector: /^\.mcp-switch-thumb$|^\.skill-switch-thumb$|^\.plus-menu-switch-thumb$/,
 		prop: "box-shadow",
 		pattern: /rgb\(0 0 0 \/ 20%\)/,
-		reason: "档外阴影：开关滑块的贴边投影（DESIGN §10.3.2）",
+		reason: "档外阴影：开关滑块的贴边投影（DESIGN §10.3.2；修订模式开关 #456 复用同一值）",
 	},
 	{
 		selector: /^\.(?:lightbox|outline-backdrop)$/,

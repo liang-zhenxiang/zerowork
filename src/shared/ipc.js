@@ -115,6 +115,23 @@ const INVOKE = {
    */
   setThinkingLevel: "session:set-thinking-level",
   /**
+   * 修订模式开关（#456）：会话级、默认关、**不持久化**。payload `[enabled]`。
+   *
+   * 开启后 Agent 的 write / edit 不落盘，而是存成待审建议（`<config>/doc-edits/`）
+   * 并 block 这次调用。与权限门是两条独立的线：权限门决定「能不能动手」，
+   * 这里决定「动手的结果先给谁看」—— 所以它排在权限判定之后。
+   */
+  setDocEditMode: "session:set-doc-edit-mode",
+  /**
+   * 待审修订建议列表（只回元数据，不含前后全文）。
+   * **拉式**：打开审阅台时才调用，不挂推送、不进 run 边界热路径。
+   */
+  listDocEdits: "session:list-doc-edits",
+  /** 读一条完整建议（含 before / after / ops / hunks）。入参 id。 */
+  readDocEdit: "session:read-doc-edit",
+  /** 删除一条建议。入参 id；不存在时报可读错误（与读同一条口径）。 */
+  deleteDocEdit: "session:delete-doc-edit",
+  /**
    * 历史会话列表（全部工作目录，含临时任务）。
    * title / isTempTask 等展示字段由 daemon 组装好，UI 不再推导。
    */
