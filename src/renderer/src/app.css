@@ -13999,7 +13999,8 @@ button.agent-row {
 
 /* 筛选是一枚分段控件：静态底 --bg-chip，选中项回到页面底色 —— 不用下划线，
    也不借状态色（「全部 / 待审阅」是视图选择，不是状态）。 */
-.rv-filter {
+.rv-filter,
+.rv-tabs {
 	display: inline-flex;
 	align-items: center;
 	gap: 2px;
@@ -14010,7 +14011,9 @@ button.agent-row {
 
 /* 未选中的筛选标签也是必须读得出的控件文字 —— 用 --text（P1-4），
    选中态靠抬升面 + 字重区分，不再多造一档颜色。 */
-.rv-filter-btn {
+.rv-filter-btn,
+.rv-tabs-btn {
+	font-variant-numeric: tabular-nums;
 	flex: 0 0 auto;
 	padding: var(--space-1) var(--space-2);
 	border-radius: var(--radius-sm);
@@ -14023,17 +14026,22 @@ button.agent-row {
 		transform var(--dur-fast) var(--ease-standard);
 }
 
-.rv-filter-btn:hover {
+.rv-filter-btn:hover,
+.rv-tabs-btn:hover {
 	background: var(--bg-hover);
 }
 
-.rv-filter-btn:active {
+.rv-filter-btn:active,
+.rv-tabs-btn:active {
 	transform: scale(0.98);
 }
 
 /* 选中是双通道：抬升面 + 字重（与 .settings-nav-item.active 同一手法），
    不靠颜色深浅单独表达。 */
-.rv-filter-btn.is-active {
+.rv-filter-btn.is-active,
+.rv-tabs-btn.is-active {
+	background: var(--surface-1);
+	box-shadow: var(--shadow-sm);
 	background: var(--bg-raised);
 	color: var(--text);
 	font-weight: 500;
@@ -14146,6 +14154,165 @@ button.agent-row {
 	font-family: var(--font-mono);
 }
 
+/* ── 修订工作台（#457）：按文件分组的队列 + 逐段勾选 ──────────────────
+   复用 .rv-row / .rv-list / .fh-card 与 diff 的增删底色，只补「组头」与
+   「一段改动 = 勾选框 + 逐行 diff」两块。组头本身不是可点行，所以不加底色。 */
+.rv-proposal-group .rv-row.selected {
+	/* 工作台的选中行：--bg-raised 在 Aurora 亮色下与画布同值，看不出选中。
+	   --row-selected 是仓库为「选中行」定义的 token（brand 混 surface）。 */
+	background: var(--row-selected);
+}
+
+.rv-proposal-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+}
+
+.rv-proposal-group + .rv-proposal-group {
+	margin-top: var(--space-3);
+}
+
+/* 文件名（.rv-row-name）与目录（.rv-row-dir）复用既有两类的字号与颜色；
+   这里只把它们摆成一行：目录最多占一半，长路径仍可悬停看完整 title。 */
+.rv-proposal-group-head {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	min-width: 0;
+	margin: 0;
+	padding: 0 var(--space-2);
+}
+
+.rv-proposal-group-head .rv-row-name {
+	font-weight: 500;
+}
+
+.rv-proposal-group-head .rv-row-dir {
+	color: var(--text-secondary);
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 55%;
+}
+
+/* 段工具条：已选汇总 + 全选 / 全不选。 */
+.rv-hunk-tools {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+	margin-top: var(--space-3);
+}
+
+.rv-hunk-summary {
+	flex: 1 1 auto;
+	min-width: 0;
+	font-size: var(--text-meta);
+	color: var(--text);
+	font-variant-numeric: tabular-nums;
+}
+
+/* 段列表：长建议在卡片内自己滚动（卡片的边框与页头不动）。 */
+.rv-hunks {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-3);
+	margin-top: var(--space-2);
+	max-height: min(60vh, 560px);
+	overflow-y: auto;
+	scrollbar-gutter: stable;
+}
+
+.rv-hunk {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	overflow: hidden;
+}
+
+/* 勾选不等于颜色：左侧 2px 品牌条 + 段头文字「应用 / 不应用」两个通道。
+   段体不降透明 —— 用户仍要逐字读它（DESIGN §3.4）。 */
+.rv-hunk.is-on {
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.rv-hunk.is-off .rv-hunk-head {
+	color: var(--text-secondary);
+}
+
+.rv-hunk-state {
+	flex: 0 0 auto;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+.rv-hunk.is-on .rv-hunk-state {
+	color: var(--accent);
+}
+
+/* 段头是 <label>：整条可点即切换勾选，键盘走原生 checkbox（空格 / Tab）。 */
+.rv-hunk-head {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
+	background: var(--bg-raised);
+	font-size: var(--text-meta);
+	color: var(--text);
+	cursor: pointer;
+}
+
+.rv-hunk-head input[type="checkbox"] {
+	flex: none;
+	margin: 0;
+	accent-color: var(--accent);
+}
+
+.rv-hunk-stats {
+	flex: 0 0 auto;
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+}
+
+.rv-hunk-where {
+	flex: 0 0 auto;
+	margin-left: auto;
+	color: var(--text);
+}
+
+.rv-hunk-lines {
+	padding: var(--space-2) 0;
+	font-family: var(--font-mono);
+	font-size: var(--text-list);
+	line-height: 1.6;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+
+.rv-hunk-line {
+	padding: 0 var(--space-3);
+	color: var(--text);
+}
+
+/* 增删行的符号列：颜色之外的第二通道（色弱/灰度也能看出 + / −）。 */
+.rv-hunk-sign {
+	display: inline-block;
+	width: 1.2em;
+	color: var(--text-secondary);
+}
+
+.rv-hunk-discard {
+	margin: var(--space-2) 0 0;
+	font-size: var(--text-meta);
+	color: var(--text-secondary);
+}
+
+/* 增删底色复用 .diff-add / .diff-del；正文色显式保持 --text（与 .rv-diff-cell
+   同一条理由：.diff-add 自带的绿字对比不足，且不该随规则顺序漂移）。 */
+.rv-hunk-line.diff-add,
+.rv-hunk-line.diff-del {
+	color: var(--text);
+}
+
 /* ── 右区：动作 / 边界说明 / 并排对照（卡片本体复用 .fh-card）────────── */
 .rv-actions {
 	display: flex;
@@ -14155,9 +14322,17 @@ button.agent-row {
 	margin-top: var(--space-3);
 }
 
-/* `+N −M` 并进 meta 行，等宽数字（与左列 .rv-row-stats 同一口径）。 */
+/* 过期时「接受选中」是灰的，但 .mini-btn:disabled 只改文字色，仍像可点。
+   禁用态用透明度通道（DESIGN §3.4），不靠换文字色。 */
+.rv-actions .mini-btn:disabled {
+	opacity: 0.55;
+}
+
+/* `+N −M` 并进 meta 行，等宽数字（与左列 .rv-row-stats 同一口径）。
+   整组不折行：路径很长时「+2」与「−2」被拆到两行会被读成两个数字。 */
 .rv-meta-stats {
 	font-family: var(--font-mono);
+	white-space: nowrap;
 }
 
 /* 本页卡片里的 meta 是「目录 · 时间 · 来源 · 行数」，必须读得出（P1-4）。

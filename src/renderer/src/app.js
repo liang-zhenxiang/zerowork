@@ -32419,6 +32419,31 @@ import {
 	reviewTruncatedDiffNote,
 	visibleReviewEntries
 } from "./review-core.js";
+// 修订工作台（#457）的纯逻辑：按文件分组 / 默认全选 / 选中汇总 / 全部文案都在
+// doc-edit-core.js，单测直测 —— 视图只负责摆位置与接线。
+import {
+	DOC_EDIT_DONE_DESC,
+	DOC_EDIT_DONE_TITLE,
+	DOC_EDIT_EMPTY_DESC,
+	DOC_EDIT_EMPTY_TITLE,
+	DOC_EDIT_STALE_TEXT,
+	acceptSuccessText,
+	defaultSelectedHunks,
+	formatHunkStats,
+	formatProposalStats,
+	groupProposalsByPath,
+	hunkApplyLabel,
+	hunkRangeText,
+	mergeSelectAll,
+	proposalDirLabel,
+	proposalModeLabel,
+	proposalNameOf,
+	proposalPendingAnnouncement,
+	proposalSourceText,
+	rejectConfirmText,
+	rejectSuccessText,
+	summarizeSelection
+} from "./doc-edit-core.js";
 import {
 	buildHighlightSegments,
 	describeSearchSummary,
@@ -76279,6 +76304,284 @@ const FILE_HISTORY_SKELETON_ROWS = [
   { dir: "38%", note: "56%" }
 ];
 /*
+ * 修订工作台的右区（#457）：一条待审建议的详情 —— 过期条 / 逐段勾选 / 接受与拒绝。
+ *
+ * 三条纪律：
+ *   · **接受只写回勾选的段**：勾选状态默认全选（建议本身就是 AI 提出的完整改动），
+ *     取消某段就是「这段我不要」；写回算法与哈希守卫都在 daemon（#458），
+ *     这里不重算，只把 daemon 的错误消息原样摆出来。
+ *   · **过期不接受**：`stale` 来自 readDocEdit（与写回时那道哈希闸同一个函数），
+ *     显示「原文已变化」并禁用接受；拒绝仍然可用 —— 丢弃一条过期建议不碰文件。
+ *   · 拒绝是**整条**丢弃，所以给二次确认；接受不需要（列表里逐段可见，误触还有
+ *     哈希守卫兜一层）。
+ */
+function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, onToast, onResolved, onRecheck, refreshToken }) {
+  const [detail, setDetail] = reactExports.useState(void 0);
+  const [detailError, setDetailError] = reactExports.useState(void 0);
+  const [selected, setSelected] = reactExports.useState([]);
+  const [applying, setApplying] = reactExports.useState(false);
+  const [applyError, setApplyError] = reactExports.useState(void 0);
+  /*
+   * 读取时 `stale:false`、但按下接受时文件已被别处改动 —— daemon 的哈希守卫会拒绝。
+   * 那条错误就是「现在过期了」，所以把本地判据也翻成过期，接受按钮立刻变灰，
+   * 不让用户对着同一句错误连点。
+   */
+  const [forceStale, setForceStale] = reactExports.useState(false);
+  const [confirmingReject, setConfirmingReject] = reactExports.useState(false);
+  const [rejecting, setRejecting] = reactExports.useState(false);
+  const [rejectError, setRejectError] = reactExports.useState(void 0);
+  const [reloadToken, setReloadToken] = reactExports.useState(0);
+  const titleBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.title])), [sessions]);
+  const pathBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.path])), [sessions]);
+  reactExports.useEffect(() => {
+    if (proposalId === void 0) {
+      setDetail(void 0);
+      setDetailError(void 0);
+      setSelected([]);
+      setApplyError(void 0);
+      setForceStale(false);
+      setConfirmingReject(false);
+      setRejectError(void 0);
+      return void 0;
+    }
+    let cancelled = false;
+    setDetail(void 0);
+    setDetailError(void 0);
+    setSelected([]);
+    setApplyError(void 0);
+    setForceStale(false);
+    setConfirmingReject(false);
+    setRejectError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.readDocEdit(proposalId);
+        if (cancelled) return;
+        setDetail(res);
+        setSelected(defaultSelectedHunks(res));
+      } catch (e) {
+        if (!cancelled) setDetailError(errorText(e));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [proposalId, reloadToken, refreshToken]);
+  /* Esc 只取消二次确认，不离开页面 —— 与还原确认条同口径。 */
+  reactExports.useEffect(() => {
+    if (!confirmingReject) return void 0;
+    const onKeyDown = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setConfirmingReject(false);
+      setRejectError(void 0);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [confirmingReject]);
+  const hunks = Array.isArray(detail?.hunks) ? detail.hunks : [];
+  const allIds = reactExports.useMemo(() => defaultSelectedHunks(detail), [detail]);
+  const stale = detail?.stale === true || forceStale;
+  /* 过期判据只保留一处：把 forceStale 折进对象再交给 summarizeSelection，
+     视图不再「summary.canAccept && !stale」地重复判一次 —— 两处判据会让
+     反向验证打偏（去掉任一处行为都不变，也就看不出断言是不是真的）。 */
+  const summary = summarizeSelection(stale && detail !== void 0 ? { ...detail, stale: true } : detail, selected);
+  const canAccept = summary.canAccept;
+  const name = typeof proposalHint?.name === "string" && proposalHint.name !== ""
+    ? proposalHint.name
+    : proposalNameOf(detail?.path);
+  const sessionTitle = detail?.sessionId === void 0 ? void 0 : titleBySessionId.get(detail.sessionId);
+  const sessionPath = detail?.sessionId === void 0 ? void 0 : pathBySessionId.get(detail.sessionId);
+  const sessionsLoaded = Array.isArray(sessions);
+  const reloadDetail = () => setReloadToken((n) => n + 1);
+  const recheck = () => {
+    reloadDetail();
+    onRecheck();
+  };
+  const toggleHunk = (id, on) => {
+    setSelected((prev) =>
+      on ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((value) => value !== id)
+    );
+  };
+  const apply = () => {
+    if (detail === void 0 || applying || !canAccept) return;
+    setApplying(true);
+    setApplyError(void 0);
+    void (async () => {
+      try {
+        const res = await window.kami.applyDocEdit(detail.id, selected);
+        const applied = Array.isArray(res?.appliedHunks) ? res.appliedHunks.length : summary.count;
+        const total = typeof res?.totalHunks === "number" ? res.totalHunks : hunks.length;
+        const text = acceptSuccessText(
+          name,
+          applied,
+          total,
+          typeof res?.added === "number" ? res.added : summary.added,
+          typeof res?.removed === "number" ? res.removed : summary.removed
+        );
+        onToast(text, "ok");
+        onResolved();
+      } catch (e) {
+        /* 哈希守卫的文案原样展示（daemon 已经写成一句可诊断的话）。 */
+        const message = errorText(e);
+        setApplyError(message);
+        if (message.includes("原文已变化")) setForceStale(true);
+      } finally {
+        setApplying(false);
+      }
+    })();
+  };
+  const reject = () => {
+    if (detail === void 0 || rejecting) return;
+    setRejecting(true);
+    setRejectError(void 0);
+    void (async () => {
+      try {
+        await window.kami.rejectDocEdit(detail.id);
+        setConfirmingReject(false);
+        const text = rejectSuccessText(name);
+        onToast(text, "ok");
+        onResolved();
+      } catch (e) {
+        setRejectError(errorText(e));
+      } finally {
+        setRejecting(false);
+      }
+    })();
+  };
+  if (proposalId === void 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 22 }),
+      title: DOC_EDIT_DONE_TITLE,
+      description: DOC_EDIT_DONE_DESC
+    }) });
+  }
+  if (detailError !== void 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: detailError, onRetry: reloadDetail }) });
+  }
+  if (detail === void 0) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取修订建议…" }) });
+  }
+  const totalStats = proposalHint === void 0 ? formatProposalStats(summarizeSelection(detail, allIds)) : formatProposalStats(proposalHint);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", {
+    className: "fh-card",
+    "data-doc-edit-card": true,
+    "data-doc-edit-id": detail.id,
+    "data-stale": stale ? "true" : void 0,
+    children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "fh-card-head", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(FileTypeIcon, { name, size: 14 }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-card-name", title: detail.path, children: name }),
+        stale && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-card-flag", children: "原文已变化" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "fh-card-meta", title: detail.path, children: [
+        /* 目录在左列的组头上已经有了：这里只留「时间 · 来源」，避免同一行被路径挤到折行。 */
+        `${formatVersionTime(detail.createdAt)} · ${proposalSourceText(detail, sessionTitle, { sessionsLoaded })}`,
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-meta-stats", children: [
+          " · ",
+          totalStats
+        ] })
+      ] }),
+      stale && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-boundary", role: "status", "data-doc-edit-stale": true, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-boundary-text", children: DOC_EDIT_STALE_TEXT }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: recheck, children: "重新检查" })
+      ] }),
+      hunks.length === 0
+        ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", role: "status", children: "这条建议里没有可应用的改动段。" })
+        : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-hunk-tools", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-hunk-summary", "data-hunk-summary": true, children: `已选 ${summary.count} / ${hunks.length} 段 · +${summary.added} −${summary.removed} 行` }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: applying, onClick: () => setSelected(mergeSelectAll(selected, allIds, true)), children: "全选" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: applying, onClick: () => setSelected(mergeSelectAll(selected, allIds, false)), children: "全不选" })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-hunks", role: "group", "aria-label": "待应用的改动段", children: hunks.map((hunk, index) => {
+              const checked = selected.includes(hunk.id);
+              const range = hunkRangeText(hunk, { total: hunks.length });
+              return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: `rv-hunk ${checked ? "is-on" : "is-off"}`, "data-hunk-id": hunk.id, children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("label", { className: "rv-hunk-head", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+                    type: "checkbox",
+                    checked,
+                    onChange: (event) => toggleHunk(hunk.id, event.target.checked),
+                    "aria-label": hunkApplyLabel(hunk, index)
+                  }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: `第 ${index + 1} 段` }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-hunk-state", children: checked ? "应用" : "不应用" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-hunk-stats", children: formatHunkStats(hunk) }),
+                  range !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-hunk-where", children: range })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-hunk-lines", children: (Array.isArray(hunk.lines) ? hunk.lines : []).map((line, lineIndex) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+                  className: `rv-hunk-line${line.type === "+" ? " diff-add" : line.type === "-" ? " diff-del" : ""}`,
+                  children: [
+                    /* 增删不只靠底色：符号是第二通道，读屏另有「新增/删除」前缀。 */
+                    line.type === "+" || line.type === "-"
+                      ? /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: line.type === "+" ? "新增：" : "删除：" })
+                      : null,
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-hunk-sign", "aria-hidden": "true", children: line.type === "+" ? "+" : line.type === "-" ? "−" : " " }),
+                    line.text === "" ? " " : line.text
+                  ]
+                }, `line-${lineIndex}`)) })
+              ] }, hunk.id ?? `hunk-${index}`);
+            }) })
+          ] }),
+      hunks.length > 0 && summary.count < hunks.length && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "rv-hunk-discard", role: "status", children: [
+        "未勾选的 ",
+        hunks.length - summary.count,
+        " 段会在接受时一并丢弃，不会保留。"
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-actions", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          disabled: applying || !canAccept,
+          title: stale ? DOC_EDIT_STALE_TEXT : summary.count === 0 ? "至少选一段才能接受" : "只把这几个改动段写回目标文件",
+          onClick: apply,
+          children: applying ? "应用中…" : `接受选中（${summary.count} 段）`
+        }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          disabled: rejecting,
+          onClick: () => {
+            setConfirmingReject(true);
+            setApplyError(void 0);
+            setRejectError(void 0);
+          },
+          children: "拒绝整条"
+        }),
+        detail.sessionId !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "mini-btn",
+          disabled: sessionPath === void 0,
+          title: sessionPath === void 0
+            ? (sessionsLoaded ? "来源会话不在当前列表中（可能已归档或删除）" : "正在读取来源会话…")
+            : "打开产生这条建议的会话",
+          onClick: () => {
+            if (sessionPath !== void 0) onResumeSession(sessionPath);
+          },
+          children: "回到来源会话"
+        })
+      ] }),
+      applyError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm fh-confirm-error", role: "alert", "data-doc-edit-error": true, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: applyError }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: recheck, children: "重新检查" })
+      ] }),
+      confirmingReject && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm", "data-doc-edit-confirm": true, children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: rejectConfirmText(name) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: rejecting, onClick: () => {
+          setConfirmingReject(false);
+          setRejectError(void 0);
+        }, children: "取消" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn danger", disabled: rejecting, onClick: reject, children: rejecting ? "拒绝中…" : "确认拒绝" })
+      ] }),
+      rejectError !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "fh-confirm fh-confirm-error", role: "alert", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: rejectError }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: rejecting, onClick: reject, children: "重试" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note fh-card-note-tail", children: "接受只写回勾选的段落；未勾选的段落按拒绝处理，不会保留。拒绝整条只丢弃建议、不改文件。写回前会先把当前内容存成一条版本，之后可以在文件历史里还原。" })
+    ]
+  });
+}
+/*
  * 变更审阅台（侧栏「变更审阅」）：文件历史按**文件**组织，这一页按**变更**组织 ——
  * 每个文件最近一次被覆盖 = 一条变更卡，配上「待审阅 / 已审阅」与并排对照。
  *
@@ -76317,6 +76620,25 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
   const [restoring, setRestoring] = reactExports.useState(false);
   const [restoreError, setRestoreError] = reactExports.useState(void 0);
   const [reloadToken, setReloadToken] = reactExports.useState(0);
+  /*
+   * 页头「刷新」还要让右区**重读一次新鲜度**（stale / currentSha256）。
+   * 只重拉清单不够：同一条建议还在，选中项不变，详情不会自己重读 ——
+   * 用户手改文件后再刷新，会继续看到一份「没过期」的旧详情。
+   * 单独一个 token，避免接受 / 拒绝后的整页刷新也触发一次多余的重读。
+   */
+  const [recheckToken, setRecheckToken] = reactExports.useState(0);
+  /*
+   * 修订工作台（#457）的状态与「已变更」并列、互不影响：
+   *   · proposals 是 listDocEdits() 的元数据列表（undefined = 还在读）；
+   *   · mode 首帧是 undefined —— 两条清单都回来之前不决定进哪一档，
+   *     否则「有建议」时会先闪一下「已变更」再跳到「待修订」；
+   *   · selectedProposalId 与 selectedKey 各记各的：切模式不重置右区选中项。
+   */
+  const [proposals, setProposals] = reactExports.useState(void 0);
+  const [proposalsError, setProposalsError] = reactExports.useState(void 0);
+  const [hadProposals, setHadProposals] = reactExports.useState(false);
+  const [mode, setMode] = reactExports.useState(void 0);
+  const [selectedProposalId, setSelectedProposalId] = reactExports.useState(void 0);
   const titleBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.title])), [sessions]);
   const pathBySessionId = reactExports.useMemo(() => new Map((sessions ?? []).map((s) => [s.id, s.path])), [sessions]);
   const loadList = reactExports.useCallback(async () => {
@@ -76337,6 +76659,34 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
   reactExports.useEffect(() => {
     void loadList();
   }, [loadList, reloadToken]);
+  const loadProposals = reactExports.useCallback(async () => {
+    try {
+      const next = await window.kami.listDocEdits();
+      const rows = Array.isArray(next) ? next : [];
+      setProposals(rows);
+      setProposalsError(void 0);
+      /* 见过非空清单 → 之后清空时要说「都处理完了」，而不是「还没有建议」。 */
+      if (rows.length > 0) setHadProposals(true);
+    } catch (e) {
+      setProposalsError(errorText(e));
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void loadProposals();
+  }, [loadProposals, reloadToken]);
+  /*
+   * 首帧决定进哪一档：有建议 → 待修订；没有（或读失败）→ 保持原来的已变更视图。
+   * 只在 mode 还是 undefined 时判一次 —— 用户手动切过之后，刷新不能把他拽回去。
+   */
+  reactExports.useEffect(() => {
+    if (mode !== void 0) return;
+    if (proposalsError !== void 0) {
+      setMode("changes");
+      return;
+    }
+    if (proposals === void 0) return;
+    setMode(proposals.length > 0 ? "doc-edit" : "changes");
+  }, [mode, proposals, proposalsError]);
   const entries = list?.entries ?? [];
   const visibleEntries = reactExports.useMemo(
     () => visibleReviewEntries(entries, filter, keptKey),
@@ -76398,6 +76748,11 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
     setKeptKey(void 0);
     setReloadToken((n) => n + 1);
   }, []);
+  /* 页头刷新 = 重拉清单 + 让右区重读新鲜度（见 recheckToken 的说明）。 */
+  const reloadAll = () => {
+    setRecheckToken((n) => n + 1);
+    refresh();
+  };
   /**
    * 标记 / 撤销统一走这里：`reviewed` 是目标状态。
    *
@@ -76633,19 +76988,103 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
         /* §非目标：命令改的文件没有旧内容可留 —— 必须如实说明，不假装覆盖了所有改动。 */
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note fh-card-note-tail", children: "这里只看 Agent 用写入 / 编辑工具改过的文件；命令改的文件没有旧内容可留。还原会先把当前内容存成一条新版本，之后还能退回来。" })
       ] });
-  const body = listError !== void 0
+  /*
+   * 修订工作台（#457）的左栏与右区。分组 / 排序 / 汇总全在 doc-edit-core.js；
+   * 这里只摆位置。选中项「直接推导」的口径与「已变更」一致：清单变了就落到第一条，
+   * 没有下一条时右区给出「都处理完了」，而不是一张空卡。
+   */
+  const effectiveMode = mode ?? "changes";
+  const proposalGroups = reactExports.useMemo(() => groupProposalsByPath(proposals), [proposals]);
+  const flatProposals = reactExports.useMemo(
+    () => proposalGroups.flatMap((group) => group.entries),
+    [proposalGroups]
+  );
+  const activeProposalId = selectedProposalId !== void 0 && flatProposals.some((entry) => entry.id === selectedProposalId)
+    ? selectedProposalId
+    : flatProposals[0]?.id;
+  const activeProposal = flatProposals.find((entry) => entry.id === activeProposalId);
+  const proposalRow = (entry) => {
+    const time = typeof entry.createdAt === "number" && entry.createdAt > 0 ? formatRelativeTime(entry.createdAt, now) : "时间未知";
+    const stats = `${entry.hunkCount ?? 0} 段 · ${formatProposalStats(entry)}`;
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
+      type: "button",
+      className: `rv-row${entry.id === activeProposalId ? " selected" : ""}`,
+      "aria-current": entry.id === activeProposalId ? "true" : void 0,
+      /* 行在组头之下，按钮的可访问名要把文件名带上，否则读屏只念「3 分钟前，2 段」。 */
+      "aria-label": `${entry.name ?? ""}，${time}，${stats}`,
+      "data-doc-edit-entry": entry.id,
+      onClick: () => setSelectedProposalId(entry.id),
+      children: /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-row-meta", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: time }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-stats", children: stats })
+      ] })
+    }, entry.id);
+  };
+  const docIndexColumn = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-index", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-index-head", children: `待修订 · ${flatProposals.length} 条` }),
+    proposalGroups.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "rv-head-counts", "data-doc-edit-counts": true, children: `共 ${proposalGroups.length} 个文件` }),
+    flatProposals.length === 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-file-note", children: "没有待修订的建议" })
+      : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-list", children: proposalGroups.map((group) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-proposal-group", children: [
+          /* 组头是文件名 + 目录：队列按文件组织，组内每一行才只报时间与段数。 */
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "rv-proposal-group-head", title: group.path, children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-name", children: group.name }),
+            group.dir !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-dir", title: group.dir, children: proposalDirLabel(group.dir) })
+          ] }),
+          group.entries.map(proposalRow)
+        ] }, group.path || "(unknown)")) })
+  ] });
+  const docEditBody = proposalsError !== void 0
+    ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: proposalsError, onRetry: refresh })
+    : proposals === void 0
+      ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-index", role: "status", "aria-label": "正在读取待修订建议", children: [0, 1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-row", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${72 - i * 9}%`, height: 12 }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${52 + i * 5}%`, height: 10 })
+          ] }, i)) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取待修订建议…" }) })
+        ] })
+      : flatProposals.length === 0
+        ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
+            icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 22 }),
+            title: hadProposals ? DOC_EDIT_DONE_TITLE : DOC_EDIT_EMPTY_TITLE,
+            description: hadProposals ? DOC_EDIT_DONE_DESC : DOC_EDIT_EMPTY_DESC,
+            action: hadProposals
+              ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setMode("changes"), children: "看已变更" })
+              : void 0
+          })
+        : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [
+            docIndexColumn,
+            /* key 跟着选中项走：换一条建议时右区的勾选 / 错误 / 二次确认全部重新开始。 */
+            /* @__PURE__ */ jsxRuntimeExports.jsx(DocEditDetail, {
+              key: activeProposalId ?? "none",
+              proposalId: activeProposalId,
+              proposalHint: activeProposal,
+              sessions,
+              onResumeSession,
+              onToast,
+              refreshToken: recheckToken,
+              onRecheck: refresh,
+              onResolved: () => {
+                setSelectedProposalId(void 0);
+                refresh();
+              }
+            })
+          ] });
+  const reviewLoadingBody = /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-index", role: "status", "aria-label": "正在读取变更", children: [0, 1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-row", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${72 - i * 9}%`, height: 12 }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${52 + i * 5}%`, height: 10 }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 90, height: 10 })
+    ] }, i)) }),
+    /* 加载态就在卡片里（与文件历史一致）：卡片的边框从第一帧就在，
+       数据到达时是「同一片区域被填上」，不是整块出现。 */
+    /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取变更…" }) })
+  ] });
+  const reviewBody = listError !== void 0
     ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: listError, onRetry: refresh })
     : list === void 0
-      ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-index", role: "status", "aria-label": "正在读取变更", children: [0, 1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-row", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${72 - i * 9}%`, height: 12 }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: `${52 + i * 5}%`, height: 10 }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { width: 90, height: 10 })
-          ] }, i)) }),
-          /* 加载态就在卡片里（与文件历史一致）：卡片的边框从第一帧就在，
-             数据到达时是「同一片区域被填上」，不是整块出现。 */
-          /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取变更…" }) })
-        ] })
+      ? reviewLoadingBody
       : entries.length === 0
         ? /* @__PURE__ */ jsxRuntimeExports.jsx(EmptyState, {
             icon: /* @__PURE__ */ jsxRuntimeExports.jsx(IconCheck, { size: 22 }),
@@ -76653,19 +77092,47 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
             description: REVIEW_EMPTY_DESC
           })
         : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-layout", children: [indexColumn, card] });
+  /*
+   * 首帧还不知道进哪一档（mode === undefined）：先给骨架，两条清单都回来后立刻
+   * 定位到正确的一档 —— 直接渲染 reviewBody 会在「有建议」时先闪一下「已变更」。
+   */
+  const body = mode === void 0
+    ? reviewLoadingBody
+    : effectiveMode === "doc-edit"
+      ? docEditBody
+      : reviewBody;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("main", { className: "settings", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn", "aria-label": "返回", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconBack, { size: 17 }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { children: "变更审阅" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-tabs", role: "group", "aria-label": "审阅模式", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: `rv-tabs-btn${effectiveMode === "doc-edit" ? " is-active" : ""}`,
+          "aria-pressed": effectiveMode === "doc-edit",
+          "data-mode": "doc-edit",
+          onClick: () => setMode("doc-edit"),
+          children: proposalModeLabel(proposals?.length ?? 0)
+        }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: `rv-tabs-btn${effectiveMode === "changes" ? " is-active" : ""}`,
+          "aria-pressed": effectiveMode === "changes",
+          "data-mode": "changes",
+          onClick: () => setMode("changes"),
+          children: "已变更"
+        })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-filter", role: "group", "aria-label": "筛选变更", children: [
+      effectiveMode === "changes" && mode !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-filter", role: "group", "aria-label": "筛选变更", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `rv-filter-btn${filter === "all" ? " is-active" : ""}`, "aria-pressed": filter === "all", onClick: () => selectFilter("all"), children: "全部" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `rv-filter-btn${filter === "pending" ? " is-active" : ""}`, "aria-pressed": filter === "pending", onClick: () => selectFilter("pending"), children: "只看待审阅" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取变更清单", onClick: refresh, children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("button", { type: "button", className: "mini-btn", title: "重新拉取变更清单", onClick: reloadAll, children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(IconRefresh, { size: 13 }),
         "刷新"
-      ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", role: "status", "aria-live": "polite", children: proposals === void 0 ? "" : proposalPendingAnnouncement(proposals.length) })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "settings-body", "data-review-desk": true, children: body })
   ] });
