@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "文档处理边界与拒绝优先原则"}
+{"file": "docs/ARCHITECTURE.md", "reason": "现有文档解析/转换链"}
