@@ -129,6 +129,19 @@ const INVOKE = {
   listDocEdits: "session:list-doc-edits",
   /** 读一条完整建议（含 before / after / ops / hunks）。入参 id。 */
   readDocEdit: "session:read-doc-edit",
+  /**
+   * 接受一条待审建议并按**选中的 hunk** 写回文件（#458）。payload `[id, hunkIds]`。
+   *
+   * 写回前有一道哈希闸：当前文件 SHA-256 必须仍等于建议的 `baseSha256`，
+   * 否则拒绝并提示「原文已变化，请重新生成」—— 直接套用会覆盖掉之后的改动。
+   * 写前还会把当前内容存进文件历史（版本记录失败即中止）。任一道不过都**不写文件**。
+   */
+  applyDocEdit: "session:apply-doc-edit",
+  /**
+   * 拒绝一条待审建议：丢弃整条建议、**不碰目标文件**。入参 id。
+   * 拒绝与过期一样留 `file` 审计，用户能在审计日志里看到这里发生过什么。
+   */
+  rejectDocEdit: "session:reject-doc-edit",
   /** 删除一条建议。入参 id；不存在时报可读错误（与读同一条口径）。 */
   deleteDocEdit: "session:delete-doc-edit",
   /**

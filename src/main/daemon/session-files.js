@@ -278,11 +278,14 @@ import {
 	createDocxExtractTool,
 } from "./doc-extract.js";
 import {
+	applyProposal,
+	checkFreshness,
 	createDocEditExtension,
 	deleteProposal,
 	isDocEditId,
 	listProposals,
 	readProposal,
+	rejectProposal,
 } from "./doc-edits.js";
 import {
 	defaultProtectedDirs,
@@ -6041,7 +6044,13 @@ const handlers = {
   },
   /** 待审修订建议的元数据列表（按创建时间倒序；坏记录跳过，不炸整页）。 */
   [INVOKE.listDocEdits]: async () => listProposals().entries,
-  /** 读一条完整建议（含前后全文与 hunk）；不存在报可读错误。 */
+  /**
+   * 读一条完整建议（含前后全文与 hunk）；不存在报可读错误。
+   *
+   * 附带**新鲜度**（`stale` / `currentSha256` / `missing`）：UI 据此禁用「接受」，
+   * 不用自己再拉一次当前文件 —— 判据与写回时的那道哈希闸是同一个函数，
+   * 两处各算一次会分叉（比如一边按空串、一边按「文件不存在」）。
+   */
   [INVOKE.readDocEdit]: async ([id]) => {
     if (!isDocEditId(id)) {
       throw new Error(`修订建议 id 格式不正确：${String(id)}`);
@@ -6050,7 +6059,29 @@ const handlers = {
     if (proposal === void 0) {
       throw new Error(`找不到修订建议（或它的记录已损坏）：${id}`);
     }
-    return proposal;
+    return { ...proposal, ...checkFreshness(proposal) };
+  },
+  /**
+   * 接受一条建议（#458）：只应用选中的 hunk，并在写前校验原文哈希、留一版旧内容。
+   *
+   * 三道闸（建议可读 / 原文未变 / 旧版已留下）任一不过都**不写目标文件**；
+   * 校验与写回的细节在 doc-edits.js（可单测），这里只做入参形状检查。
+   */
+  [INVOKE.applyDocEdit]: async ([id, hunkIds]) => {
+    if (!isDocEditId(id)) {
+      throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+    }
+    if (!Array.isArray(hunkIds)) {
+      throw new Error("要应用的改动段必须是数组 —— 元素是 hunk 的 id，形如 h1。");
+    }
+    return applyProposal(id, hunkIds);
+  },
+  /** 拒绝一条建议（#458）：丢弃整条建议、**不碰目标文件**；拒绝也留审计。 */
+  [INVOKE.rejectDocEdit]: async ([id]) => {
+    if (!isDocEditId(id)) {
+      throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+    }
+    return rejectProposal(id);
   },
   /** 删除一条建议；不存在报可读错误（与读同一条口径）。 */
   [INVOKE.deleteDocEdit]: async ([id]) => {
