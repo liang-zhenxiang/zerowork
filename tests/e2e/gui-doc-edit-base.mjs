@@ -9,6 +9,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { buildProposal, saveProposal } from "../../src/main/daemon/doc-edits.js";
 import { createHarness, waitUntil } from "./lib/harness.mjs";
 
 const FINAL_TEXT = "DOC_EDIT_PROBE_DONE";
@@ -69,6 +71,8 @@ const h = createHarness({ name: "doc-edit-base" });
 mkdirSync(h.WORKSPACE_DIR, { recursive: true });
 const mock = await startWriteServer();
 await h.launch();
+// 关掉首启「新东西」侧栏：工作台截图要覆盖宽版双列，不能被它压到 620px 以下。
+await h.dismissWhatsNew();
 const win = h.window();
 
 await h.check("注册 provider 并选中模型", async () => {
@@ -277,6 +281,303 @@ await h.check("接受建议：原文变过就拒绝，恢复到基准后才写�
 	}, id);
 	assert.match(again, /找不到修订建议/);
 	await h.shoot("apply-done");
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+ * 修订工作台（#457）：待修订队列 → 取消一段 → 接受；原文被手改 → 拒绝整条
+ *
+ * 建议由 `buildProposal` + `saveProposal`（daemon 的同一份实现）直接落种子，
+ * 而不是再跑一轮 Agent：这一轮要钉的是「勾选 → 写回 → 文件字节」与「过期 → 禁用
+ * → 拒绝 → 文件不变」，模型的输出不该为这几条断言引入运气成分。生成链路本身
+ * 已由本文件上半段的真实工具调用覆盖。
+ * ══════════════════════════════════════════════════════════════════════ */
+const DOC_EDITS_DIR = join(h.CONFIG_DIR, "doc-edits");
+const A_NAME = "工作台甲.md";
+const B_NAME = "工作台乙.md";
+
+/** 第 2 行与第 18 行各改一处 —— 相距超过上下文阈值，会分成两个 hunk。 */
+const aBeforeLines = Array.from({ length: 20 }, (_, index) => `第 ${index + 1} 行：原文`);
+aBeforeLines[1] = "第一处：原文";
+aBeforeLines[17] = "第二处：原文";
+const aAfterLines = [...aBeforeLines];
+aAfterLines[1] = "第一处：改后";
+aAfterLines[17] = "第二处：改后";
+const aFirstOnlyLines = [...aBeforeLines];
+aFirstOnlyLines[1] = "第一处：改后";
+const A_BEFORE = `${aBeforeLines.join("\n")}\n`;
+const A_AFTER = `${aAfterLines.join("\n")}\n`;
+/** 只应用第 1 段时应落盘的内容（第 18 行仍是原文）。 */
+const A_EXPECT = `${aFirstOnlyLines.join("\n")}\n`;
+
+const B_BEFORE = "乙：原文\n第二行：不变\n";
+const B_AFTER = "乙：改后\n第二行：不变\n";
+const B_MANUAL = "用户手写的内容\n";
+
+function seedDocEdit(fileName, before, after, at) {
+	const absPath = join(h.WORKSPACE_DIR, fileName);
+	writeFileSync(absPath, before, "utf8");
+	const proposal = buildProposal({
+		absPath,
+		before,
+		after,
+		sessionId: "sess-doc-workbench-e2e",
+		toolName: "edit",
+		at
+	});
+	saveProposal(proposal, { dir: DOC_EDITS_DIR });
+	return { proposal, absPath };
+}
+
+const seededA = seedDocEdit(A_NAME, A_BEFORE, A_AFTER, Date.now() - 60_000);
+const seededB = seedDocEdit(B_NAME, B_BEFORE, B_AFTER, Date.now() - 120_000);
+assert.equal(seededA.proposal.hunks.length, 2, "夹具应生成两段互不相邻的改动");
+
+async function openReviewDeskFromChat() {
+	const opened = await win.evaluate(() => {
+		const nav = [...document.querySelectorAll(".sidebar-nav button")].find((b) =>
+			(b.getAttribute("aria-label") ?? "").startsWith("文件历史")
+		);
+		if (nav === undefined || nav.disabled) return false;
+		nav.click();
+		return true;
+	});
+	assert.ok(opened, "侧栏找不到可点的「文件历史」导航项");
+	await waitUntil(
+		() =>
+			win.evaluate(() => {
+				const btn = [...document.querySelectorAll("main.settings .settings-head button")].find((b) =>
+					(b.textContent ?? "").trim().startsWith("变更审阅")
+				);
+				if (btn === undefined) return false;
+				btn.click();
+				return true;
+			}),
+		{ timeout: 15_000, desc: "文件历史页头出现「变更审阅」入口" }
+	);
+}
+
+/** 读工作台的可见状态；页面还没切过去时返回 null（谓词必须能返回假值）。 */
+function readDocView() {
+	return win.evaluate(() => {
+		const main = document.querySelector("main.settings");
+		if (main === null) return null;
+		const card = main.querySelector("[data-doc-edit-card]");
+		return {
+			tabs: [...main.querySelectorAll(".rv-tabs-btn")].map((b) => ({
+				text: (b.textContent ?? "").trim(),
+				active: b.getAttribute("aria-pressed") === "true"
+			})),
+			groups: [...main.querySelectorAll(".rv-proposal-group")].map((group) => ({
+				name: (group.querySelector(".rv-row-name")?.textContent ?? "").trim(),
+				dir: (group.querySelector(".rv-row-dir")?.textContent ?? "").trim(),
+				rows: group.querySelectorAll("[data-doc-edit-entry]").length
+			})),
+			cardName: (card?.querySelector(".fh-card-name")?.textContent ?? "").trim(),
+			hunkBoxes: card === null
+				? []
+				: [...card.querySelectorAll(".rv-hunk-head input[type=checkbox]")].map((box) => ({
+						checked: box.checked,
+						label: box.getAttribute("aria-label") ?? ""
+					})),
+			summary: (card?.querySelector(".rv-hunk-summary")?.textContent ?? "").trim(),
+			stale: card?.getAttribute("data-stale") === "true",
+			staleText: (card?.querySelector("[data-doc-edit-stale] .rv-boundary-text")?.textContent ?? "").trim(),
+			actions: card === null
+				? []
+				: [...card.querySelectorAll(".rv-actions button")].map((b) => ({
+						text: (b.textContent ?? "").trim(),
+						disabled: b.disabled
+					})),
+			confirm: (card?.querySelector("[data-doc-edit-confirm] .fh-confirm-text")?.textContent ?? "").trim(),
+			emptyTitle: (main.querySelector(".state-empty-title")?.textContent ?? "").trim(),
+			toasts: [...document.querySelectorAll(".toast-text")].map((t) => (t.textContent ?? "").trim())
+		};
+	});
+}
+
+const waitDocView = async (pred, desc, timeout = 20_000) => {
+	let last;
+	try {
+		return await waitUntil(async () => {
+			last = await readDocView();
+			return last !== null && pred(last) ? last : null;
+		}, { timeout, desc });
+	} catch (error) {
+		throw new Error(`${desc} —— 最后读到的状态：${JSON.stringify(last).slice(0, 600)}`, { cause: error });
+	}
+};
+
+async function clickInDocCard(label) {
+	const ok = await win.evaluate((text) => {
+		const card = document.querySelector("[data-doc-edit-card]");
+		const btn = card === null
+			? undefined
+			: [...card.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === text);
+		if (btn === undefined || btn.disabled) return false;
+		btn.click();
+		return true;
+	}, label);
+	assert.ok(ok, `找不到可点的「${label}」`);
+}
+
+async function clickReviewRefresh() {
+	const ok = await win.evaluate(() => {
+		const btn = [...document.querySelectorAll("main.settings .settings-head button")].find((b) =>
+			(b.getAttribute("title") ?? "").includes("重新拉取变更清单")
+		);
+		if (btn === undefined) return false;
+		btn.click();
+		return true;
+	});
+	assert.ok(ok, "页头找不到「刷新」按钮");
+}
+
+/** 切主题走与应用同一条路：localStorage 镜像 + data-theme 属性 + 偏好真源落盘。 */
+async function setTheme(pref) {
+	await win.evaluate(async (value) => {
+		const resolved = value === "system"
+			? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+			: value;
+		localStorage.setItem("zw:theme-pref", value);
+		document.documentElement.setAttribute("data-theme", resolved);
+		window.dispatchEvent(new CustomEvent("zw:theme-changed"));
+		await window.kami.setThemePreference(value);
+	}, pref);
+	await waitUntil(
+		() => win.evaluate((value) => {
+			const resolved = value === "system"
+				? (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+				: value;
+			return document.documentElement.getAttribute("data-theme") === resolved;
+		}, pref),
+		{ timeout: 10_000, desc: `主题切到 ${pref}` }
+	);
+}
+
+await h.check("工作台默认进入待修订：按文件分组、默认全选", async () => {
+	await openReviewDeskFromChat();
+	const view = await waitDocView(
+		(state) => state.tabs.length === 2 && state.groups.length === 2 && state.hunkBoxes.length === 2,
+		"待修订队列渲染（两个文件、两段）"
+	);
+	await h.waitForSettled();
+	await h.shoot("doc-edit-workbench-light");
+
+	assert.deepEqual(view.tabs.map((tab) => tab.text), ["待修订 2", "已变更"], "模式按钮文字不对");
+	assert.equal(view.tabs[0].active, true, "有建议时应默认停在「待修订」，而不是「已变更」");
+	assert.deepEqual(
+		view.groups.map((group) => group.name).sort(),
+		[A_NAME, B_NAME].sort(),
+		`队列应按文件分组：${JSON.stringify(view.groups)}`
+	);
+	assert.ok(view.groups.every((group) => group.dir.length > 0), "组头应显示目录（不能只剩文件名）");
+	assert.equal(view.cardName, A_NAME, "应默认选中最新的一条建议");
+	assert.equal(view.hunkBoxes.length, 2, "两条 hunk 应各有一个勾选框");
+	assert.ok(view.hunkBoxes.every((box) => box.checked), "hunk 默认全选");
+	assert.match(view.hunkBoxes[1].label, /应用第 2 段/, `第二段的读屏名称不对：${view.hunkBoxes[1].label}`);
+	assert.match(view.summary, /已选 2 \/ 2 段/, `汇总不对：${JSON.stringify(view.summary)}`);
+
+	/* 暗色也要看一遍：token 是属性驱动的，同一个界面换一套底即可。 */
+	await setTheme("dark");
+	await h.waitForSettled();
+	await h.shoot("doc-edit-workbench-dark");
+	await setTheme("light");
+});
+
+await h.check("取消第二段后接受：目标文件只写回选中的段", async () => {
+	await win.evaluate(() => {
+		const boxes = [...document.querySelectorAll("[data-doc-edit-card] .rv-hunk-head input[type=checkbox]")];
+		boxes[1].click();
+	});
+	await waitDocView((state) => state.summary.includes("已选 1 / 2 段"), "取消第二段后汇总变成 1 / 2");
+	// 勾选状态不只靠复选框：段头文字与丢弃提示必须同时说清。
+	const offState = await win.evaluate(() => {
+		const off = document.querySelector("[data-doc-edit-card] .rv-hunk.is-off");
+		return {
+			count: document.querySelectorAll("[data-doc-edit-card] .rv-hunk.is-off").length,
+			state: off?.querySelector(".rv-hunk-state")?.textContent ?? "",
+			discard: document.querySelector("[data-doc-edit-card] .rv-hunk-discard")?.textContent ?? "",
+		};
+	});
+	assert.equal(offState.count, 1, "取消勾选后应有一段标成不应用");
+	assert.equal(offState.state, "不应用");
+	assert.match(offState.discard, /未勾选的 1 段会.*丢弃/);
+	// 增删行有符号与读屏前缀，不只靠底色。
+	const lineSemantics = await win.evaluate(() => {
+		const del = document.querySelector("[data-doc-edit-card] .rv-hunk-line.diff-del");
+		const add = document.querySelector("[data-doc-edit-card] .rv-hunk-line.diff-add");
+		return {
+			delSign: del?.querySelector(".rv-hunk-sign")?.textContent ?? "",
+			delSr: del?.querySelector(".sr-only")?.textContent ?? "",
+			addSign: add?.querySelector(".rv-hunk-sign")?.textContent ?? "",
+			addSr: add?.querySelector(".sr-only")?.textContent ?? "",
+		};
+	});
+	assert.equal(lineSemantics.delSign, "−");
+	assert.equal(lineSemantics.delSr, "删除：");
+	assert.equal(lineSemantics.addSign, "+");
+	assert.equal(lineSemantics.addSr, "新增：");
+
+	await clickInDocCard("接受选中（1 段）");
+	const disk = await waitUntil(
+		() => {
+			const text = readFileSync(seededA.absPath, "utf8");
+			return text === A_EXPECT ? text : null;
+		},
+		{ timeout: 20_000, interval: 200, desc: "目标文件只含第一处改动（第二段未写回）" }
+	);
+	assert.equal(disk, A_EXPECT, "写回内容与选中段不一致");
+	assert.ok(disk.includes("第二处：原文"), "未选中的第二段被写回去了");
+	assert.ok(!disk.includes("第二处：改后"), "未选中的第二段被写回去了");
+
+	const after = await waitDocView((state) => state.tabs[0]?.text === "待修订 1", "接受后队列只剩乙");
+	assert.ok(
+		after.toasts.some((text) => text.includes("1 / 2 段") && text.includes("其余 1 段已丢弃")),
+		`toast 应报段数与未勾选段的去向：${JSON.stringify(after.toasts)}`
+	);
+	assert.ok(
+		after.toasts.some((text) => text.includes("+1") && text.includes("−1")),
+		`toast 应报增删行数：${JSON.stringify(after.toasts)}`
+	);
+	assert.equal((await win.evaluate(() => globalThis.kami.listDocEdits())).length, 1, "接受后建议应被删除");
+	await h.shoot("doc-edit-workbench-accepted");
+});
+
+await h.check("原文被手改 → 过期提示、接受禁用；Esc 取消拒绝", async () => {
+	writeFileSync(seededB.absPath, B_MANUAL, "utf8");
+	await clickReviewRefresh();
+	const stale = await waitDocView(
+		(state) => state.stale === true && state.cardName === B_NAME,
+		"刷新后出现「原文已变化」"
+	);
+	assert.match(stale.staleText, /原文已变化/, `过期条文案不对：${JSON.stringify(stale.staleText)}`);
+	assert.match(stale.staleText, /重新生成/, "过期条要给「重新生成」指引");
+	const accept = stale.actions.find((action) => action.text.startsWith("接受选中"));
+	assert.ok(accept !== undefined, "过期时仍应显示接受按钮（禁用而不是消失）");
+	assert.equal(accept.disabled, true, "过期时接受按钮必须禁用");
+	await h.shoot("doc-edit-workbench-stale");
+
+	/* 拒绝仍可用：先打开二次确认，Esc 取消后文件与建议都必须原样。 */
+	await clickInDocCard("拒绝整条");
+	await waitDocView((state) => state.confirm !== "", "拒绝的二次确认条出现");
+	await win.keyboard.press("Escape");
+	await waitDocView((state) => state.confirm === "", "Esc 取消二次确认");
+	assert.equal(readFileSync(seededB.absPath, "utf8"), B_MANUAL, "取消后文件不该变");
+	assert.equal((await win.evaluate(() => globalThis.kami.listDocEdits())).length, 1, "取消后建议应仍在");
+});
+
+await h.check("确认拒绝：建议消失、计数归零、目标文件不变", async () => {
+	await clickInDocCard("拒绝整条");
+	await waitDocView((state) => state.confirm !== "", "再次出现确认条");
+	await clickInDocCard("确认拒绝");
+	const view = await waitDocView((state) => state.tabs[0]?.text === "待修订 0", "拒绝后待修订归零");
+	assert.equal(readFileSync(seededB.absPath, "utf8"), B_MANUAL, "拒绝整条不该改动文件");
+	assert.equal((await win.evaluate(() => globalThis.kami.listDocEdits())).length, 0, "拒绝后建议应被删除");
+
+	const empty = await waitDocView((state) => state.emptyTitle !== "", "队列清空后出现「都处理完了」空态");
+	assert.equal(empty.emptyTitle, "待修订的建议都处理完了", "空态应区分「都处理完了」与「还没有建议」");
+	assert.equal(view.tabs[0].active, true, "清空队列后仍停在「待修订」，由空态给出下一步");
+	await h.shoot("doc-edit-workbench-empty");
 });
 
 await mock.close();

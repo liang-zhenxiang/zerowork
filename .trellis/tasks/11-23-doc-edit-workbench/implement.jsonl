@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/renderer/index.md", "reason": "组件状态、键盘与视觉约束"}
+{"file": ".trellis/spec/testing/index.md", "reason": "单测/真实 Electron 用例与折叠断言纪律"}
+{"file": "docs/DESIGN.md", "reason": "审阅台与 diff 的既有视觉档位"}
