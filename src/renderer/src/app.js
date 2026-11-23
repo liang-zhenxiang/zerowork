@@ -13614,6 +13614,21 @@ function Sidebar({
   const [renamingCwd, setRenamingCwd] = reactExports.useState(void 0);
   const [removingCwd, setRemovingCwd] = reactExports.useState(void 0);
   const [tasksCollapsed, setTasksCollapsed] = reactExports.useState(false);
+  /* #484 第三十轮 F1/F6：任务视图（列表/看板），选择持久化。 */
+  const [taskView, setTaskView] = reactExports.useState(() => {
+    try {
+      return window.localStorage.getItem("zw:task-view") === "board" ? "board" : "list";
+    } catch {
+      return "list";
+    }
+  });
+  const switchTaskView = (next) => {
+    setTaskView(next);
+    try {
+      window.localStorage.setItem("zw:task-view", next);
+    } catch {
+    }
+  };
   /* 「规划中」默认收起：两项都不可点，展开只会把导航区撑到需要滚动，
      而滚动容器的可视高度又恰好会切在其中一项中间（视觉上像坏了）。 */
   const [planningCollapsed, setPlanningCollapsed] = reactExports.useState(true);
@@ -15088,6 +15103,14 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
             ]
           }
         ),
+        !tasksCollapsed && jsxRuntimeExports.jsx("button", {
+          type: "button",
+          className: "task-view-toggle",
+          "aria-label": taskView === "board" ? "切换到列表视图" : "切换到看板视图",
+          title: taskView === "board" ? "切换到列表视图" : "切换到看板视图",
+          onClick: () => switchTaskView(taskView === "board" ? "list" : "board"),
+          children: taskView === "board" ? "列表" : "看板"
+        }),
         !tasksCollapsed && tasks !== void 0 && tasks.length > 3 && /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
           type: "text",
           className: "task-filter",
@@ -15132,7 +15155,7 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
           /* #354 第十九轮 F1：按活跃时间分组（今天/本周/本月/更早）。
              过滤态（filterNeedle 非空）不分组——过滤时用户在找具体某条，
              分组头是噪音。分组只对「未过滤 + 无分组折叠」的默认视图生效。 */
-          filterNeedle === "" ? ageGroups.map((group) => {
+          taskView === "board" && filterNeedle === "" ? jsxRuntimeExports.jsx("div", { className: "task-board", children: jsxRuntimeExports.jsx(TaskBoardSection, { tasks: visibleTasks.filter((t) => !t.archived), archived: [], onOpen: (t) => resumeTask(t.path), onArchive: (p) => onArchiveTask(p) }) }) : filterNeedle === "" ? ageGroups.map((group) => {
             const collapsed = ageCollapsed.has(group.key);
             return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
               group.tasks.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -32451,6 +32474,7 @@ import {
 	roleLabel,
 	summarizeSearch,
 } from "./session-search-core.js";
+import { TaskBoardSection } from "./task-board-section.js";
 import {
 	automationToastText,
 	automationToastTone,

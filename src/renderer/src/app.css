@@ -21377,3 +21377,86 @@ html[data-sidebar-density='compact'] .space-group-header {
 		transition: none;
 	}
 }
+
+/* ── §58 第三十轮十连（#484 任务看板） ──────────────────────────── */
+/* F1 视图切换按钮（任务标题右侧） */
+.task-view-toggle {
+	border: none;
+	background: transparent;
+	color: var(--text-faint);
+	font-size: 11px;
+	cursor: pointer;
+	padding: 2px 6px;
+	border-radius: var(--radius-sm);
+}
+.task-view-toggle:hover {
+	color: var(--accent);
+}
+/* F2-F8 看板 */
+.task-board {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: var(--space-2);
+}
+.task-board-col {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.task-board-col-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	font-size: 11px;
+	color: var(--text-faint);
+	padding: 2px var(--space-2);
+}
+.task-board-count {
+	font-weight: 600;
+}
+.task-board-col-body {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-1);
+	max-height: 320px;
+	overflow-y: auto;
+	min-height: 48px;
+	border-radius: var(--radius-sm);
+}
+.task-board-col-body:empty::after,
+.task-board-empty {
+	color: var(--text-faint);
+	font-size: 11px;
+	padding: var(--space-2);
+	text-align: center;
+}
+.task-board-card {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+	text-align: left;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-elevated);
+	padding: var(--space-2);
+	cursor: pointer;
+	font: inherit;
+	color: var(--text);
+}
+.task-board-card:hover {
+	border-color: var(--accent);
+}
+.task-board-card:active {
+	transform: scale(0.99);
+}
+.task-board-card-title {
+	font-size: var(--text-sm);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.task-board-card-meta {
+	color: var(--text-faint);
+	font-size: 11px;
+}
