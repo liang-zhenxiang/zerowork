@@ -7,7 +7,8 @@
  * `requireParentPort()` 并 `loadResources()`，在 Electron utilityProcess 之外
  * 根本 import 不了。把「建议的生成与存储」放那里等于放弃单测。
  * 这里**不 import Electron**（只碰 node:fs / node:crypto / node:path 与本目录的
- * config-paths、session-view 纯函数），vitest 可以直接 import。
+ * config-paths、session-view、audit、version-store —— 后两者同样不碰 Electron），
+ * vitest 可以直接 import。
  *
  * ## 语义（与 PRD #456 一一对应）
  *
@@ -21,6 +22,14 @@
  *
  * hunk 只是**视图**：`before` / `after` 才是唯一真相，写回（#458）按 hunk 的
  * `opsStart` / `opsEnd` 在原 ops 区间上应用即可，不需要重新做一次 diff。
+ *
+ * ## 写回（#458）
+ *
+ * 接受一条建议要同时成立三件事，缺一不可（顺序见 `applyProposal`）：
+ * 只应用**选中的 hunk**、当前文件哈希仍等于 `baseSha256`（否则拒绝并让用户重新生成）、
+ * 写盘前把当前内容交给 `version-store`（没有旧版本就不写）。
+ * 拒绝只丢建议、**不碰目标文件**；接受 / 拒绝 / 过期都写一条 `file` 类审计，
+ * detail 只记 id、文件名与段数 —— **不记文档正文**。
  */
 import { createHash, randomBytes } from "node:crypto";
 import {
@@ -35,7 +44,9 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { clipAuditDetail, writeAuditRecord } from "./audit.js";
 import { getConfigDir } from "./config-paths.js";
+import { recordVersion } from "./version-store.js";
 import { DIFF_CELL_BUDGET, DIFF_CONTEXT, applyEdits } from "./session-view.js";
 import { DOC_EDIT_BLOCK_PREFIX } from "../../shared/doc-edit.js";
 
@@ -482,20 +493,352 @@ function deleteProposal(id, options = {}) {
 	return { deleted: true };
 }
 
-/** 读目标文件：不存在按空串（write 新建 / edit 必然失败），超过 1 MiB 抛错。 */
-function readBefore(absPath) {
+/**
+ * 读目标文件的当前状态（**写回与新鲜度共用同一个口径**）。
+ *
+ * 不存在按空串（与生成建议时 `readBefore` 的口径一致：新建文件时 baseSha256
+ * 就是空串的哈希），`exists` 单独给出 —— 新建文件的建议在写回时不该被当成
+ * 「文件丢了」，也不该留下一条空内容的旧版本。
+ * 目录与超过 1 MiB 抛错（与生成侧同一个上限）。
+ */
+function readCurrentState(absPath) {
 	let stats;
 	try {
 		stats = statSync(absPath);
 	} catch (error) {
-		if (error !== null && typeof error === "object" && error.code === "ENOENT") return "";
+		if (error !== null && typeof error === "object" && error.code === "ENOENT") {
+			return { exists: false, text: "" };
+		}
 		throw error;
 	}
 	if (stats.isDirectory()) throw new Error("目标路径是一个目录，不是文件");
 	if (stats.size > DOC_EDIT_MAX_BYTES) {
 		throw new Error(`文件超过修订模式的 1 MiB 上限（${stats.size} 字节）`);
 	}
-	return readFileSync(absPath, "utf8");
+	return { exists: true, text: readFileSync(absPath, "utf8"), mode: stats.mode & 0o777 };
+}
+
+/** 读目标文件：不存在按空串（write 新建 / edit 必然失败），超过 1 MiB 抛错。 */
+function readBefore(absPath) {
+	return readCurrentState(absPath).text;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * 写回（#458）：选中 hunk 合并 → 哈希守卫 → 版本快照 → 原子写 → 审计
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * 把建议的逐行 ops 按**选中的 hunk** 合并成一份全文（**纯函数**，不碰磁盘）。
+ *
+ * 判据只有一条：一个增删行**是否落在某个被选中的 hunk 的 `opsStart..opsEnd` 内**。
+ * - 上下文行永远保留（它两侧同文，保留哪一个都是原文）；
+ * - 选中的增删行按 diff 语义应用（`+` 追加、`-` 丢弃）；
+ * - 未选中的增删行**回到原侧**（`-` 保留、`+` 丢弃）—— 未选中的 hunk 在写回时
+ *   一并丢弃，「保留这条建议」这件事本身不用单独表达（design.md §5）。
+ *
+ * `hunkIds` 必须非空、每个都存在、无重复：静默忽略拼错的 id 会让用户以为
+ * 「我选了它」而实际没选，那是一次不可见的丢改动。
+ *
+ * 返回 `{ text, appliedHunks }`，`appliedHunks` 按建议里的原顺序排列，每项带
+ * `{ id, opsStart, opsEnd, added, removed }`（增删数**从 ops 现算**，不信坏数据里的字段）。
+ */
+function mergeSelectedHunks(proposal, hunkIds) {
+	if (!isPlainObject(proposal)) throw new Error("缺少修订建议，无法合并改动");
+	const ops = Array.isArray(proposal.ops) ? proposal.ops : [];
+	const hunks = Array.isArray(proposal.hunks) ? proposal.hunks : [];
+	if (!Array.isArray(hunkIds) || hunkIds.length === 0) {
+		throw new Error("请至少选择一段要应用的改动");
+	}
+	const known = new Map();
+	for (const hunk of hunks) {
+		if (!isPlainObject(hunk) || typeof hunk.id !== "string" || hunk.id === "") continue;
+		known.set(hunk.id, hunk);
+	}
+	const selected = new Set();
+	for (const id of hunkIds) {
+		if (typeof id !== "string" || !known.has(id)) {
+			throw new Error(`这条建议里没有这一段改动：${String(id)}；文件没有被修改。`);
+		}
+		if (selected.has(id)) {
+			throw new Error(`同一段改动的 id 重复了：${id}；文件没有被修改。`);
+		}
+		selected.add(id);
+	}
+	const marked = new Uint8Array(ops.length);
+	const appliedHunks = [];
+	for (const hunk of hunks) {
+		if (!isPlainObject(hunk) || !selected.has(hunk.id)) continue;
+		const start = hunk.opsStart;
+		const end = hunk.opsEnd;
+		if (
+			!Number.isInteger(start) ||
+			!Number.isInteger(end) ||
+			start < 0 ||
+			end < start ||
+			end >= ops.length
+		) {
+			throw new Error("这条建议的结构已损坏（改动段的位置越界），请重新生成一次改动");
+		}
+		let added = 0;
+		let removed = 0;
+		for (let k = start; k <= end; k += 1) {
+			marked[k] = 1;
+			if (ops[k]?.type === "+") added += 1;
+			else if (ops[k]?.type === "-") removed += 1;
+		}
+		appliedHunks.push({ id: hunk.id, opsStart: start, opsEnd: end, added, removed });
+	}
+	const lines = [];
+	for (let k = 0; k < ops.length; k += 1) {
+		const op = ops[k];
+		if (op?.type === " ") {
+			lines.push(typeof op.text === "string" ? op.text : "");
+			continue;
+		}
+		const applied = marked[k] === 1;
+		if (op?.type === "-") {
+			if (!applied) lines.push(typeof op.text === "string" ? op.text : "");
+		} else if (op?.type === "+") {
+			if (applied) lines.push(typeof op.text === "string" ? op.text : "");
+		}
+	}
+	return { text: lines.join("\n"), appliedHunks };
+}
+
+/**
+ * 当前文件是否仍与建议的基准一致（**只读目标文件**）。
+ *
+ * 返回 `{ stale, currentSha256, missing, reason? }`：
+ * - 哈希相等 → `stale: false`；
+ * - 文件不存在但基准是空串哈希 → 仍是 `stale: false`（那是「新建文件」的建议，
+ *   与生成侧 `readBefore` 对不存在的口径一致）；
+ * - 其余 → `stale: true`，`reason` ∈ `"missing" | "changed" | "unreadable"`。
+ *
+ * IPC 读取建议时附带这两个字段（#457 据此禁用「接受」），所以本函数**不抛**：
+ * 读不了目标文件也是一种「不能接受」的状态，不是一次异常。
+ */
+function checkFreshness(proposal, options = {}) {
+	if (
+		!isPlainObject(proposal) ||
+		typeof proposal.path !== "string" ||
+		proposal.path === "" ||
+		typeof proposal.baseSha256 !== "string"
+	) {
+		return { stale: true, currentSha256: null, missing: false, reason: "invalid" };
+	}
+	let text = "";
+	let missing = false;
+	try {
+		if (typeof options.readText === "function") {
+			text = options.readText(proposal.path);
+		} else {
+			const state = readCurrentState(proposal.path);
+			text = state.text;
+			missing = !state.exists;
+		}
+	} catch (error) {
+		return {
+			stale: true,
+			currentSha256: null,
+			missing: false,
+			reason: "unreadable",
+			message: error instanceof Error ? error.message : String(error),
+		};
+	}
+	const currentSha256 = sha256(typeof text === "string" ? text : "");
+	if (currentSha256 === proposal.baseSha256) return { stale: false, currentSha256, missing };
+	return { stale: true, currentSha256, missing, reason: missing ? "missing" : "changed" };
+}
+
+/**
+ * 原子写：同目录临时文件 + rename（与 saveProposal / version-store 同款）。
+ *
+ * 临时文件必须与目标**同目录** —— 跨目录 rename 在多数文件系统上会退化成
+ * 复制 + 删除，不再是原子的。`mode` 来自原文件的权限位，存在时保留。
+ */
+function writeAtomically(absPath, text, mode) {
+	const dir = dirname(absPath);
+	mkdirSync(dir, { recursive: true });
+	const tmp = join(dir, `.${basename(absPath)}.${randomBytes(6).toString("hex")}${TMP_SUFFIX}`);
+	try {
+		writeFileSync(tmp, text, mode === undefined ? { encoding: "utf8" } : { encoding: "utf8", mode });
+		renameSync(tmp, absPath);
+	} catch (error) {
+		try {
+			rmSync(tmp, { force: true });
+		} catch {
+			// 临时文件删不掉不影响「目标文件没被改」这个事实；下次写入用自己的临时名。
+		}
+		throw error;
+	}
+}
+
+/** 写一条 file 类审计；detail 走 clipAuditDetail（≤240 字符），**不含文档正文**。 */
+function writeFileAudit(outcome, detail, auditDir) {
+	writeAuditRecord(
+		{ category: "file", outcome, detail: clipAuditDetail(detail) },
+		typeof auditDir === "string" && auditDir !== "" ? auditDir : undefined,
+	);
+}
+
+/** `options.now` 既接受函数也接受数字（注入固定时钟，单测才可复现）。 */
+function resolveNow(now) {
+	if (typeof now === "function") {
+		const value = now();
+		return typeof value === "number" && Number.isFinite(value) ? value : Date.now();
+	}
+	if (typeof now === "number" && Number.isFinite(now)) return now;
+	return Date.now();
+}
+
+/** 版本记录失败时的可读原因（错误要可诊断，不是一句「失败了」）。 */
+function versionFailureText(recorded) {
+	if (recorded?.reason === "io-error") {
+		return `写入版本目录失败（${recorded.message ?? "未知 IO 错误"}）`;
+	}
+	if (recorded?.reason === "too-large") return "目标文件超过 1 MiB，无法留旧版本";
+	if (recorded?.reason === "binary") return "目标文件看起来是二进制，无法留文本旧版本";
+	if (recorded?.reason === "no-content" || recorded?.reason === "no-path") return "拿不到目标文件的当前内容";
+	return `无法保存旧版本（${recorded?.reason ?? "未知原因"}）`;
+}
+
+/**
+ * 接受一条建议：**只应用选中的 hunk**，并把结果写回目标文件。
+ *
+ * 顺序是契约，每一步失败都**不写盘**：
+ *
+ * 1. 读建议（不存在 / 损坏 → 可读错误）→ `mergeSelectedHunks`；
+ * 2. 读当前文件并比对 `baseSha256` —— 不一致就拒绝（审计 `file/failed`，
+ *    detail 只记 id / 文件名 / 段数，不记正文）。这是「建议不是依据最新原文
+ *    生成的」的唯一判据，也是避免把用户之后的改动覆盖掉的那道闸；
+ * 3. 写前 `version-store.recordVersion` 留一版旧内容 —— 失败（尤其是
+ *    `io-error`）就**中止**：没有旧版本的写回不可回滚，违背「可回退」承诺；
+ *    文件本来不存在（新建建议）时没有旧内容可留，跳过这一步；
+ * 4. 原子写（同目录临时文件 + rename，保留原 mode）；
+ * 5. 审计 `file/allowed`；
+ * 6. 删除建议（删不掉不改变「已写入」这个事实，结果里如实给出 `proposalDeleted`）。
+ *
+ * 返回 `{ path, appliedHunks, added, removed, totalHunks, proposalDeleted }`。
+ */
+function applyProposal(id, hunkIds, options = {}) {
+	if (!isDocEditId(id)) throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+	const proposal = readProposal(id, { dir: options.dir });
+	if (proposal === undefined) {
+		throw new Error(
+			`找不到修订建议（或它的记录已损坏）：${id}；目标文件没有被修改。可以在审阅台重新生成一次改动。`,
+		);
+	}
+	const name = basename(proposal.path);
+	const { text, appliedHunks } = mergeSelectedHunks(proposal, hunkIds);
+	const totalHunks = proposal.hunks.length;
+	const appliedNote = `${appliedHunks.length}/${totalHunks} 段`;
+	let added = 0;
+	let removed = 0;
+	for (const hunk of appliedHunks) {
+		added += hunk.added;
+		removed += hunk.removed;
+	}
+
+	let state;
+	try {
+		state = readCurrentState(proposal.path);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		writeFileAudit("failed", `接受修订建议 ${id} 中止：读取目标文件失败（${name}，${appliedNote}）：${message}`, options.auditDir);
+		throw new Error(`读取目标文件失败（${message}），原文没有被修改。确认文件可读后重试。`);
+	}
+
+	const currentSha256 = sha256(state.text);
+	if (currentSha256 !== proposal.baseSha256) {
+		// 「原文已变化」是 PRD 指定的说法：#457 的按钮与提示文案都按它对齐。
+		const why = state.exists ? "原文已变化" : "原文已变化（目标文件已不在）";
+		writeFileAudit(
+			"failed",
+			`拒绝接受修订建议 ${id}：${why}（${name}，${appliedNote}），未写入`,
+			options.auditDir,
+		);
+		throw new Error(
+			"原文已变化，请重新生成：这条建议是依据更早的版本生成的，直接写回会覆盖掉之后的改动。目标文件没有被修改。",
+		);
+	}
+
+	if (state.exists) {
+		const recorded = recordVersion(
+			{
+				path: proposal.path,
+				content: state.text,
+				at: resolveNow(options.now),
+				sessionId: proposal.sessionId,
+				tool: "doc-edit",
+				added,
+				removed,
+			},
+			{ dir: options.versionsDir },
+		);
+		if (recorded.recorded !== true) {
+			const reason = versionFailureText(recorded);
+			writeFileAudit(
+				"failed",
+				`接受修订建议 ${id} 中止：写回前无法保存旧版本（${name}，${appliedNote}）：${reason}`,
+				options.auditDir,
+			);
+			throw new Error(
+				`无法在写回前保存旧版本（${reason}），为避免改坏之后退不回去，本次没有修改文件。清理磁盘空间或检查目标位置的写权限后重试。`,
+			);
+		}
+	}
+
+	try {
+		writeAtomically(proposal.path, text, state.mode);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		writeFileAudit("failed", `接受修订建议 ${id} 中止：写入失败（${name}，${appliedNote}）：${message}`, options.auditDir);
+		const escape = state.exists ? "旧内容已保存在文件历史里，可以从那里还原。" : "目标文件没有被创建。";
+		throw new Error(`写入失败（${message}）。${escape}`);
+	}
+
+	writeFileAudit(
+		"allowed",
+		`接受修订建议 ${id}：应用 ${appliedNote}（+${added} / -${removed} 行），写入 ${name}`,
+		options.auditDir,
+	);
+
+	let proposalDeleted = false;
+	try {
+		proposalDeleted = deleteProposal(id, { dir: options.dir }).deleted;
+	} catch (error) {
+		/*
+		 * 文件已经写成功了，这里不能再抛（那会让用户以为写回失败）。
+		 * 删不掉建议也不致命：UI 再点一次「接受」会被哈希守卫拦住，
+		 * 因为原文已经变了。
+		 */
+		console.error(
+			`[doc-edits] 建议文件删除失败（${id}）：${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+
+	return { path: proposal.path, appliedHunks: appliedHunks.map((hunk) => hunk.id), added, removed, totalHunks, proposalDeleted };
+}
+
+/**
+ * 拒绝一条建议：读建议 → 审计 `file/blocked` → 删除建议。**不读写目标文件。**
+ *
+ * 拒绝的是**整条建议**，不是单个 hunk —— 单条 hunk 的取舍用「不选」表达
+ * （design.md §5）。返回 `{ rejected: true, deleted }`。
+ */
+function rejectProposal(id, options = {}) {
+	if (!isDocEditId(id)) throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+	const proposal = readProposal(id, { dir: options.dir });
+	if (proposal === undefined) {
+		throw new Error(`找不到修订建议（或它的记录已损坏）：${id}；没有任何文件被改动。`);
+	}
+	writeFileAudit(
+		"blocked",
+		`用户拒绝修订建议 ${id}（${basename(proposal.path)}，${proposal.hunks.length} 段），目标文件未修改`,
+		options.auditDir,
+	);
+	const { deleted } = deleteProposal(id, { dir: options.dir });
+	return { rejected: true, deleted };
 }
 
 /**
@@ -593,8 +936,10 @@ export {
 	DOC_EDIT_ID_RE,
 	DOC_EDIT_MAX_BYTES,
 	DOC_EDIT_MAX_ENTRIES,
+	applyProposal,
 	applyToolInput,
 	buildProposal,
+	checkFreshness,
 	createDocEditExtension,
 	deleteProposal,
 	docEditsDir,
@@ -603,7 +948,9 @@ export {
 	isTextEditPath,
 	lineOps,
 	listProposals,
+	mergeSelectedHunks,
 	readProposal,
+	rejectProposal,
 	resolveInsideWorkspace,
 	saveProposal,
 	sha256,

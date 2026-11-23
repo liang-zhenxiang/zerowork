@@ -94,6 +94,13 @@ const INVOKE = {
   listDocEdits: "session:list-doc-edits",
   /** 读一条完整建议（before / after / ops / hunks）。入参 id。 */
   readDocEdit: "session:read-doc-edit",
+  /**
+   * 接受一条待审建议并按选中的 hunk 写回（#458）。payload `[id, hunkIds]`。
+   * 原文已变化、或写前留不下旧版本时**不写文件**（见 shared/ipc.js 同名字段）。
+   */
+  applyDocEdit: "session:apply-doc-edit",
+  /** 拒绝一条待审建议：丢弃整条建议、不碰目标文件。入参 id。 */
+  rejectDocEdit: "session:reject-doc-edit",
   /** 删除一条建议。入参 id。 */
   deleteDocEdit: "session:delete-doc-edit",
   /**
@@ -763,6 +770,8 @@ const bridge = {
   setDocEditMode: (enabled) => ipcRenderer.invoke(INVOKE.setDocEditMode, enabled),
   listDocEdits: () => ipcRenderer.invoke(INVOKE.listDocEdits),
   readDocEdit: (id) => ipcRenderer.invoke(INVOKE.readDocEdit, id),
+  applyDocEdit: (id, hunkIds) => ipcRenderer.invoke(INVOKE.applyDocEdit, id, hunkIds),
+  rejectDocEdit: (id) => ipcRenderer.invoke(INVOKE.rejectDocEdit, id),
   deleteDocEdit: (id) => ipcRenderer.invoke(INVOKE.deleteDocEdit, id),
   listSessions: () => ipcRenderer.invoke(INVOKE.sessionList),
   // 首页「继续推进」的交接摘要：paths 是 SessionSummary.path 数组（首页可见的几张卡）。
