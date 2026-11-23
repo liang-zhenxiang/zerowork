@@ -177,7 +177,13 @@ describe("文案（同一件事同一句话）", () => {
 	});
 
 	it("来源会话解析不到时如实说，不显示裸 id", () => {
-		expect(proposalSourceText({ toolName: "edit" }, undefined)).toBe("编辑 · 来源会话已不在");
+		expect(proposalSourceText({ toolName: "edit" }, undefined)).toBe(
+			"编辑 · 来源会话不在列表中（可能已归档或删除）"
+		);
+		expect(proposalSourceText({ toolName: "edit" }, undefined, { sessionsLoaded: false })).toBe(
+			"编辑 · 来源会话读取中…"
+		);
+		expect(proposalSourceText({ toolName: "edit" }, "周报整理")).toBe("编辑 · 周报整理");
 		expect(proposalSourceText({ toolName: "write" }, "整理周报")).toBe("写入 · 整理周报");
 	});
 

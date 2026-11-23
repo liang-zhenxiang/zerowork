@@ -14013,6 +14013,7 @@ button.agent-row {
    选中态靠抬升面 + 字重区分，不再多造一档颜色。 */
 .rv-filter-btn,
 .rv-tabs-btn {
+	font-variant-numeric: tabular-nums;
 	flex: 0 0 auto;
 	padding: var(--space-1) var(--space-2);
 	border-radius: var(--radius-sm);
@@ -14188,6 +14189,7 @@ button.agent-row {
 }
 
 .rv-proposal-group-head .rv-row-dir {
+	color: var(--text-secondary);
 	flex: 0 1 auto;
 	min-width: 0;
 	max-width: 55%;
@@ -14318,6 +14320,12 @@ button.agent-row {
 	align-items: center;
 	gap: var(--space-2);
 	margin-top: var(--space-3);
+}
+
+/* 过期时「接受选中」是灰的，但 .mini-btn:disabled 只改文字色，仍像可点。
+   禁用态用透明度通道（DESIGN §3.4），不靠换文字色。 */
+.rv-actions .mini-btn:disabled {
+	opacity: 0.55;
 }
 
 /* `+N −M` 并进 meta 行，等宽数字（与左列 .rv-row-stats 同一口径）。

@@ -14,6 +14,7 @@
  *
  * 本模块不碰 DOM、不读磁盘，对坏数据宽容处理（缺 path / 缺 hunks 不抛）。
  */
+import { formatDirLabel, formatToolName } from "./file-history-core.js";
 import { formatHunkHeader, reviewSourceText } from "./review-core.js";
 
 /** 空态一：一条建议都还没有（用户还没在修订模式下让 AI 改过文件）。 */
@@ -193,8 +194,29 @@ export function proposalPendingAnnouncement(count) {
 }
 
 /** 来源（工具 · 会话标题）—— 与变更审阅共用同一句，不露 `write`。 */
-export function proposalSourceText(proposal, sessionTitle) {
+export function proposalSourceText(proposal, sessionTitle, { sessionsLoaded = true } = {}) {
+	const tool = formatToolName(typeof proposal?.toolName === "string" ? proposal.toolName : "");
+	const title = typeof sessionTitle === "string" ? sessionTitle : "";
+	/*
+	 * 「不在当前列表」不等于「已删除」：会话清单可能还没加载（undefined）、
+	 * 或该会话已归档 / 不在当前筛选里。三种状态分开说，别谎报删除。
+	 */
+	if (sessionsLoaded !== true) return tool === "" ? "来源会话读取中…" : `${tool} · 来源会话读取中…`;
+	if (title === "") {
+		const text = "来源会话不在列表中（可能已归档或删除）";
+		return tool === "" ? text : `${tool} · ${text}`;
+	}
 	return reviewSourceText({ tool: typeof proposal?.toolName === "string" ? proposal.toolName : "" }, sessionTitle);
+}
+
+/** 组头目录：末两段足够区分；被截断时加 `…/` 前缀，读作「路径被截断」而不是怪路径。 */
+export function proposalDirLabel(dir) {
+	const text = typeof dir === "string" ? dir : "";
+	const trimmed = text.replace(/[\\/]+$/, "");
+	if (trimmed === "") return "";
+	const segments = trimmed.split(/[\\/]+/).filter((part) => part !== "");
+	const label = formatDirLabel(text);
+	return segments.length > 2 ? `…/${label}` : label;
 }
 
 /** 接受成功后的 toast / 播报：段数与行数都要说。 */

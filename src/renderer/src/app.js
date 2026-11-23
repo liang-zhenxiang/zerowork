@@ -32435,6 +32435,7 @@ import {
 	hunkApplyLabel,
 	hunkRangeText,
 	mergeSelectAll,
+	proposalDirLabel,
 	proposalModeLabel,
 	proposalNameOf,
 	proposalPendingAnnouncement,
@@ -76390,6 +76391,7 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
     : proposalNameOf(detail?.path);
   const sessionTitle = detail?.sessionId === void 0 ? void 0 : titleBySessionId.get(detail.sessionId);
   const sessionPath = detail?.sessionId === void 0 ? void 0 : pathBySessionId.get(detail.sessionId);
+  const sessionsLoaded = Array.isArray(sessions);
   const reloadDetail = () => setReloadToken((n) => n + 1);
   const recheck = () => {
     reloadDetail();
@@ -76473,7 +76475,7 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "fh-card-meta", title: detail.path, children: [
         /* 目录在左列的组头上已经有了：这里只留「时间 · 来源」，避免同一行被路径挤到折行。 */
-        `${formatVersionTime(detail.createdAt)} · ${proposalSourceText(detail, sessionTitle)}`,
+        `${formatVersionTime(detail.createdAt)} · ${proposalSourceText(detail, sessionTitle, { sessionsLoaded })}`,
         /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-meta-stats", children: [
           " · ",
           totalStats
@@ -76550,7 +76552,9 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
           type: "button",
           className: "mini-btn",
           disabled: sessionPath === void 0,
-          title: sessionPath === void 0 ? "来源会话已不在列表中" : "打开产生这条建议的会话",
+          title: sessionPath === void 0
+            ? (sessionsLoaded ? "来源会话不在当前列表中（可能已归档或删除）" : "正在读取来源会话…")
+            : "打开产生这条建议的会话",
           onClick: () => {
             if (sessionPath !== void 0) onResumeSession(sessionPath);
           },
@@ -77025,7 +77029,7 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
           /* 组头是文件名 + 目录：队列按文件组织，组内每一行才只报时间与段数。 */
           /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "rv-proposal-group-head", title: group.path, children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-name", children: group.name }),
-            group.dir !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-dir", title: group.dir, children: formatDirLabel(group.dir) })
+            group.dir !== "" && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-row-dir", title: group.dir, children: proposalDirLabel(group.dir) })
           ] }),
           group.entries.map(proposalRow)
         ] }, group.path || "(unknown)")) })
