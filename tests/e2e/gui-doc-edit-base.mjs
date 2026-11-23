@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildProposal, saveProposal } from "../../src/main/daemon/doc-edits.js";
 import { createHarness, waitUntil } from "./lib/harness.mjs";
@@ -36,7 +36,29 @@ function startWriteServer() {
 			send({ role: "assistant", content: "" });
 			const messages = parsed?.messages ?? [];
 			const hasToolResult = messages.some((message) => message.role === "tool");
-			if (!hasToolResult && requests.length === 1) {
+			const lastUserIndex = messages.map((message) => message.role).lastIndexOf("user");
+			const afterLastUser = lastUserIndex === -1 ? [] : messages.slice(lastUserIndex + 1);
+			const userText = JSON.stringify(messages[lastUserIndex]?.content ?? "");
+			const wantsNormalWrite = userText.includes("正常写入");
+			/*
+			 * 两条工具调用路径：
+			 *   · 第一次请求：修订模式下的 write（被拦成建议）；
+			 *   · 关闭修订模式后的「正常写入」：只有该用户消息之后**还没有** tool 结果时才发，
+			 *     否则同一轮会无限重复调用。
+			 */
+			if (!afterLastUser.some((message) => message.role === "tool") && wantsNormalWrite) {
+				send({
+					tool_calls: [
+						{
+							index: 0,
+							id: `call_normal_${requests.length}`,
+							type: "function",
+							function: { name: "write", arguments: JSON.stringify({ path: "normal-target.md", content: "正常写入成功\n" }) },
+						},
+					],
+				});
+				send({}, "tool_calls");
+			} else if (!hasToolResult && requests.length === 1) {
 				send({
 					tool_calls: [
 						{
@@ -223,6 +245,42 @@ await h.check("点开关可关闭，状态回推且字段消失", async () => {
  * 留下一条空内容的历史版本。有旧内容时的还原路径由单测
  * `doc-edits-apply.test.mjs` 用临时目录钉住。
  */
+await h.check("关闭修订模式后恢复正常写入（模型直接落盘）", async () => {
+	await win.evaluate(() => document.querySelector(".ws-backdrop")?.click());
+	const before = await win.evaluate(() => globalThis.kami.listDocEdits());
+	// 直接走 daemon 的 prompt 通道：这一条只验证「开关关掉后写入正常落盘」，
+	// 不依赖输入框的焦点与排队状态。
+	await win.evaluate(() => globalThis.kami.prompt({ text: "正常写入一次，用 normal-target.md" }));
+	/*
+	 * 会话 cwd 可能是工作区下的任务子目录（工作区按任务分桶），所以按文件名
+	 * 递归找工作区内的落点 —— 断言的是「真的写入磁盘」，不是某个拼死的绝对路径。
+	 */
+	const findNormalTarget = () => {
+		try {
+			const rel = readdirSync(h.WORKSPACE_DIR, { recursive: true })
+				.map((entry) => String(entry))
+				.find((entry) => entry.endsWith("normal-target.md"));
+			if (rel === undefined) return null;
+			const abs = join(h.WORKSPACE_DIR, rel);
+			return readFileSync(abs, "utf8") === "正常写入成功\n" ? abs : null;
+		} catch {
+			return null;
+		}
+	};
+	const written = await waitUntil(
+		() => findNormalTarget(),
+		{ timeout: 40_000, interval: 300, desc: "关闭修订模式后 write 直接落到磁盘" }
+	);
+	assert.ok(written.endsWith("normal-target.md"));
+	const after = await win.evaluate(() => globalThis.kami.listDocEdits());
+	assert.equal(after.length, before.length, "关闭修订模式后仍产生了待审建议");
+	assert.equal(
+		after.some((entry) => entry.name === "normal-target.md"),
+		false,
+		"关闭修订模式后的写入被错误地记成了建议"
+	);
+});
+
 await h.check("接受建议：原文变过就拒绝，恢复到基准后才写回", async () => {
 	const entries = await win.evaluate(() => globalThis.kami.listDocEdits());
 	assert.equal(entries.length, 1, `建议条数：${JSON.stringify(entries)}`);
@@ -541,6 +599,24 @@ await h.check("取消第二段后接受：目标文件只写回选中的段", as
 	);
 	assert.equal((await win.evaluate(() => globalThis.kami.listDocEdits())).length, 1, "接受后建议应被删除");
 	await h.shoot("doc-edit-workbench-accepted");
+});
+
+await h.check("接受后可从文件历史还原到接受前", async () => {
+	const history = await win.evaluate(() => globalThis.kami.listFileHistory());
+	const file = history.files.find((entry) => entry.path === seededA.absPath);
+	assert.ok(file, "文件历史里没有接受前留下的版本");
+	const detail = await win.evaluate(({ key }) => globalThis.kami.readFileHistory({ key }), { key: file.key });
+	assert.equal(detail?.ok, true, `读版本详情失败：${JSON.stringify(detail)}`);
+	const versions = detail.versions ?? [];
+	assert.ok(versions.length > 0, "接受前没有留下版本记录");
+	// versions 旧→新；接受前的旧内容是最早的一版。
+	const oldest = versions[0];
+	const restored = await win.evaluate(
+		({ key, id }) => globalThis.kami.restoreFileHistory({ key, id }),
+		{ key: file.key, id: oldest.id }
+	);
+	assert.equal(restored?.ok, true, `还原失败：${JSON.stringify(restored)}`);
+	assert.equal(readFileSync(seededA.absPath, "utf8"), A_BEFORE, "还原后内容不等于接受前");
 });
 
 await h.check("原文被手改 → 过期提示、接受禁用；Esc 取消拒绝", async () => {
