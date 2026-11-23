@@ -654,7 +654,9 @@ await h.check("⑦ 文件已不在：卡片与详情都标出来，预览 / 继�
 		() =>
 			win.evaluate(() => {
 				const notes = [...document.querySelectorAll(".lib-detail .lib-detail-note")].map((n) => (n.textContent ?? "").trim());
-				return notes.some((text) => !text.includes("正在读取版本历史")) ? true : null;
+				// 必须等**所有** note 都离开加载态：「文件已不在」那条先到，用 some 会在
+				// 版本历史还没返回时放行，随后断言「没有版本时应说明…」偶发失败（#469）。
+				return notes.length > 0 && notes.every((text) => !text.includes("正在读取版本历史")) ? true : null;
 			}),
 		{ timeout: 15_000, desc: "pptx 详情的版本历史读取完成" },
 	);
