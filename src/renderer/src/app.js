@@ -15823,6 +15823,8 @@ function useImageAttachments(onError) {
       const accepted = [];
       const docs2 = [];
       const rejected = [];
+      /* #493 第三十一轮 F7：粘贴/选择成功的反馈（名称 + 大小），一次汇总。 */
+      const acceptedNames = [];
       for (const file of Array.from(files)) {
         const cls = classifyAttachment(file);
         if (cls.kind === "reject") {
@@ -15847,6 +15849,11 @@ function useImageAttachments(onError) {
       if (rejected.length > 0) onError(`未添加：${rejected.join("；")}`);
       if (accepted.length > 0) {
         setAttachments((current) => [...current, ...accepted]);
+        /* #493 第三十一轮 F7：粘贴/选择成功的反馈（名称 + 大小，一次汇总 toast）。 */
+        const summary = Array.from(files).filter((file) => file.type.startsWith("image/") || file.type === "").map((file) => `${file.name}（${Math.max(1, Math.round(file.size / 1024))} KB）`);
+        if (summary.length > 0) {
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: `已添加附件：${summary.join("、")}` }] }));
+        }
       }
       addDocumentRefs(docs2);
     },
@@ -16127,6 +16134,17 @@ function Composer({
   onCycleMember
 }) {
   const [draft, setDraft] = reactExports.useState(() => draftKey === void 0 ? "" : loadDraft(draftKey) ?? "");
+  /* #493 第三十一轮 F3：草稿自动保存微提示（保存后淡出）。 */
+  const [draftSavedAt, setDraftSavedAt] = reactExports.useState(0);
+  /* #493 第三十一轮 F8：长文本发送确认（>2000 字，localStorage 可关）。 */
+  const [longTextConfirm, setLongTextConfirm] = reactExports.useState(() => {
+    try {
+      return window.localStorage.getItem("zw:long-text-confirm") !== "off";
+    } catch {
+      return true;
+    }
+  });
+  const [pendingLongSubmit, setPendingLongSubmit] = reactExports.useState(null);
   /* #397 第二十四轮 F9：斜杠命令面板。草稿以 "/" 开头时弹出本地命令列表
      （映射既有动作：帮助/统计/专注/新任务），选中即执行并清空草稿。
      命令是「快捷入口」不是新通道——全部走既有 props 与 zw: 事件。 */
@@ -16138,6 +16156,26 @@ function Composer({
   ];
   const slashQuery = draft.startsWith("/") ? draft.slice(1).toLowerCase() : null;
   const slashMatches = slashQuery === null ? [] : slashCommands.filter((c) => c.cmd.slice(1).startsWith(slashQuery));
+  /* #493 第三十一轮 F5：斜杠菜单键盘导航。↓ 选中下一项、↑ 回到输入、
+     Enter 执行选中项（无选中时执行首个匹配）。 */
+  const [slashActive, setSlashActive] = reactExports.useState(0);
+  const draftSavedTimerRef = reactExports.useRef(0);
+  reactExports.useEffect(() => {
+    setSlashActive(0);
+  }, [slashQuery]);
+  const slashKeyDown = (e) => {
+    if (slashMatches.length === 0) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setSlashActive((i) => (i + 1) % slashMatches.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setSlashActive((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+    } else if (e.key === "Enter" && draft.startsWith("/") && slashMatches.length > 0) {
+      e.preventDefault();
+      runSlashCommand(slashMatches[Math.min(slashActive, slashMatches.length - 1)]);
+    }
+  };
   const runSlashCommand = (cmd) => {
     setDraft("");
     if (draftKey !== void 0) saveDraft(draftKey, "");
@@ -16369,6 +16407,13 @@ function Composer({
     const text2 = draft.trim();
     if (charCountState(draft.length).over) return;
     if (text2 === "" && skills.length === 0 || !ready) return;
+    /* #493 第三十一轮 F8：长文本（>2000 字）发送前确认——可关（zw:long-text-confirm=off）。
+       pendingLongSubmit 保存待发参数，确认面板「发送」时真正提交。 */
+    if (text2.length > 2000 && longTextConfirm && pendingLongSubmit === null) {
+      setPendingLongSubmit({ text: text2, whileStreaming });
+      return;
+    }
+    setPendingLongSubmit(null);
     const images = img.attachments;
     const picked = skills;
     setDraft("");
@@ -16409,6 +16454,12 @@ function Composer({
     );
   };
   const handleComposerKeyDown = (e) => {
+    /* #493 第三十一轮 F5：斜杠菜单导航优先接管（要在 ac.bind 的自动完成之前，
+       否则 ArrowDown 被吞后导航不执行）。 */
+    if (draft.startsWith("/") && slashMatches.length > 0) {
+      slashKeyDown(e);
+      if (e.defaultPrevented) return;
+    }
     ac.bind.onKeyDown(e);
     if (e.defaultPrevented) return;
     if (e.key === "Escape") {
@@ -16515,11 +16566,38 @@ function Composer({
         ))] }),
         /* #397 第二十四轮 F9：斜杠命令浮层。草稿以 / 开头且无空格时显示；
            ↑↓ 交给用户（Enter 直接选中首个匹配——快捷入口无需复杂导航）。 */
-        slashMatches.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "slash-menu", role: "listbox", "aria-label": "斜杠命令", children: slashMatches.map((c) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        /* #493 第三十一轮 F8：长文本发送确认面板。 */
+        pendingLongSubmit !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "long-text-confirm", role: "alertdialog", "aria-label": "长文本发送确认", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { children: [
+            "这条消息有 ",
+            pendingLongSubmit.text.length,
+            " 个字，确定要发送吗？"
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "long-text-confirm-actions", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => {
+              try {
+                window.localStorage.setItem("zw:long-text-confirm", "off");
+              } catch {
+              }
+              setLongTextConfirm(false);
+              setPendingLongSubmit(null);
+            }, children: "不再提示" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setPendingLongSubmit(null), children: "继续编辑" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn is-primary", onClick: () => {
+              /* 直接走 onSubmit（props），并清空草稿——与正常发送同一链路。 */
+              const pending = pendingLongSubmit;
+              setPendingLongSubmit(null);
+              setDraft("");
+              if (draftKey !== void 0) saveDraft(draftKey, "");
+              onSubmit(pending.text, void 0, pending.whileStreaming);
+            }, children: "发送" })
+          ] })
+        ] }),
+        slashMatches.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "slash-menu", role: "listbox", "aria-label": "斜杠命令", children: slashMatches.map((c, ci) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "button",
           {
             type: "button",
-            className: "slash-menu-item",
+            className: ci === slashActive ? "slash-menu-item is-active" : "slash-menu-item",
             onClick: () => runSlashCommand(c),
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "slash-menu-cmd", children: c.cmd }),
@@ -16538,7 +16616,13 @@ function Composer({
               "aria-label": "消息输入框",
               onChange: (e) => {
                 ac.bind.onChange(e);
-                if (draftKey !== void 0) saveDraft(draftKey, e.target.value);
+                if (draftKey !== void 0) {
+                  saveDraft(draftKey, e.target.value);
+                  /* #493 F3：自动保存微提示（防抖淡出 1.5s）。 */
+                  setDraftSavedAt(Date.now());
+                  window.clearTimeout(draftSavedTimerRef.current);
+                  draftSavedTimerRef.current = window.setTimeout(() => setDraftSavedAt(0), 1500);
+                }
               },
               onSelect: ac.bind.onSelect,
               onBlur: ac.bind.onBlur,
@@ -16595,6 +16679,8 @@ function Composer({
           /* §21.4 估算的显示门独立于字符计数：字符计数是「快写满了」的警告
            * （remaining<1000 才出现），而 token 估算要的是日常量级感 —— 只要
            * 有实质输入（≥40 字符）就显示，搭便车永远等不到那一天。 */
+          /* #493 第三十一轮 F3：草稿自动保存微提示。 */
+          draftSavedAt > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "draft-saved-hint", children: "已自动保存" }),
           modelContextWindow !== void 0 && modelContextWindow > 0 && convChars !== void 0 && (() => {
             const usedTokens = Math.ceil(convChars / 4) + tokenEstimate;
             const pct = Math.min(100, Math.round(usedTokens / modelContextWindow * 100));
