@@ -265,6 +265,7 @@ import {
 	collectRuntimeInventory,
 	defaultPythonRuntimeOptions,
 	defaultSpawn,
+	ensurePythonRuntime,
 	inspectPythonRuntime,
 	installManagedRuntime,
 	planRuntimeShellInjection,
@@ -279,6 +280,7 @@ import {
 } from "./doc-extract.js";
 import { createDocxReplaceTool } from "./docx-replace.js";
 import {
+	applyDocxProposal,
 	applyProposal,
 	checkFreshness,
 	createDocEditExtension,
@@ -6106,6 +6108,11 @@ const handlers = {
    *
    * 三道闸（建议可读 / 原文未变 / 旧版已留下）任一不过都**不写目标文件**；
    * 校验与写回的细节在 doc-edits.js（可单测），这里只做入参形状检查。
+   *
+   * **docx 建议走另一条通道**（#482）：它不是逐段文本，`hunkIds` 没有意义
+   * （可以是空数组），真正的写回是「一处文字替换」。这条通道**在运行时 ensure
+   * 之后**才由 `applyDocxProposal` 重读文件做哈希守卫 —— ensure 可能装几分钟，
+   * 期间用户手改过的话，守卫看到的是最新字节，不会悄悄覆盖。
    */
   [INVOKE.applyDocEdit]: async ([id, hunkIds]) => {
     if (!isDocEditId(id)) {
@@ -6114,7 +6121,43 @@ const handlers = {
     if (!Array.isArray(hunkIds)) {
       throw new Error("要应用的改动段必须是数组 —— 元素是 hunk 的 id，形如 h1。");
     }
-    return applyProposal(id, hunkIds);
+    const proposal = readProposal(id);
+    if (proposal?.kind !== "docx") {
+      // 找不到 / 记录损坏时交给 applyProposal 报它那句可读错误（不在这里另说一遍）。
+      return applyProposal(id, hunkIds);
+    }
+    const engineDir = join(getResourcesDir(), "docx-engine");
+    let env;
+    try {
+      env = await ensurePythonRuntime(
+        defaultPythonRuntimeOptions({ engineDir, homeDir: homedir() }),
+        defaultSpawn,
+      );
+    } catch (error) {
+      // ensure 自己抛了（不是返回 failed）：同样要把「文件未修改」说清楚，别让原始栈透给用户。
+      const message = error instanceof Error ? error.message : String(error);
+      writeAuditRecord({
+        category: "runtime",
+        outcome: "failed",
+        detail: clipAuditDetail(`接受 docx 修订建议 ${id} 前运行时检查异常：${message}`),
+      });
+      throw new Error(
+        `docx 替换环境检查失败（${message}）。请到「设置 → 内置运行时」检查或重新安装后再试。目标文件没有被修改。`,
+      );
+    }
+    if (env?.status !== "ready") {
+      writeAuditRecord({
+        category: "runtime",
+        outcome: "failed",
+        detail: clipAuditDetail(
+          `接受 docx 修订建议 ${id} 前运行时未就绪（${env?.phase ?? "unknown"}）：${env?.error ?? "未知原因"}`,
+        ),
+      });
+      throw new Error(
+        `docx 替换环境未就绪（${env?.phase ?? "unknown"}）：${env?.error ?? "未知原因"}\n请到「设置 → 内置运行时」安装后再试。目标文件没有被修改。`,
+      );
+    }
+    return applyDocxProposal(id, { python: env.python, engineDir });
   },
   /** 拒绝一条建议（#458）：丢弃整条建议、**不碰目标文件**；拒绝也留审计。 */
   [INVOKE.rejectDocEdit]: async ([id]) => {

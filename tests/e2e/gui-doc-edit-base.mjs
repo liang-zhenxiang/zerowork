@@ -7,11 +7,21 @@
  * 完整五条路径由 #459 在这个文件上扩展。
  */
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { buildProposal, saveProposal } from "../../src/main/daemon/doc-edits.js";
-import { createHarness, waitUntil } from "./lib/harness.mjs";
+import { promisify } from "node:util";
+import {
+	DOCX_PART_DEFAULT,
+	buildDocxProposal,
+	buildProposal,
+	saveProposal,
+	sha256Bytes,
+} from "../../src/main/daemon/doc-edits.js";
+import { ROOT, createHarness, waitUntil } from "./lib/harness.mjs";
+
+const runFile = promisify(execFile);
 
 const FINAL_TEXT = "DOC_EDIT_PROBE_DONE";
 
@@ -431,6 +441,19 @@ function readDocView() {
 				rows: group.querySelectorAll("[data-doc-edit-entry]").length
 			})),
 			cardName: (card?.querySelector(".fh-card-name")?.textContent ?? "").trim(),
+			/* docx（#482）：没有 hunk，主体是「替换前 / 替换后」两块只读对照。 */
+			docx: card?.getAttribute("data-docx") === "true",
+			docxPart: (card?.querySelector("[data-docx-part]")?.textContent ?? "").trim(),
+			docxBefore: (card?.querySelector('[data-docx-block="before"] .rv-hunk-line')?.textContent ?? "").trim(),
+			docxAfter: (card?.querySelector('[data-docx-block="after"] .rv-hunk-line')?.textContent ?? "").trim(),
+			docxBeforeSign: card?.querySelector('[data-docx-block="before"] .rv-hunk-sign')?.textContent ?? "",
+			docxBeforeSr: card?.querySelector('[data-docx-block="before"] .sr-only')?.textContent ?? "",
+			docxAfterSign: card?.querySelector('[data-docx-block="after"] .rv-hunk-sign')?.textContent ?? "",
+			docxAfterSr: card?.querySelector('[data-docx-block="after"] .sr-only')?.textContent ?? "",
+			docxNote: (card?.querySelector("[data-docx-note]")?.textContent ?? "").trim(),
+			hasCheckbox: card === null ? false : card.querySelector(".rv-hunk-head input[type=checkbox]") !== null,
+			hunkToolButtons: card === null ? 0 : card.querySelectorAll(".rv-hunk-tools button").length,
+			rowStats: [...main.querySelectorAll("[data-doc-edit-entry] .rv-row-stats")].map((s) => (s.textContent ?? "").trim()),
 			hunkBoxes: card === null
 				? []
 				: [...card.querySelectorAll(".rv-hunk-head input[type=checkbox]")].map((box) => ({
@@ -654,6 +677,171 @@ await h.check("确认拒绝：建议消失、计数归零、目标文件不变",
 	assert.equal(empty.emptyTitle, "待修订的建议都处理完了", "空态应区分「都处理完了」与「还没有建议」");
 	assert.equal(view.tabs[0].active, true, "清空队列后仍停在「待修订」，由空态给出下一步");
 	await h.shoot("doc-edit-workbench-empty");
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+ * docx 文本替换建议（#482）：显示旧→新 → 接受（真实 python 引擎）→ 可还原；
+ * 以及「原文已变化 → 接受禁用、拒绝不碰文件」。
+ *
+ * 建议同样由 `buildDocxProposal` + `saveProposal` 直接落种子（与 #481 生成侧
+ * 同一份实现），目标是夹具 a-styles.docx 的副本 —— 这样断言的是「这一处文字
+ * 真的被换掉了」，而不是模型输出碰巧长成什么样。
+ *
+ * 接受要内置 python 运行时：本机没装时**显式 skip**（报告里看得见，退出码按
+ * 有无通过判定），完整安装与覆盖在 #483 统一处理。展示与过期两段不需要 python。
+ * ══════════════════════════════════════════════════════════════════════ */
+const DOCX_FIXTURE = join(ROOT, "tests/fixtures/docx-revision/a-styles.docx");
+const DOCX_NAME = "季度报告.docx";
+/* 夹具正文里「本季度营收」是一个 run 内的纯文本（「跨 run 的文本」被拆开了，不能用）。 */
+const DOCX_FIND = "本季度营收";
+const DOCX_REPLACE = "本季度净收入";
+let docxSeed;
+
+function seedDocxEdit(at) {
+	const absPath = join(h.WORKSPACE_DIR, DOCX_NAME);
+	copyFileSync(DOCX_FIXTURE, absPath);
+	const bytes = readFileSync(absPath);
+	const proposal = buildDocxProposal({
+		absPath,
+		baseSha256: sha256Bytes(bytes),
+		find: DOCX_FIND,
+		replace: DOCX_REPLACE,
+		part: DOCX_PART_DEFAULT,
+		sessionId: "sess-doc-workbench-e2e",
+		toolName: "docx_replace",
+		at
+	});
+	saveProposal(proposal, { dir: DOC_EDITS_DIR });
+	return { proposal, absPath, originalBytes: bytes };
+}
+
+await h.check("docx 建议：显示替换前/后与目标部件，没有逐段勾选", async () => {
+	docxSeed = seedDocxEdit(Date.now());
+	await clickReviewRefresh();
+	const view = await waitDocView((state) => state.docx === true, "docx 建议卡渲染");
+	await h.waitForSettled();
+	await h.shoot("docx-workbench-light");
+
+	assert.equal(view.cardName, DOCX_NAME, "右区应显示 docx 文件名");
+	assert.equal(view.tabs[0]?.text, "待修订 1", "docx 建议应计入待修订");
+	assert.deepEqual(view.rowStats, ["1 处替换"], "左列对 docx 应显示「1 处替换」，而不是「1 段 · +1 −1」");
+	assert.equal(view.docxPart, `目标部件：${DOCX_PART_DEFAULT}`, "应显示目标部件");
+	assert.ok(view.docxBefore.includes(DOCX_FIND), `「替换前」没有旧文字：${JSON.stringify(view.docxBefore)}`);
+	assert.ok(view.docxAfter.includes(DOCX_REPLACE), `「替换后」没有新文字：${JSON.stringify(view.docxAfter)}`);
+	/* 前后不只靠底色：符号与读屏前缀是第二、第三通道。 */
+	assert.equal(view.docxBeforeSign, "−");
+	assert.equal(view.docxBeforeSr, "替换前：");
+	assert.equal(view.docxAfterSign, "+");
+	assert.equal(view.docxAfterSr, "替换后：");
+	assert.match(view.docxNote, /v1 只替换正文里这一处文字/);
+	assert.match(view.docxNote, /不保留 Word 原生修订痕迹/);
+	assert.equal(view.hasCheckbox, false, "docx 建议不该出现逐段勾选框");
+	assert.equal(view.hunkToolButtons, 0, "docx 建议不该有全选 / 全不选");
+	const accept = view.actions.find((action) => action.text === "接受替换（1 处）");
+	assert.ok(accept !== undefined, `接受按钮文案不对：${JSON.stringify(view.actions)}`);
+	assert.equal(accept.disabled, false, "未过期时应可接受");
+
+	await setTheme("dark");
+	await h.waitForSettled();
+	await h.shoot("docx-workbench-dark");
+	await setTheme("light");
+});
+
+await h.check("docx 建议：接受后正文被替换、建议消失、版本可还原", async () => {
+	const label = "docx 建议：接受后正文被替换、建议消失、版本可还原";
+	const py = await win.evaluate(async () => {
+		const s = await globalThis.kami.runtimesSnapshot();
+		const item = (s?.items ?? []).find((x) => x.id === "python");
+		return { kind: item?.status?.kind, exe: item?.executable };
+	});
+	if (py.kind !== "ready" || !py.exe) {
+		h.skip(label, `Python 运行时未就绪（${py.kind ?? "未知"}）：docx 接受需要内置运行时，本机未安装时这条不跑（#483 统一处理安装与全覆盖）`);
+	}
+
+	await clickInDocCard("接受替换（1 处）");
+	const afterBytes = await waitUntil(
+		() => {
+			try {
+				const now = readFileSync(docxSeed.absPath);
+				return sha256Bytes(now) !== sha256Bytes(docxSeed.originalBytes) ? now : null;
+			} catch {
+				return null;
+			}
+		},
+		{ timeout: 60_000, interval: 300, desc: "接受后目标 docx 的字节发生变化" }
+	);
+	assert.ok(afterBytes.length > 0, "接受后文件不该为空");
+
+	/*
+	 * 「队列清空」与「toast 出现」是两件事：分两次等会让断言读到空州先到、
+	 * toast 还没挂上的那一帧（spec/testing §4 的真实教训）。放进同一个完成条件。
+	 */
+	const view = await waitDocView(
+		(state) =>
+			state.emptyTitle !== "" &&
+			state.toasts.some((text) => text.includes(`已替换「${DOCX_NAME}」正文中的 1 处文字`)),
+		"接受后队列清空且 toast 说明替换了 1 处文字"
+	);
+	assert.ok(
+		view.toasts.some((text) => text.includes(`已替换「${DOCX_NAME}」正文中的 1 处文字`)),
+		`toast 应说明替换了 1 处文字：${JSON.stringify(view.toasts)}`
+	);
+	assert.deepEqual(await win.evaluate(() => globalThis.kami.listDocEdits()), [], "接受后建议应被删除");
+
+	/* 解压 word/document.xml 直接看正文：文字真的被换掉了，而不只是「没报错」。 */
+	const script = [
+		"import json,sys,zipfile",
+		'x=zipfile.ZipFile(sys.argv[1]).read("word/document.xml").decode("utf-8")',
+		'print(json.dumps({"find": sys.argv[2] in x, "replace": sys.argv[3] in x}))'
+	].join("\n");
+	const { stdout } = await runFile(py.exe, ["-c", script, docxSeed.absPath, DOCX_FIND, DOCX_REPLACE], {
+		encoding: "utf8",
+		timeout: 60_000
+	});
+	const probed = JSON.parse(stdout.trim().split("\n").pop());
+	assert.equal(probed.find, false, "替换前的文字仍在正文里");
+	assert.equal(probed.replace, true, "替换后的文字没有写进正文");
+
+	/* 版本可还原：接受前的那一版是二进制快照，逐字节还原后应等于原夹具副本。 */
+	const history = await win.evaluate(() => globalThis.kami.listFileHistory());
+	const file = history.files.find((entry) => entry.path === docxSeed.absPath);
+	assert.ok(file, "文件历史里没有接受 docx 之前留下的版本");
+	const detail = await win.evaluate(({ key }) => globalThis.kami.readFileHistory({ key }), { key: file.key });
+	assert.equal(detail?.ok, true, `读版本详情失败：${JSON.stringify(detail)}`);
+	const oldest = (detail.versions ?? [])[0];
+	assert.ok(oldest !== undefined, "接受前没有留下版本记录");
+	const restored = await win.evaluate(
+		({ key, id }) => globalThis.kami.restoreFileHistory({ key, id }),
+		{ key: file.key, id: oldest.id }
+	);
+	assert.equal(restored?.ok, true, `还原失败：${JSON.stringify(restored)}`);
+	assert.deepEqual(readFileSync(docxSeed.absPath), docxSeed.originalBytes, "还原后字节不等于接受前");
+});
+
+await h.check("docx 建议：原文已变化 → 接受禁用、拒绝整条不碰文件", async () => {
+	const seeded = seedDocxEdit(Date.now() + 1_000);
+	/* 手动在副本尾部追加一个字节 —— zip 结构不变但字节哈希变了，正是哈希守卫的判据。 */
+	const changedBytes = Buffer.concat([readFileSync(seeded.absPath), Buffer.from([0])]);
+	writeFileSync(seeded.absPath, changedBytes);
+	await clickReviewRefresh();
+
+	const stale = await waitDocView(
+		(state) => state.docx === true && state.stale === true,
+		"docx 建议刷新后出现「原文已变化」"
+	);
+	assert.match(stale.staleText, /原文已变化/, `过期条文案不对：${JSON.stringify(stale.staleText)}`);
+	assert.match(stale.staleText, /重新生成/, "过期条要给「重新生成」指引");
+	const accept = stale.actions.find((action) => action.text.startsWith("接受替换"));
+	assert.ok(accept !== undefined, "过期时仍应显示接受按钮（禁用而不是消失）");
+	assert.equal(accept.disabled, true, "过期时 docx 接受按钮必须禁用");
+	await h.shoot("docx-workbench-stale");
+
+	await clickInDocCard("拒绝整条");
+	await waitDocView((state) => state.confirm !== "", "docx 拒绝的二次确认条出现");
+	await clickInDocCard("确认拒绝");
+	await waitDocView((state) => state.tabs[0]?.text === "待修订 0", "拒绝后待修订归零");
+	assert.deepEqual(readFileSync(seeded.absPath), changedBytes, "拒绝整条不该改动文件字节");
+	assert.equal((await win.evaluate(() => globalThis.kami.listDocEdits())).length, 0, "拒绝后建议应被删除");
 });
 
 await mock.close();
