@@ -90,6 +90,7 @@ import {
 	createDocxConvertTool,
 	createDocxExtractTool,
 } from "./doc-extract.js";
+import { createDocxReplaceTool } from "./docx-replace.js";
 import {
 	CONFIG_EXECUTABLE_SUBDIRS,
 	canonicalizePath,
@@ -129,7 +130,14 @@ function declareReadOnlyTools(toolNames) {
   }
 }
 
-const MUTATING = /* @__PURE__ */ new Set(["write", "edit", "docx_convert", "docx_extract"]);
+/*
+ * 「会写文件 / 改文件」的工具集合，按 `path` 判定档位。
+ *
+ * docx_replace（#481）改的是**已有文件**（与 edit 同类），不是产出新文件 ——
+ * 它的 `path` 就是目标本身，extractFacts 直接取到。它必须在只读档被拒：
+ * 只读档在下面先于 MUTATING 分支拦下一切非 shell 工具（见 decideUnderMode）。
+ */
+const MUTATING = /* @__PURE__ */ new Set(["write", "edit", "docx_convert", "docx_extract", "docx_replace"]);
 
 const SHELL = /* @__PURE__ */ new Set(["bash", "powershell"]);
 
@@ -314,8 +322,9 @@ function decideUnderMode(facts, paths, cwd, mode, rules) {
     return {
       kind: "ask",
       risk: "medium",
-      // docx_convert / docx_extract 与 write 同为「产出新文件」，edit 是改已有文件。
-      summary: toolName === "edit" ? "修改工作目录之外的文件" : "写入工作目录之外的文件",
+      // docx_convert / docx_extract 与 write 同为「产出新文件」，edit / docx_replace
+      // 是改已有文件。
+      summary: toolName === "edit" || toolName === "docx_replace" ? "修改工作目录之外的文件" : "写入工作目录之外的文件",
       details: target
     };
   }
@@ -2313,6 +2322,20 @@ function buildSubagentExtensions(deps, agent, cwd, getHost2, hooksRoot) {
       engineDir: join(getResourcesDir(), "docx-engine"),
       homeDir: homedir(),
       // 运行时失败进审计中心（与主会话同一个写入函数，见 daemon/index.ts）。
+      onAudit: writeAuditRecord
+    }),
+    /*
+     * docx 原文替换（#481）：craft 白名单含 docx_replace，子代理同样需要同名工具，
+     * 否则模型对着白名单调一个不存在的能力（与 docx_convert / docx_extract 同一理由）。
+     * 子代理没有审阅台、也不该存一条无人接受的建议 —— 修订模式恒 false，直接走
+     * 哈希守卫 + 二进制版本 + 引擎原子修补。
+     */
+    createDocxReplaceTool({
+      cwd,
+      engineDir: join(getResourcesDir(), "docx-engine"),
+      homeDir: homedir(),
+      getDocEditMode: () => false,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
       onAudit: writeAuditRecord
     })
     // 不注册 visualizer（read_me / show_widget）：子代理的输出只以文本回传
