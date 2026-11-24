@@ -277,6 +277,7 @@ import {
 	createDocxConvertTool,
 	createDocxExtractTool,
 } from "./doc-extract.js";
+import { createDocxReplaceTool } from "./docx-replace.js";
 import {
 	applyProposal,
 	checkFreshness,
@@ -1550,6 +1551,23 @@ function buildRunExtensions(deps, cwd, getHost2, watch) {
       engineDir: join(getResourcesDir(), "docx-engine"),
       homeDir: homedir(),
       // 运行时失败进审计中心（与主会话同一个写入函数）。
+      onAudit: writeAuditRecord
+    }),
+    /*
+     * docx 原文替换（#481，craft 白名单含 docx_replace）：run 会话注册同名真实工具。
+     * 与 docx_convert / docx_extract 同档 —— 受控 spawn venv python，不经 powershell；
+     * 权限按「改工作区内已有文件」判定（MUTATING 锚定 path），区内直接放行。
+     *
+     * **无人值守不做修订模式**（getDocEditMode 恒 false）：修订模式是 UI 上的会话级
+     * 开关，run 会话没有开关、也没有人在审阅台点「接受」—— 存一条建议等于把改动
+     * 丢掉。直接写回 + 写前留旧版本 + 审计，是这条路径上可回退的唯一形态。
+     */
+    createDocxReplaceTool({
+      cwd,
+      engineDir: join(getResourcesDir(), "docx-engine"),
+      homeDir: homedir(),
+      getDocEditMode: () => false,
+      getSessionId: () => getHost2()?.state.sessionId ?? "",
       onAudit: writeAuditRecord
     }),
     /*
@@ -3673,6 +3691,24 @@ async function createHost(bucket, sessionManager) {
         engineDir: join(getResourcesDir(), "docx-engine"),
         homeDir: homedir(),
         // 运行时装不上要进审计中心（「运行时」一类，写入点在工具层）。
+        onAudit: writeAuditRecord
+      }),
+      /*
+       * docx 原文替换（#481）：craft 白名单含 docx_replace，所有用户会话都装。
+       * 与 docx_convert / docx_extract 同档（受控 spawn venv python，不经
+       * powershell）；权限按「改工作区内已有文件」判定 —— MUTATING 里锚定 path，
+       * 只读档在权限门直接拒绝。
+       *
+       * 修订模式**现读桶状态**（与 createDocEditExtension 同一份真相）：开着时
+       * 工具只生成 kind:"docx" 的待审建议、不写盘、也不启动 Python 运行时；
+       * 关闭时直接写回（哈希守卫 → 留旧版本 → 引擎原子修补 → 审计）。
+       */
+      createDocxReplaceTool({
+        cwd,
+        engineDir: join(getResourcesDir(), "docx-engine"),
+        homeDir: homedir(),
+        getDocEditMode: () => bucket.conversation.state.docEditMode === true,
+        getSessionId: () => adoptedSessionId(bucket),
         onAudit: writeAuditRecord
       }),
       // 内联可视化（read_me + show_widget）：无副作用、无用户交互，

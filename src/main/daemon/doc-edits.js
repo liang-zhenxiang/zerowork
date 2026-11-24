@@ -46,7 +46,8 @@ import {
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { clipAuditDetail, writeAuditRecord } from "./audit.js";
 import { getConfigDir } from "./config-paths.js";
-import { recordVersion } from "./version-store.js";
+import { patchDocx } from "./docx-patch.js";
+import { recordBinaryVersion, recordVersion } from "./version-store.js";
 import { DIFF_CELL_BUDGET, DIFF_CONTEXT, applyEdits } from "./session-view.js";
 import { DOC_EDIT_BLOCK_PREFIX } from "../../shared/doc-edit.js";
 
@@ -61,6 +62,27 @@ const DOC_EDIT_EXTENSIONS = new Set([".md", ".markdown", ".txt"]);
 
 /** 储存 id：`<base36 时间戳>-<6 位随机 hex>`。不接受调用方传入 id。 */
 const DOC_EDIT_ID_RE = /^[a-z0-9]+-[a-f0-9]{6}$/;
+
+/**
+ * 建议的两种形态（#481）：
+ * - `text`：write / edit 的全文改写（`before` / `after` / `ops` / `hunks`）；
+ * - `docx`：docx_replace 的一处文本替换（`find` / `replace` / `part`，二进制哈希）。
+ *
+ * **旧记录没有 `kind` 字段 = text**（向后兼容）：解析时按 text 处理，写入时带上
+ * `kind:"text"`，于是新旧记录读回来是同一种形状。
+ */
+const DOC_EDIT_KIND_TEXT = "text";
+const DOC_EDIT_KIND_DOCX = "docx";
+
+/** docx 建议默认只作用于正文部件（v1 不路由页眉页脚）。 */
+const DOCX_PART_DEFAULT = "word/document.xml";
+
+/**
+ * docx 建议/直改的单文件上限：20 MiB。
+ * 必须 ≤ 版本存储的 VERSION_MAX_BINARY_BYTES（同为 20 MiB）—— 否则「版本先行」
+ * 会在写回中途失败，工具接受了一个注定改不了的文件。
+ */
+const DOCX_MAX_BYTES = 20 * 1024 * 1024;
 
 const PROPOSAL_EXT = ".json";
 const TMP_SUFFIX = ".tmp";
@@ -267,6 +289,11 @@ function sha256(text) {
 	return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+/** docx 建议的基准是**文件字节**（不是解码后的文本 —— docx 是压缩包）。 */
+function sha256Bytes(bytes) {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+
 function byteLength(text) {
 	return Buffer.byteLength(text, "utf8");
 }
@@ -313,6 +340,7 @@ function buildProposal({ absPath, before, after, sessionId, toolName, at } = {})
 	const createdAt = typeof at === "number" && Number.isFinite(at) ? at : Date.now();
 	return {
 		id: makeId(createdAt),
+		kind: DOC_EDIT_KIND_TEXT,
 		path: absPath,
 		baseSha256: sha256(before),
 		before,
@@ -325,39 +353,106 @@ function buildProposal({ absPath, before, after, sessionId, toolName, at } = {})
 	};
 }
 
-/** 列表用的元数据：不带前后全文（列表可能一次列 100 条）。 */
-function summarize(proposal) {
-	const { added, removed } = countOps(proposal.ops);
+/**
+ * 生成一条 **docx 文本替换**建议（纯计算，不碰磁盘，#481）。
+ *
+ * 与文本建议的区别：docx 是二进制压缩包，没有「前后全文」可给 —— 建议里存的是
+ * 一处替换的三要素（`find` / `replace` / `part`）与**文件字节的基准哈希**。
+ * 接受时按基准哈希判定原文是否变过，再让引擎在同一部件里做唯一命中替换。
+ *
+ * `find === replace` 直接拒绝：那不会产生改动，留着只会让用户点一次「接受」却
+ * 什么也没变（与文本建议的「没有实际改动」同一条纪律）。
+ */
+function buildDocxProposal({ absPath, baseSha256, find, replace, part, sessionId, toolName, at } = {}) {
+	if (typeof absPath !== "string" || absPath === "") throw new Error("缺少目标文件的绝对路径，无法生成待审建议");
+	if (typeof baseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(baseSha256)) {
+		throw new Error("缺少目标文件的基准哈希（sha256），无法生成待审建议");
+	}
+	if (typeof find !== "string" || find === "") throw new Error("缺少要替换的原文（find），无法生成待审建议");
+	if (typeof replace !== "string" || replace === "") {
+		throw new Error("缺少替换后的文本（replace），无法生成待审建议");
+	}
+	if (find === replace) throw new Error("这次替换没有产生任何实际改动（find 与 replace 完全相同）");
+	const createdAt = typeof at === "number" && Number.isFinite(at) ? at : Date.now();
 	return {
+		id: makeId(createdAt),
+		kind: DOC_EDIT_KIND_DOCX,
+		path: absPath,
+		baseSha256,
+		part: typeof part === "string" && part !== "" ? part : DOCX_PART_DEFAULT,
+		find,
+		replace,
+		sessionId: typeof sessionId === "string" ? sessionId : "",
+		createdAt,
+		toolName: typeof toolName === "string" ? toolName : "",
+	};
+}
+
+/**
+ * 列表用的元数据：不带前后全文（列表可能一次列 100 条），也**不带 find / replace
+ * 的原文**（那是一段文档正文，列表页不需要它）。
+ *
+ * docx 建议没有逐段 diff：列表只需要显示「1 处替换」，所以 `hunkCount` / `added` /
+ * `removed` 固定为 1（一行增、一行减的形象说法），`part` 说明改的是哪个部件。
+ */
+function summarize(proposal) {
+	const common = {
 		id: proposal.id,
+		kind: proposal.kind === DOC_EDIT_KIND_DOCX ? DOC_EDIT_KIND_DOCX : DOC_EDIT_KIND_TEXT,
 		path: proposal.path,
 		name: basename(proposal.path),
 		sessionId: proposal.sessionId,
 		createdAt: proposal.createdAt,
-		hunkCount: proposal.hunks.length,
-		added,
-		removed,
 		toolName: proposal.toolName,
 	};
+	if (proposal.kind === DOC_EDIT_KIND_DOCX) {
+		return { ...common, hunkCount: 1, added: 1, removed: 1, part: proposal.part };
+	}
+	const { added, removed } = countOps(proposal.ops);
+	return { ...common, hunkCount: proposal.hunks.length, added, removed };
 }
 
 /**
  * 读回并校验一条建议。结构不对返回 `undefined`（调用方按「已损坏 / 不存在」处理），
  * 不抛 —— 单条坏记录不该让整个列表或某个读取入口炸掉。
+ *
+ * 按 `kind` 分支：没有 `kind`（#481 之前的记录）或 `kind:"text"` 走文本校验；
+ * `kind:"docx"` 只要求 docx 三要素，**不再要求** before/after/ops/hunks。
+ * 未知的 `kind` 一律当损坏 —— 猜错类型比读不回来更危险（可能把一段 docx 替换
+ * 当成全文改写去写盘）。
  */
 function parseProposal(raw) {
 	if (!isPlainObject(raw)) return undefined;
 	if (!isDocEditId(raw.id)) return undefined;
 	if (typeof raw.path !== "string" || raw.path === "") return undefined;
 	if (typeof raw.baseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(raw.baseSha256)) return undefined;
-	if (typeof raw.before !== "string" || typeof raw.after !== "string") return undefined;
 	if (typeof raw.createdAt !== "number" || !Number.isFinite(raw.createdAt)) return undefined;
+	if (raw.kind === DOC_EDIT_KIND_DOCX) {
+		if (typeof raw.part !== "string" || raw.part === "") return undefined;
+		if (typeof raw.find !== "string" || raw.find === "") return undefined;
+		if (typeof raw.replace !== "string" || raw.replace === "") return undefined;
+		return {
+			id: raw.id,
+			kind: DOC_EDIT_KIND_DOCX,
+			path: raw.path,
+			baseSha256: raw.baseSha256,
+			part: raw.part,
+			find: raw.find,
+			replace: raw.replace,
+			sessionId: typeof raw.sessionId === "string" ? raw.sessionId : "",
+			createdAt: raw.createdAt,
+			toolName: typeof raw.toolName === "string" ? raw.toolName : "",
+		};
+	}
+	if (raw.kind !== void 0 && raw.kind !== DOC_EDIT_KIND_TEXT) return undefined;
+	if (typeof raw.before !== "string" || typeof raw.after !== "string") return undefined;
 	if (!Array.isArray(raw.ops) || !Array.isArray(raw.hunks)) return undefined;
 	for (const op of raw.ops) {
 		if (!isPlainObject(op) || ![" ", "-", "+"].includes(op.type) || typeof op.text !== "string") return undefined;
 	}
 	return {
 		id: raw.id,
+		kind: DOC_EDIT_KIND_TEXT,
 		path: raw.path,
 		baseSha256: raw.baseSha256,
 		before: raw.before,
@@ -606,6 +701,29 @@ function mergeSelectedHunks(proposal, hunkIds) {
 }
 
 /**
+ * 读目标文件的当前**字节**（docx 建议用；文本通道仍走 `readCurrentState`）。
+ *
+ * 不存在的判定与文本通道一致（`exists:false` + 空 Buffer），但 docx 的「文件不在」
+ * 永远算过期 —— 文本建议可以是「新建文件」，而 docx 替换只能作用于已存在的包。
+ */
+function readCurrentBytes(absPath) {
+	let stats;
+	try {
+		stats = statSync(absPath);
+	} catch (error) {
+		if (error !== null && typeof error === "object" && error.code === "ENOENT") {
+			return { exists: false, bytes: Buffer.alloc(0) };
+		}
+		throw error;
+	}
+	if (stats.isDirectory()) throw new Error("目标路径是一个目录，不是文件");
+	if (stats.size > DOCX_MAX_BYTES) {
+		throw new Error(`文件超过 docx 的 ${Math.round(DOCX_MAX_BYTES / (1024 * 1024))} MiB 上限（${stats.size} 字节），无法读取校验`);
+	}
+	return { exists: true, bytes: readFileSync(absPath) };
+}
+
+/**
  * 当前文件是否仍与建议的基准一致（**只读目标文件**）。
  *
  * 返回 `{ stale, currentSha256, missing, reason? }`：
@@ -613,6 +731,9 @@ function mergeSelectedHunks(proposal, hunkIds) {
  * - 文件不存在但基准是空串哈希 → 仍是 `stale: false`（那是「新建文件」的建议，
  *   与生成侧 `readBefore` 对不存在的口径一致）；
  * - 其余 → `stale: true`，`reason` ∈ `"missing" | "changed" | "unreadable"`。
+ *
+ * docx 建议按**文件字节**比较（`kind:"docx"`）：文件不在即 `missing`，
+ * 不走「新建文件」那条宽容分支 —— docx 替换没有「新建」语义。
  *
  * IPC 读取建议时附带这两个字段（#457 据此禁用「接受」），所以本函数**不抛**：
  * 读不了目标文件也是一种「不能接受」的状态，不是一次异常。
@@ -625,6 +746,31 @@ function checkFreshness(proposal, options = {}) {
 		typeof proposal.baseSha256 !== "string"
 	) {
 		return { stale: true, currentSha256: null, missing: false, reason: "invalid" };
+	}
+	if (proposal.kind === DOC_EDIT_KIND_DOCX) {
+		let bytes;
+		let missing = false;
+		try {
+			if (typeof options.readBytes === "function") {
+				bytes = options.readBytes(proposal.path);
+			} else {
+				const state = readCurrentBytes(proposal.path);
+				bytes = state.bytes;
+				missing = !state.exists;
+			}
+		} catch (error) {
+			return {
+				stale: true,
+				currentSha256: null,
+				missing: false,
+				reason: "unreadable",
+				message: error instanceof Error ? error.message : String(error),
+			};
+		}
+		if (missing) return { stale: true, currentSha256: null, missing: true, reason: "missing" };
+		const currentSha256 = sha256Bytes(bytes);
+		if (currentSha256 === proposal.baseSha256) return { stale: false, currentSha256, missing: false };
+		return { stale: true, currentSha256, missing: false, reason: "changed" };
 	}
 	let text = "";
 	let missing = false;
@@ -691,14 +837,24 @@ function resolveNow(now) {
 	return Date.now();
 }
 
-/** 版本记录失败时的可读原因（错误要可诊断，不是一句「失败了」）。 */
-function versionFailureText(recorded) {
+/**
+ * 版本记录失败时的可读原因（错误要可诊断，不是一句「失败了」）。
+ *
+ * `binary` 决定「超限」那句话的上限：文本通道 1 MiB、二进制通道 20 MiB
+ * （两个数写在 version-store.js 里）。混用会把「20 MiB 的 docx 留不下版本」
+ * 说成「超过 1 MiB」，用户按那句话去压缩文件不会有用。
+ */
+function versionFailureText(recorded, binary = false) {
 	if (recorded?.reason === "io-error") {
 		return `写入版本目录失败（${recorded.message ?? "未知 IO 错误"}）`;
 	}
-	if (recorded?.reason === "too-large") return "目标文件超过 1 MiB，无法留旧版本";
+	if (recorded?.reason === "too-large") {
+		return binary ? "目标文件超过 20 MiB，无法留旧版本" : "目标文件超过 1 MiB，无法留旧版本";
+	}
 	if (recorded?.reason === "binary") return "目标文件看起来是二进制，无法留文本旧版本";
-	if (recorded?.reason === "no-content" || recorded?.reason === "no-path") return "拿不到目标文件的当前内容";
+	if (recorded?.reason === "no-content" || recorded?.reason === "no-bytes" || recorded?.reason === "no-path") {
+		return "拿不到目标文件的当前内容";
+	}
 	return `无法保存旧版本（${recorded?.reason ?? "未知原因"}）`;
 }
 
@@ -726,6 +882,11 @@ function applyProposal(id, hunkIds, options = {}) {
 	if (proposal === undefined) {
 		throw new Error(
 			`找不到修订建议（或它的记录已损坏）：${id}；目标文件没有被修改。可以在审阅台重新生成一次改动。`,
+		);
+	}
+	if (proposal.kind === DOC_EDIT_KIND_DOCX) {
+		throw new Error(
+			"这是一条 docx 文本替换建议，不能按整篇文本写回（请走 docx 的接受通道）；文件没有被修改。",
 		);
 	}
 	const name = basename(proposal.path);
@@ -821,10 +982,149 @@ function applyProposal(id, hunkIds, options = {}) {
 }
 
 /**
+ * 接受一条 **docx 文本替换**建议（#481；IPC 路由由 #482 接）。
+ *
+ * 三道闸与文本写回同序，任一步失败都**不写目标文件**：
+ *
+ * 1. **哈希守卫**：当前文件字节的 sha256 必须等于建议的 `baseSha256`。不等就拒绝
+ *    （审计 `file/failed`）—— 直接套用会覆盖用户在建议生成之后的改动；
+ * 2. **版本先行**：写盘前把当前字节交给 `recordBinaryVersion`，失败即中止。
+ *    没有旧版本可回退的改动不该发生；
+ * 3. **引擎修补**：`patchDocx(in=out=path)` 在该部件里做唯一命中替换（写后自检）。
+ *
+ * 成功后审计 `file/allowed`（只记文件名与字节数，不记 find/replace 正文）并删除
+ * 建议。`python` / `engineDir` 由调用方在 ensure 之后传入（本函数不 ensure ——
+ * 它可能在 UI 的「接受」按钮里被调用，运行时状态由调用方负责，失败原因原样上抛）。
+ *
+ * @param {string} id 建议 id
+ * @param {object} options `{ python, engineDir, dir?, versionsDir?, auditDir?, now?, run?, patch?, recordBinaryVersion? }`
+ * @returns {Promise<{path:string, part:string, replaced:1, bytesBefore:number, bytesAfter:number, proposalDeleted:boolean}>}
+ */
+async function applyDocxProposal(id, options = {}) {
+	if (!isDocEditId(id)) throw new Error(`修订建议 id 格式不正确：${String(id)}`);
+	const proposal = readProposal(id, { dir: options.dir });
+	if (proposal === undefined) {
+		throw new Error(`找不到修订建议（或它的记录已损坏）：${id}；目标文件没有被修改。`);
+	}
+	if (proposal.kind !== DOC_EDIT_KIND_DOCX) {
+		throw new Error("这条建议不是 docx 文本替换建议，请走文本建议的接受通道；目标文件没有被修改。");
+	}
+	if (typeof options.python !== "string" || options.python === "") {
+		throw new Error("缺少 Python 运行时路径：请先确认 docx 运行时已就绪（设置 → 内置运行时）再接受这条建议；目标文件没有被修改。");
+	}
+	if (typeof options.engineDir !== "string" || options.engineDir === "") {
+		throw new Error("缺少 docx 引擎目录，无法应用这条建议；目标文件没有被修改。");
+	}
+
+	const name = basename(proposal.path);
+	let state;
+	try {
+		state = readCurrentBytes(proposal.path);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		writeFileAudit("failed", `接受 docx 修订建议 ${id} 中止：读取目标文件失败（${name}）：${message}`, options.auditDir);
+		throw new Error(`读取目标文件失败（${message}），原文没有被修改。确认文件可读后重试。`);
+	}
+
+	const currentSha256 = state.exists ? sha256Bytes(state.bytes) : null;
+	if (currentSha256 !== proposal.baseSha256) {
+		const why = state.exists ? "原文已变化" : "原文已变化（目标文件已不在）";
+		writeFileAudit("failed", `拒绝接受 docx 修订建议 ${id}：${why}（${name}），未写入`, options.auditDir);
+		throw new Error(
+			"原文已变化，请重新生成：这条建议是依据更早的版本生成的，直接写回会覆盖掉之后的改动。目标文件没有被修改。",
+		);
+	}
+
+	const record = options.recordBinaryVersion ?? recordBinaryVersion;
+	const recorded = record(
+		{
+			path: proposal.path,
+			bytes: state.bytes,
+			at: resolveNow(options.now),
+			sessionId: proposal.sessionId,
+			tool: "docx_replace",
+		},
+		{ dir: options.versionsDir },
+	);
+	if (recorded?.recorded !== true) {
+		const reason = versionFailureText(recorded, true);
+		writeFileAudit(
+			"failed",
+			`接受 docx 修订建议 ${id} 中止：写回前无法保存旧版本（${name}）：${reason}`,
+			options.auditDir,
+		);
+		throw new Error(
+			`无法在写回前保存旧版本（${reason}），为避免改坏之后退不回去，本次没有修改文件。清理磁盘空间或检查目标位置的写权限后重试。`,
+		);
+	}
+
+	const patch = options.patch ?? patchDocx;
+	let result;
+	try {
+		result = await patch(
+			{
+				python: options.python,
+				engineDir: options.engineDir,
+				inputPath: proposal.path,
+				outputPath: proposal.path,
+				part: proposal.part,
+				find: proposal.find,
+				replace: proposal.replace,
+			},
+			options.run,
+		);
+	} catch (error) {
+		const detail = error instanceof Error ? error.message : String(error);
+		const code = typeof error?.code === "string" && error.code !== "" ? error.code : "unknown";
+		writeFileAudit(
+			"failed",
+			`接受 docx 修订建议 ${id} 中止：引擎修补失败（${name}，${code}）：${detail}`,
+			options.auditDir,
+		);
+		throw error instanceof Error ? error : new Error(detail);
+	}
+
+	writeFileAudit(
+		"allowed",
+		`接受 docx 修订建议 ${id}：替换 ${name} 正文中的 1 处（${result.bytesBefore} → ${result.bytesAfter} 字节）`,
+		options.auditDir,
+	);
+
+	let proposalDeleted = false;
+	try {
+		proposalDeleted = deleteProposal(id, { dir: options.dir }).deleted;
+	} catch (error) {
+		/*
+		 * 文件已经改成功了，这里不能再抛（那会让用户以为没改成）。
+		 * 删不掉建议也不致命：再点一次「接受」会被哈希守卫拦住（原文已变）。
+		 */
+		console.error(
+			`[doc-edits] docx 建议文件删除失败（${id}）：${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+
+	return {
+		path: proposal.path,
+		part: result.part,
+		replaced: 1,
+		bytesBefore: result.bytesBefore,
+		bytesAfter: result.bytesAfter,
+		proposalDeleted,
+	};
+}
+
+/** 建议的「段数」：docx 只有一处替换，文本建议按 hunk 数。 */
+function proposalHunkCount(proposal) {
+	if (proposal.kind === DOC_EDIT_KIND_DOCX) return 1;
+	return Array.isArray(proposal.hunks) ? proposal.hunks.length : 0;
+}
+
+/**
  * 拒绝一条建议：读建议 → 审计 `file/blocked` → 删除建议。**不读写目标文件。**
  *
  * 拒绝的是**整条建议**，不是单个 hunk —— 单条 hunk 的取舍用「不选」表达
- * （design.md §5）。返回 `{ rejected: true, deleted }`。
+ * （design.md §5）。docx 建议只有一处替换，拒绝整条等价于拒绝那一处。
+ * 返回 `{ rejected: true, deleted }`。
  */
 function rejectProposal(id, options = {}) {
 	if (!isDocEditId(id)) throw new Error(`修订建议 id 格式不正确：${String(id)}`);
@@ -832,9 +1132,10 @@ function rejectProposal(id, options = {}) {
 	if (proposal === undefined) {
 		throw new Error(`找不到修订建议（或它的记录已损坏）：${id}；没有任何文件被改动。`);
 	}
+	const shape = proposal.kind === DOC_EDIT_KIND_DOCX ? "1 处替换" : `${proposalHunkCount(proposal)} 段`;
 	writeFileAudit(
 		"blocked",
-		`用户拒绝修订建议 ${id}（${basename(proposal.path)}，${proposal.hunks.length} 段），目标文件未修改`,
+		`用户拒绝修订建议 ${id}（${basename(proposal.path)}，${shape}），目标文件未修改`,
 		options.auditDir,
 	);
 	const { deleted } = deleteProposal(id, { dir: options.dir });
@@ -931,13 +1232,19 @@ function createDocEditExtension(options) {
 }
 
 export {
+	DOCX_MAX_BYTES,
+	DOCX_PART_DEFAULT,
 	DOC_EDIT_BLOCK_PREFIX,
 	DOC_EDIT_EXTENSIONS,
 	DOC_EDIT_ID_RE,
+	DOC_EDIT_KIND_DOCX,
+	DOC_EDIT_KIND_TEXT,
 	DOC_EDIT_MAX_BYTES,
 	DOC_EDIT_MAX_ENTRIES,
+	applyDocxProposal,
 	applyProposal,
 	applyToolInput,
+	buildDocxProposal,
 	buildProposal,
 	checkFreshness,
 	createDocEditExtension,
@@ -949,10 +1256,13 @@ export {
 	lineOps,
 	listProposals,
 	mergeSelectedHunks,
+	parseProposal,
 	readProposal,
 	rejectProposal,
 	resolveInsideWorkspace,
 	saveProposal,
 	sha256,
+	sha256Bytes,
 	summarize,
+	versionFailureText,
 };
