@@ -19,7 +19,10 @@ import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+// 真跑 Python 引擎的用例在 Windows runner 上启动较慢：单条 5s 不够。
+vi.setConfig({ testTimeout: 30_000 });
 import JSZip from "jszip";
 import {
 	DOCX_PART_DEFAULT,
