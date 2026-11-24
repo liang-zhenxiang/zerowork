@@ -51,12 +51,37 @@ function startWriteServer() {
 			const userText = JSON.stringify(messages[lastUserIndex]?.content ?? "");
 			const wantsNormalWrite = userText.includes("正常写入");
 			/*
-			 * 两条工具调用路径：
-			 *   · 第一次请求：修订模式下的 write（被拦成建议）；
-			 *   · 关闭修订模式后的「正常写入」：只有该用户消息之后**还没有** tool 结果时才发，
-			 *     否则同一轮会无限重复调用。
+			 * #483：docx 工具的真实调用链。与 `wantsNormalWrite` 同形 —— 只在最后
+			 * 一条 user 之后**还没有** tool 结果时发一次，否则同一轮会无限调用。
+			 * 两条路径的差别只在参数：
+			 *   · 「docx 替换」→ 能成功的唯一命中，用来验证建议生成与接受后的保真；
+			 *   · 「docx 跨 run」→ 夹具里被 Word 拆开的那段文字，应当被引擎拒绝。
 			 */
-			if (!afterLastUser.some((message) => message.role === "tool") && wantsNormalWrite) {
+			const wantsDocxReplace = userText.includes("docx 替换");
+			const wantsDocxCrossRun = userText.includes("docx 跨 run");
+			if (
+				!afterLastUser.some((message) => message.role === "tool") &&
+				(wantsDocxReplace || wantsDocxCrossRun)
+			) {
+				send({
+					tool_calls: [
+						{
+							index: 0,
+							id: `call_docx_${requests.length}`,
+							type: "function",
+							function: {
+								name: "docx_replace",
+								arguments: JSON.stringify(
+									wantsDocxCrossRun
+										? { path: "跨run.docx", find: "跨 run 的文本", replace: "改掉" }
+										: { path: "季度报告工具链.docx", find: "本季度营收", replace: "本季度净收入" },
+								),
+							},
+						},
+					],
+				});
+				send({}, "tool_calls");
+			} else if (!afterLastUser.some((message) => message.role === "tool") && wantsNormalWrite) {
 				send({
 					tool_calls: [
 						{
@@ -854,6 +879,209 @@ await h.check("docx 建议：原文已变化 → 接受禁用、拒绝整条不�
 		beforeReject - 1,
 		"拒绝后建议应被删除"
 	);
+});
+
+/* ══════════════════════════════════════════════════════════════════════
+ * docx 真实工具调用链路（#483）：模型调用 `docx_replace` → 修订模式生成建议
+ * → 接受 → 保真清单逐项对比 → 二进制版本还原；关闭修订模式后跨 run 被拒绝。
+ *
+ * 与上面两条用例的区别是「建议从哪来」：那边用 `buildDocxProposal` 直接落种子，
+ * 这里走完整的模型 → 工具 → daemon 审批路径 —— 任何一处没接上（工具没注册、
+ * 修订模式没读对、参数校验写错）都只有这条能抓到。
+ * ══════════════════════════════════════════════════════════════════════ */
+const INSPECT_SCRIPT = join(ROOT, "tests/fixtures/docx-revision/inspect_docx.py");
+const DOCX_TOOL_NAME = "季度报告工具链.docx";
+const DOCX_CROSS_NAME = "跨run.docx";
+let docxToolProposal;
+let docxToolTarget;
+let docxToolBeforeBytes;
+
+/** 内置 python 未就绪时返回 null：真实工具调用要走引擎/运行时，没有它只能 skip。 */
+async function readyPython() {
+	const info = await win.evaluate(async () => {
+		const snapshot = await globalThis.kami.runtimesSnapshot();
+		const item = (snapshot?.items ?? []).find((x) => x.id === "python");
+		return { kind: item?.status?.kind, exe: item?.executable };
+	});
+	return info.kind === "ready" && info.exe ? info : null;
+}
+
+/** 用夹具自带的保真清单读一份 docx（与单元测试同一份事实来源，不另写解析）。 */
+async function inspectDocx(py, path) {
+	const { stdout } = await runFile(py.exe, [INSPECT_SCRIPT, path], { encoding: "utf8", timeout: 60_000 });
+	return JSON.parse(stdout);
+}
+
+/** 当前会话的工作目录（工作区根下按会话分的子目录），工具的相对路径以它为锚。 */
+async function sessionCwd() {
+	const cwd = await win.evaluate(async () => (await globalThis.kami.snapshot())?.state?.cwd ?? "");
+	assert.ok(cwd !== "", "拿不到当前会话的工作目录");
+	return cwd;
+}
+
+await h.check("docx 工具：模型调用在修订模式下生成建议、文件不变", async () => {
+	const cwd = await sessionCwd();
+	const target = join(cwd, DOCX_TOOL_NAME);
+	copyFileSync(DOCX_FIXTURE, target);
+	const beforeBytes = readFileSync(target);
+	await win.evaluate(() => globalThis.kami.setDocEditMode(true));
+
+	/*
+	 * 走 IPC 而不是输入框：上面两条 docx 用例结束时停在审阅页，那里没有消息输入框；
+	 * 这里要验证的是「模型 → 工具 → 建议」这条链，不是输入框本身（那由 #456 用例覆盖）。
+	 */
+	await win.evaluate((text) => globalThis.kami.prompt({ text }), "用 docx 替换把营收的说法改一下");
+
+	const proposal = await waitUntil(
+		async () => {
+			const list = await win.evaluate(() => globalThis.kami.listDocEdits());
+			return list.find((item) => item.kind === "docx" && item.path === target) ?? null;
+		},
+		{ timeout: 90_000, interval: 500, desc: "模型调用 docx_replace 后出现 docx 建议" }
+	);
+	assert.deepEqual(readFileSync(target), beforeBytes, "修订模式下 docx_replace 不该改动文件");
+
+	const detail = await win.evaluate((id) => globalThis.kami.readDocEdit(id), proposal.id);
+	assert.equal(detail.find, DOCX_FIND, "建议里的原文不对");
+	assert.equal(detail.replace, DOCX_REPLACE, "建议里的新文字不对");
+	assert.equal(detail.toolName, "docx_replace", "建议来源工具不是 docx_replace");
+	assert.ok(detail.sessionId !== "", "建议没有来源会话");
+
+	await clickReviewRefresh();
+	const view = await waitDocView((state) => state.docx === true, "真实链路建议在工作台渲染");
+	await h.waitForSettled();
+	assert.equal(view.cardName, DOCX_TOOL_NAME, "工作台应显示工具生成的那份 docx");
+	assert.deepEqual(view.rowStats, ["1 处替换"], "左列应报「1 处替换」");
+	await h.shoot("docx-tool-proposal-light");
+	await setTheme("dark");
+	await h.waitForSettled();
+	await h.shoot("docx-tool-proposal-dark");
+	await setTheme("light");
+
+	docxToolProposal = proposal;
+	docxToolTarget = target;
+	docxToolBeforeBytes = beforeBytes;
+});
+
+await h.check("docx 工具：接受后保真清单与版本还原", async () => {
+	const py = await readyPython();
+	if (py === null) {
+		h.skip(
+			"docx 工具：接受后保真清单与版本还原",
+			"Python 运行时未就绪：接受与保真断言需要内置运行时，本机未安装时这条不跑"
+		);
+	}
+	const target = docxToolTarget;
+	assert.ok(target !== undefined, "上一条用例没有留下真实链路的建议");
+
+	const accepted = await win.evaluate(
+		({ id }) => globalThis.kami.applyDocEdit(id, []),
+		{ id: docxToolProposal.id }
+	);
+	/* 成功时返回的是写回结果（不是 `{ok:true}`）；失败会抛错、由 h.check 记为失败。 */
+	assert.equal(accepted?.replaced, 1, `接受结果不对：${JSON.stringify(accepted)}`);
+	assert.equal(accepted?.proposalDeleted, true, "接受后建议没有被删除");
+	await waitUntil(
+		async () => {
+			const list = await win.evaluate(() => globalThis.kami.listDocEdits());
+			return list.some((item) => item.id === docxToolProposal.id) ? null : true;
+		},
+		{ timeout: 60_000, interval: 300, desc: "接受后建议从队列消失" }
+	);
+
+	/* ── 保真：正文变了，其余条目与版式特征逐项不变 ───────────────────── */
+	const beforeList = await inspectDocx(py, DOCX_FIXTURE);
+	const afterList = await inspectDocx(py, target);
+	assert.ok(
+		afterList.document.text.some((line) => line.includes(DOCX_REPLACE)),
+		"替换后的文字没有出现在正文里"
+	);
+	assert.ok(
+		!afterList.document.text.some((line) => line.includes(DOCX_FIND)),
+		"替换前的文字仍在正文里"
+	);
+	assert.deepEqual(
+		afterList.entries.map((entry) => entry.name),
+		beforeList.entries.map((entry) => entry.name),
+		"zip 条目顺序或数量变了"
+	);
+	const changedEntries = afterList.entries
+		.filter((entry, index) => entry.sha256 !== beforeList.entries[index].sha256)
+		.map((entry) => entry.name);
+	assert.deepEqual(changedEntries, ["word/document.xml"], `不该被改动的条目：${changedEntries.join(", ")}`);
+	assert.deepEqual(afterList.parts, beforeList.parts, "包内结构特征（样式/编号/批注等部件存在性）变了");
+	assert.deepEqual(afterList.document.paragraph_styles, beforeList.document.paragraph_styles, "段落样式变了");
+	assert.equal(afterList.document.numbered_paragraphs, beforeList.document.numbered_paragraphs, "编号段落数变了");
+	assert.deepEqual(afterList.document.hyperlinks, beforeList.document.hyperlinks, "超链接变了");
+
+	/* ── 版本：接受前的那一版可逐字节还原 ─────────────────────────────── */
+	const history = await win.evaluate(() => globalThis.kami.listFileHistory());
+	const file = history.files.find((entry) => entry.path === target);
+	assert.ok(file, "文件历史里没有接受 docx 之前留下的版本");
+	const historyDetail = await win.evaluate(({ key }) => globalThis.kami.readFileHistory({ key }), { key: file.key });
+	assert.equal(historyDetail?.ok, true, `读版本详情失败：${JSON.stringify(historyDetail)}`);
+	const oldest = (historyDetail.versions ?? [])[0];
+	assert.ok(oldest !== undefined, "接受前没有留下版本记录");
+	const restored = await win.evaluate(
+		({ key, id }) => globalThis.kami.restoreFileHistory({ key, id }),
+		{ key: file.key, id: oldest.id }
+	);
+	assert.equal(restored?.ok, true, `还原失败：${JSON.stringify(restored)}`);
+	assert.deepEqual(readFileSync(target), docxToolBeforeBytes, "还原后字节不等于接受前");
+	const restoredList = await inspectDocx(py, target);
+	assert.ok(
+		restoredList.document.text.some((line) => line.includes(DOCX_FIND)),
+		"还原后正文没有回到替换前的文字"
+	);
+});
+
+await h.check("docx 工具：跨 run 目标被拒绝、原文件不变", async () => {
+	const py = await readyPython();
+	if (py === null) {
+		h.skip(
+			"docx 工具：跨 run 目标被拒绝、原文件不变",
+			"Python 运行时未就绪：直接写回路径需要引擎，跨 run 拒绝无法验证"
+		);
+	}
+	/* 跨 run 只在直接写回路径上判定（修订模式只存建议、不调引擎），所以要关掉开关。 */
+	await win.evaluate(() => globalThis.kami.setDocEditMode(false));
+	const cwd = await sessionCwd();
+	const target = join(cwd, DOCX_CROSS_NAME);
+	copyFileSync(DOCX_FIXTURE, target);
+	const beforeBytes = readFileSync(target);
+	const before = mock.requests.length;
+
+	await win.evaluate((text) => globalThis.kami.prompt({ text }), "docx 跨 run 试试");
+	/*
+	 * 两条请求：第一条是模型给出工具调用，第二条带着工具结果回来。等第二条，
+	 * 才能看到引擎的拒绝原文（工具结果在请求的 messages 里）。
+	 */
+	const afterTool = await waitUntil(
+		() => (mock.requests.length >= before + 2 ? mock.requests[before + 1] : null),
+		{ timeout: 90_000, interval: 500, desc: "mock 收到带 docx 工具结果的第 2 轮" }
+	);
+	/*
+	 * 请求里带的是**完整对话历史**，`find` 会拿到最早那条工具结果（第一个用例的
+	 * write 建议）。本次工具结果一定在末尾，按「最后一条 tool 消息」取。
+	 */
+	const toolMessages = (afterTool.body?.messages ?? []).filter((message) => message.role === "tool");
+	const toolMessage = toolMessages.at(-1);
+	assert.ok(toolMessage, "第 2 轮请求里没有工具结果");
+	const toolText = JSON.stringify(toolMessage);
+	/*
+	 * 只认 cross-run 分支的专属措辞。不能用宽泛的「跨 run」：not-found 的
+	 * 原文回显「找不到：跨 run 的文本」也含这几个字 —— 那样即使单 run 守卫
+	 * 失效（本该判跨 run 却落到 not-found）断言照样绿，反向验证也就抓不到。
+	 */
+	assert.match(
+		toolText,
+		/cross-run|拆成了多个 run|拆在多个 run|跨 w:t/,
+		`工具结果里没有跨 run 的原因：${toolText.slice(0, 400)}`
+	);
+	assert.doesNotMatch(toolText, /not-found|找不到目标文字/, "跨 run 被误判成了「找不到」");
+	assert.match(toolText, /Word 里手动修改|Word 中手动修改/, "工具结果没有给出「在 Word 里手改」的逃生指引");
+	assert.deepEqual(readFileSync(target), beforeBytes, "跨 run 被拒绝时不该改动文件字节");
+	await win.evaluate(() => globalThis.kami.setDocEditMode(true));
 });
 
 await mock.close();
