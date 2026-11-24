@@ -948,10 +948,31 @@ await h.check("docx 工具：模型调用在修订模式下生成建议、文件
 	assert.ok(detail.sessionId !== "", "建议没有来源会话");
 
 	await clickReviewRefresh();
-	const view = await waitDocView((state) => state.docx === true, "真实链路建议在工作台渲染");
+	/*
+	 * 队列里可能不止这一条：接受用例在运行时未就绪时会 SKIP，它种下的
+	 * 「季度报告.docx」建议仍在队列里，而右区默认选中第一条。所以先按文件名
+	 * 点中工具生成的这一条，再断言右区 —— 不要假设「它就是第一条」。
+	 */
+	const view = await waitDocView(
+		(state) => state.groups.some((group) => group.name === DOCX_TOOL_NAME),
+		"左栏列出工具生成的 docx"
+	);
+	const rowLabel = await win.evaluate((name) => {
+		const row = [...document.querySelectorAll("[data-doc-edit-entry]")].find((node) =>
+			(node.getAttribute("aria-label") ?? "").startsWith(`${name}，`)
+		);
+		if (row === undefined) return null;
+		row.click();
+		return row.getAttribute("aria-label") ?? "";
+	}, DOCX_TOOL_NAME);
+	assert.ok(rowLabel !== null, `左栏找不到工具生成的 docx 条目：${JSON.stringify(view.groups)}`);
+	assert.match(rowLabel, /1 处替换/, "该条目应报「1 处替换」");
+	const selected = await waitDocView(
+		(state) => state.docx === true && state.cardName === DOCX_TOOL_NAME,
+		"右区切到工具生成的 docx 建议"
+	);
 	await h.waitForSettled();
-	assert.equal(view.cardName, DOCX_TOOL_NAME, "工作台应显示工具生成的那份 docx");
-	assert.deepEqual(view.rowStats, ["1 处替换"], "左列应报「1 处替换」");
+	assert.ok(selected.rowStats.includes("1 处替换"), "左列应报「1 处替换」");
 	await h.shoot("docx-tool-proposal-light");
 	await setTheme("dark");
 	await h.waitForSettled();
