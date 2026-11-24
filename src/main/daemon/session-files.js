@@ -5164,7 +5164,11 @@ const handlers = {
       if (!got.ok) {
         const message = got.reason === "missing"
           ? "这一版的内容文件已经不在磁盘上了，无法读取。可以挑别的版本试试。"
-          : "这一版不在历史里（可能已被 20 版上限裁掉）。";
+          // 二进制版本（docx / zip）不提供文本预览：按 UTF-8 解出来的是乱码，
+          // 「看起来有内容」比直说读不了更危险。还原不受影响。
+          : got.reason === "binary"
+            ? "这一版是二进制文件（如 docx），文件历史不提供文本预览；需要时可以还原这一版。"
+            : "这一版不在历史里（可能已被 20 版上限裁掉）。";
         return { ok: false, reason: got.reason, message };
       }
       result.content = got.content;

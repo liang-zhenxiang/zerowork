@@ -13,7 +13,8 @@
  *   <config>/versions/
  *     <key>/                              key = sha1(绝对路径) 前 16 位 hex
  *       meta.json                         { path, skipped, versions: [ { id, at, size, ... } ] }
- *       <id>.txt                          该版本的正文（UTF-8 原文）
+ *       <id>.txt                          文本版本的正文（UTF-8 原文）
+ *       <id>.bin                          二进制版本的原文（docx / zip 等，逐字节）
  *
  * `versions` **旧→新**排序（与时间轴渲染方向一致）。`meta.json` 走「临时文件 + rename」
  * 原子落盘（与 pin.js / projects.js 同款手法）；坏 meta 一律当「这个文件没有历史」——
@@ -23,17 +24,27 @@
  * 「会话在跑就拒绝还原」由 session-files 通过 `restoreVersion` 的 `isSessionRunning`
  * 选项注入（会话桶在那一层）。本模块因此可以被单测直接调用。
  *
- * ## 四个硬边界（写死在常量里并导出，便于单测钉住）
+ * ## 两条记录通道（不混类型）
  *
- *   VERSION_MAX_PER_FILE  20      超出丢**最旧**的（连内容文件一起删）
- *   VERSION_MAX_BYTES     1 MiB   旧内容超过它**整条跳过**，meta.skipped +1
- *   VERSION_BINARY_SNIFF  8 KiB   前 8 KiB 含 NUL 判为二进制，整条跳过
- *   VERSION_LIST_MAX_FILES 200    清单上限，超出置 truncated:true（界面必须说出来）
+ *   recordVersion        文本（`content` 是 string），沿用「前 8 KiB 含 NUL 判二进制」跳过
+ *   recordBinaryVersion  二进制（`bytes` 是 Buffer / Uint8Array），逐字节保存
+ *
+ * 二进制 meta 带 `binary:true` 与 `sha256`；**旧 meta 没有 binary 字段一律按文本读**
+ * （向后兼容），内容文件仍是 `<id>.txt`。文本 diff（review.js）只认文本：二进制版本
+ * 由 `readVersionContent` 返回 `reason:"binary"`，不进文本预览。
+ *
+ * ## 五个硬边界（写死在常量里并导出，便于单测钉住）
+ *
+ *   VERSION_MAX_PER_FILE      20      超出丢**最旧**的（连内容文件一起删）
+ *   VERSION_MAX_BYTES         1 MiB   文本旧内容超过它**整条跳过**，meta.skipped +1
+ *   VERSION_MAX_BINARY_BYTES  20 MiB  二进制旧内容超过它**整条跳过**，meta.skipped +1
+ *   VERSION_BINARY_SNIFF      8 KiB   文本通道：前 8 KiB 含 NUL 判为二进制，整条跳过
+ *   VERSION_LIST_MAX_FILES    200     清单上限，超出置 truncated:true（界面必须说出来）
  *
  * `skipped` 让界面能说「这个文件有 N 次改动没留下版本」——不静默吞掉，与 library.js
  * 的 `truncated` 是同一族做法（本仓库对「静默丢东西」有明确纪律，见 AGENTS.md）。
  */
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   existsSync,
   mkdirSync,
@@ -41,6 +52,7 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
@@ -50,8 +62,11 @@ import { clipAuditDetail, formatAuditTime } from "./audit.js";
 /** 单文件历史上限：超出丢最旧的（含删内容文件）。 */
 const VERSION_MAX_PER_FILE = 20;
 
-/** 单版体积上限（字节）：旧内容超过它整条跳过（不假装记下了）。 */
+/** 单版体积上限（字节）：文本旧内容超过它整条跳过（不假装记下了）。 */
 const VERSION_MAX_BYTES = 1024 * 1024;
+
+/** 单版体积上限（字节）：二进制（docx / zip）内容超过它整条跳过。 */
+const VERSION_MAX_BINARY_BYTES = 20 * 1024 * 1024;
 
 /** 二进制嗅探窗口（字节）：前这么多字节里出现 NUL 就判为二进制。 */
 const VERSION_BINARY_SNIFF = 8 * 1024;
@@ -60,7 +75,8 @@ const VERSION_BINARY_SNIFF = 8 * 1024;
 const VERSION_LIST_MAX_FILES = 200;
 
 const META_FILE = "meta.json";
-const CONTENT_EXT = ".txt";
+const TEXT_CONTENT_EXT = ".txt";
+const BINARY_CONTENT_EXT = ".bin";
 const KEY_RE = /^[0-9a-f]{16}$/;
 
 function isPlainObject(value) {
@@ -93,8 +109,8 @@ function versionDirOf(absPath, dir) {
   return join(dir, versionKeyOf(absPath));
 }
 
-function contentPathOf(fileDir, id) {
-  return join(fileDir, `${id}${CONTENT_EXT}`);
+function contentPathOf(fileDir, id, binary = false) {
+  return join(fileDir, `${id}${binary ? BINARY_CONTENT_EXT : TEXT_CONTENT_EXT}`);
 }
 
 function exists(path) {
@@ -111,6 +127,10 @@ function parseVersion(raw) {
   if (typeof raw.id !== "string" || raw.id === "") return undefined;
   if (typeof raw.at !== "number" || !Number.isFinite(raw.at)) return undefined;
   const entry = { id: raw.id, at: raw.at, size: typeof raw.size === "number" && Number.isFinite(raw.size) ? raw.size : 0 };
+  // 旧 meta 没有 binary 字段 = 文本版本（向后兼容）。只有显式 true 才算二进制，
+  // 免得 `binary:"true"` 这类脏值把内容扩展名指到 .bin 上去。
+  if (raw.binary === true) entry.binary = true;
+  if (typeof raw.sha256 === "string" && /^[0-9a-f]{64}$/.test(raw.sha256)) entry.sha256 = raw.sha256;
   if (typeof raw.sessionId === "string" && raw.sessionId !== "") entry.sessionId = raw.sessionId;
   if (typeof raw.tool === "string" && raw.tool !== "") entry.tool = raw.tool;
   if (typeof raw.added === "number" && Number.isFinite(raw.added)) entry.added = raw.added;
@@ -175,18 +195,95 @@ function looksBinary(content) {
   return head.includes("\0");
 }
 
+/** 字节版的同一判据（还原时判断「当前磁盘内容该走哪条记录通道」）。 */
+function bufferLooksBinary(buffer) {
+  const end = Math.min(buffer.length, VERSION_BINARY_SNIFF);
+  for (let i = 0; i < end; i += 1) {
+    if (buffer[i] === 0) return true;
+  }
+  return false;
+}
+
 function byteLength(content) {
   return Buffer.byteLength(content, "utf8");
 }
 
+/** Buffer / Uint8Array → Buffer；其它形态返回 undefined（recordBinaryVersion 入参校验）。 */
+function toBytes(value) {
+  if (Buffer.isBuffer(value)) return value;
+  if (value instanceof Uint8Array) return Buffer.from(value);
+  return undefined;
+}
+
+function sha256OfBytes(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
 /**
- * 记一版「改动前内容」。
+ * 跳过一条记录：`meta.skipped` +1 并落 meta（不留下半条版本）。
+ *
+ * 为什么连「没记成」都要落盘：界面据此说「这个文件有 N 次改动没留下版本」——
+ * 静默吞掉会让用户以为文件从没被改过（与 library.js 的 truncated 同一纪律）。
+ */
+function skipVersion(dir, absPath, reason, extra = {}) {
+  const fileDir = versionDirOf(absPath, dir);
+  // 坏 meta 当空（与 pin.js / projects.js 同口径）：最坏后果是丢这个文件的历史。
+  const meta = readMeta(fileDir) ?? { path: absPath, skipped: 0, versions: [] };
+  meta.path = absPath;
+  meta.skipped += 1;
+  writeMeta(fileDir, meta);
+  return { recorded: false, skipped: true, reason, count: meta.versions.length, ...extra };
+}
+
+/**
+ * 把一条已通过校验/上限检查的版本写进存储（文本与二进制共用）。
+ *
+ * `payload` 是 string（文本，按 UTF-8 写）或 Buffer（二进制，逐字节写）。
+ * 顺序固定：**内容先落、meta 后落** —— 反过来的话崩溃会留下「meta 指向不存在的内容文件」。
+ * 裁剪时先写 meta 再删旧内容文件，崩在中间也不会丢「仍被引用」的版本。
+ */
+function commitVersion({ dir, absPath, at, size, binary, payload, from }) {
+  const fileDir = versionDirOf(absPath, dir);
+  const meta = readMeta(fileDir) ?? { path: absPath, skipped: 0, versions: [] };
+  meta.path = absPath;
+  const id = nextVersionId(meta.versions, at);
+  mkdirSync(fileDir, { recursive: true });
+  if (binary) writeFileSync(contentPathOf(fileDir, id, true), payload);
+  else writeFileSync(contentPathOf(fileDir, id, false), payload, "utf8");
+  const entry = { id, at, size };
+  if (binary) {
+    entry.binary = true;
+    entry.sha256 = sha256OfBytes(payload);
+  }
+  if (typeof from.sessionId === "string" && from.sessionId !== "") entry.sessionId = from.sessionId;
+  if (typeof from.tool === "string" && from.tool !== "") entry.tool = from.tool;
+  if (typeof from.added === "number" && Number.isFinite(from.added)) entry.added = from.added;
+  if (typeof from.removed === "number" && Number.isFinite(from.removed)) entry.removed = from.removed;
+  meta.versions.push(entry);
+
+  const dropped = [];
+  while (meta.versions.length > VERSION_MAX_PER_FILE) dropped.push(meta.versions.shift());
+  writeMeta(fileDir, meta);
+  // meta 已经不再引用它们，这时才删内容文件 —— 崩在中间也不会丢「仍被引用」的版本。
+  for (const stale of dropped) {
+    try {
+      rmSync(contentPathOf(fileDir, stale.id, stale.binary === true), { force: true });
+    } catch {
+      // 删不掉旧内容文件不影响新版本已成立；下一次裁剪会再试。
+    }
+  }
+  return { recorded: true, skipped: false, id, at, count: meta.versions.length, dropped: dropped.length };
+}
+
+/**
+ * 记一版「改动前内容」（**文本通道**）。
  *
  * 入参：`{ path, content, at, sessionId, tool, added, removed }`。返回
  * `{ recorded, skipped, reason? }`（**不抛**：记录失败不能打断 Agent 的运行）。
  *
  * 边界行为：
- * - 二进制 / 超 1 MiB → **不落内容**，`meta.skipped` +1，返回 `skipped:true`；
+ * - 前 8 KiB 含 NUL / 超 1 MiB → **不落内容**，`meta.skipped` +1，返回 `skipped:true`；
+ *   二进制请走 `recordBinaryVersion`（显式 API，不把字符串与字节混在一个参数里）；
  * - 超出 20 版 → 丢最旧的（连内容文件一起删）；
  * - 坏 meta → 当「这个文件没有历史」，从头开始，不抛。
  */
@@ -201,47 +298,43 @@ function recordVersion(input, options = {}) {
     }
     const dir = options.dir ?? versionsDir();
     const absPath = resolve(input.path);
-    const fileDir = versionDirOf(absPath, dir);
-    // 坏 meta 当空（与 pin.js / projects.js 同口径）：最坏后果是丢这个文件的历史。
-    const meta = readMeta(fileDir) ?? { path: absPath, skipped: 0, versions: [] };
-    meta.path = absPath;
-
-    if (looksBinary(input.content)) {
-      meta.skipped += 1;
-      writeMeta(fileDir, meta);
-      return { recorded: false, skipped: true, reason: "binary", count: meta.versions.length };
-    }
+    if (looksBinary(input.content)) return skipVersion(dir, absPath, "binary");
     const size = byteLength(input.content);
-    if (size > VERSION_MAX_BYTES) {
-      meta.skipped += 1;
-      writeMeta(fileDir, meta);
-      return { recorded: false, skipped: true, reason: "too-large", size, count: meta.versions.length };
-    }
+    if (size > VERSION_MAX_BYTES) return skipVersion(dir, absPath, "too-large", { size });
 
     const at = typeof input.at === "number" && Number.isFinite(input.at) ? input.at : Date.now();
-    const id = nextVersionId(meta.versions, at);
-    mkdirSync(fileDir, { recursive: true });
-    // 内容先落、meta 后落：反过来的话崩溃会留下「meta 指向不存在的内容文件」。
-    writeFileSync(contentPathOf(fileDir, id), input.content, "utf8");
-    const entry = { id, at, size };
-    if (typeof input.sessionId === "string" && input.sessionId !== "") entry.sessionId = input.sessionId;
-    if (typeof input.tool === "string" && input.tool !== "") entry.tool = input.tool;
-    if (typeof input.added === "number" && Number.isFinite(input.added)) entry.added = input.added;
-    if (typeof input.removed === "number" && Number.isFinite(input.removed)) entry.removed = input.removed;
-    meta.versions.push(entry);
+    return commitVersion({ dir, absPath, at, size, binary: false, payload: input.content, from: input });
+  } catch (error) {
+    return { recorded: false, skipped: false, reason: "io-error", message: error instanceof Error ? error.message : String(error) };
+  }
+}
 
-    const dropped = [];
-    while (meta.versions.length > VERSION_MAX_PER_FILE) dropped.push(meta.versions.shift());
-    writeMeta(fileDir, meta);
-    // meta 已经不再引用它们，这时才删内容文件 —— 崩在中间也不会丢「仍被引用」的版本。
-    for (const stale of dropped) {
-      try {
-        rmSync(contentPathOf(fileDir, stale.id), { force: true });
-      } catch {
-        // 删不掉旧内容文件不影响新版本已成立；下一次裁剪会再试。
-      }
+/**
+ * 记一版「改动前内容」（**二进制通道**，docx / zip 等）。
+ *
+ * 入参：`{ path, bytes, at, sessionId, tool, added, removed }`，`bytes` 是 Buffer /
+ * Uint8Array（显式分开，避免与文本的 string 混类型）。返回形态与 `recordVersion` 一致。
+ *
+ * 边界行为：
+ * - 超过 `VERSION_MAX_BINARY_BYTES`（20 MiB）→ **不落内容文件**，`meta.skipped` +1；
+ * - 超 20 版 → 丢最旧的（连 `.bin` 一起删；`meta.binary` 决定扩展名，混存也不会删错）；
+ * - 坏 meta → 当「这个文件没有历史」，从头开始，不抛。
+ */
+function recordBinaryVersion(input, options = {}) {
+  try {
+    if (!isPlainObject(input)) return { recorded: false, skipped: false, reason: "bad-input" };
+    if (typeof input.path !== "string" || input.path === "") {
+      return { recorded: false, skipped: false, reason: "no-path" };
     }
-    return { recorded: true, skipped: false, id, at, count: meta.versions.length, dropped: dropped.length };
+    const bytes = toBytes(input.bytes);
+    if (bytes === undefined) return { recorded: false, skipped: false, reason: "no-bytes" };
+    const dir = options.dir ?? versionsDir();
+    const absPath = resolve(input.path);
+    const size = bytes.byteLength;
+    if (size > VERSION_MAX_BINARY_BYTES) return skipVersion(dir, absPath, "too-large", { size });
+
+    const at = typeof input.at === "number" && Number.isFinite(input.at) ? input.at : Date.now();
+    return commitVersion({ dir, absPath, at, size, binary: true, payload: bytes, from: input });
   } catch (error) {
     return { recorded: false, skipped: false, reason: "io-error", message: error instanceof Error ? error.message : String(error) };
   }
@@ -290,6 +383,9 @@ function listVersionFiles(options = {}) {
       if (last.sessionId !== undefined) entry.sessionId = last.sessionId;
       if (last.added !== undefined) entry.added = last.added;
       if (last.removed !== undefined) entry.removed = last.removed;
+      // 二进制标记（新增字段，文本条目不出现在这里 = 缺省即文本）：界面据此
+      // 不为这一条请求文本预览。既有字段一个都不动。
+      if (last.binary === true) entry.binary = true;
     }
     files.push(entry);
   }
@@ -302,7 +398,8 @@ function listVersionFiles(options = {}) {
  * 读一个文件的版本元数据 + 全部版本条目。
  *
  * key 不存在 / meta 损坏 → `undefined`；某版正文文件缺失时给该版标 `broken:true`，
- * 其余版本照常返回（单条坏数据不整体失败）。
+ * 其余版本照常返回（单条坏数据不整体失败）。条目带 `binary:true` 的版本，正文在
+ * `<id>.bin`；**旧条目没有该字段 = 文本**，正文在 `<id>.txt`。
  */
 function readVersionFile(key, options = {}) {
   if (typeof key !== "string" || !KEY_RE.test(key)) return undefined;
@@ -312,17 +409,20 @@ function readVersionFile(key, options = {}) {
   if (meta === undefined) return undefined;
   const versions = meta.versions.map((entry) => ({
     ...entry,
-    broken: !exists(contentPathOf(fileDir, entry.id)),
+    broken: !exists(contentPathOf(fileDir, entry.id, entry.binary === true)),
   }));
   return { key, path: meta.path, skipped: meta.skipped, versions };
 }
 
 /**
- * 读某一版的正文。
+ * 读某一版的文本正文（**文本通道**）。
  *
  * 返回 `{ ok:true, content, at }` 或 `{ ok:false, reason }`，reason ∈
- * `"unknown" | "no-such-version" | "missing"`。失败用返回值表达、不 reject
+ * `"unknown" | "no-such-version" | "missing" | "binary"`。失败用返回值表达、不 reject
  * （与 forkSession 的 branchFail 同族）。
+ *
+ * **二进制版本一律 `reason:"binary"`**：把 docx 按 UTF-8 解出来的是乱码，
+ * 「看起来有内容」比直接说读不了更危险。需要字节请走 `readVersionBytes`。
  */
 function readVersionContent(key, id, options = {}) {
   if (typeof key !== "string" || !KEY_RE.test(key)) return { ok: false, reason: "unknown" };
@@ -333,8 +433,36 @@ function readVersionContent(key, id, options = {}) {
   if (meta === undefined) return { ok: false, reason: "unknown" };
   const entry = meta.versions.find((v) => v.id === id);
   if (entry === undefined) return { ok: false, reason: "no-such-version" };
+  if (entry.binary === true) return { ok: false, reason: "binary" };
   try {
-    return { ok: true, content: readFileSync(contentPathOf(fileDir, id), "utf8"), at: entry.at };
+    return { ok: true, content: readFileSync(contentPathOf(fileDir, id, false), "utf8"), at: entry.at };
+  } catch {
+    return { ok: false, reason: "missing" };
+  }
+}
+
+/**
+ * 读某一版的原始字节（**二进制通道**；文本版本返回其 UTF-8 字节）。
+ *
+ * 返回 `{ ok:true, bytes: Buffer, at }` 或 `{ ok:false, reason }`，
+ * reason ∈ `"unknown" | "no-such-version" | "missing"`。不做解码 —— 还原写回
+ * 依赖的是逐字节一致。
+ */
+function readVersionBytes(key, id, options = {}) {
+  if (typeof key !== "string" || !KEY_RE.test(key)) return { ok: false, reason: "unknown" };
+  if (typeof id !== "string" || id === "") return { ok: false, reason: "no-such-version" };
+  const dir = options.dir ?? versionsDir();
+  const fileDir = join(dir, key);
+  const meta = readMeta(fileDir);
+  if (meta === undefined) return { ok: false, reason: "unknown" };
+  const entry = meta.versions.find((v) => v.id === id);
+  if (entry === undefined) return { ok: false, reason: "no-such-version" };
+  try {
+    return {
+      ok: true,
+      bytes: readFileSync(contentPathOf(fileDir, id, entry.binary === true)),
+      at: entry.at,
+    };
   } catch {
     return { ok: false, reason: "missing" };
   }
@@ -346,6 +474,36 @@ function restoreFail(reason, message) {
 }
 
 /**
+ * 二进制还原的原子写：同目录临时文件 + rename（与 doc-edits.writeAtomically 同款）。
+ *
+ * - 临时文件必须与目标**同目录**：跨目录 rename 会退化成复制 + 删除，不再原子；
+ * - 目标已存在时沿用它的权限位（`mode & 0o777`）；不存在则用默认权限；
+ * - 失败先删临时文件再抛 —— 目标文件保持还原前的样子（写坏一半的只可能是临时文件）。
+ */
+function writeBytesAtomically(absPath, bytes) {
+  const dir = dirname(absPath);
+  mkdirSync(dir, { recursive: true });
+  let mode;
+  try {
+    mode = statSync(absPath).mode & 0o777;
+  } catch {
+    mode = void 0; // 目标不存在：还原会重新创建它，用默认权限。
+  }
+  const tmp = join(dir, `.${basename(absPath)}.${randomBytes(6).toString("hex")}.tmp`);
+  try {
+    writeFileSync(tmp, bytes, mode === void 0 ? void 0 : { mode });
+    renameSync(tmp, absPath);
+  } catch (error) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // 临时文件删不掉不影响「目标文件没被改」这个事实；下次写入用自己的临时名。
+    }
+    throw error;
+  }
+}
+
+/**
  * 还原到某一版（design.md §3.3 / §3.4）。
  *
  * 拒绝判据（任一命中即返回 `{ ok:false, reason, message }`，**不抛**）：
@@ -354,10 +512,19 @@ function restoreFail(reason, message) {
  *   - 该文件最近一条版本所属会话**正在运行** → `running`（判据由 session-files 注入）
  *   - 写盘失败 → `write-failed`，带原始错误摘要
  *
+ * **按 `meta.binary` 分支**：二进制版本读 `<id>.bin` 的字节，写回走
+ * 「同目录临时文件 + rename」（保留原 mode，失败不破坏当前文件）；文本版本沿用
+ * 原来的 utf8 读写路径。旧条目没有 `binary` 字段 = 文本（向后兼容）。
+ *
  * 还原本身也留一版：**先读当前磁盘内容**存成一条新版本（`tool:"restore"`），
  * 再写回目标版本（「先留后改」，与「落盘先于界面更新」同一纪律）。当前内容与
  * 目标版本逐字节相同时不写新版本，返回 `unchanged:true`，此时**不写审计**（没
  * 发生任何改动，那句「当前内容已先存为新版本」会是不实信息）。
+ *
+ * 当前内容的记录通道按**内容本身**判：目标版本是二进制或当前文件前 8 KiB 含 NUL
+ * 就走 `recordBinaryVersion`（逐字节），否则走 `recordVersion`。只在目标类型上判
+ * 会在「文件从文本变成 docx」时把当前内容按 UTF-8 解成乱码再当文本存 —— 那样的
+ * 版本退不回去，等于没有留。
  *
  * 审计走 `options.onAudit`（默认 no-op）——沿用 command-exec / background-jobs
  * 注入 `writeAuditRecord` 的既有模式，本模块因此不 import 会话桶、也不写日志文件。
@@ -379,9 +546,12 @@ function restoreVersion(key, id, options = {}) {
   if (target === undefined) {
     return restoreFail("no-such-version", `这一版（${id}）不在历史里。`);
   }
+  const targetBinary = target.binary === true;
   let targetContent;
+  let targetBytes;
   try {
-    targetContent = readFileSync(contentPathOf(fileDir, id), "utf8");
+    if (targetBinary) targetBytes = readFileSync(contentPathOf(fileDir, id, true));
+    else targetContent = readFileSync(contentPathOf(fileDir, id, false), "utf8");
   } catch {
     return restoreFail("missing", "这一版的内容文件已经不在磁盘上了，无法还原。可以挑更早或更晚的一版试试。");
   }
@@ -397,26 +567,40 @@ function restoreVersion(key, id, options = {}) {
     return restoreFail("running", "这条文件所属的会话正在运行，等它跑完再还原，避免与正在进行的写入打架。");
   }
 
-  let currentContent;
+  let currentBytes;
   try {
-    currentContent = readFileSync(meta.path, "utf8");
+    currentBytes = readFileSync(meta.path);
   } catch {
-    currentContent = undefined; // 文件已被删除：还原会重新创建它（design.md §5）。
+    currentBytes = undefined; // 文件已被删除：还原会重新创建它（design.md §5）。
   }
 
-  const identical = typeof currentContent === "string" && currentContent === targetContent;
+  const identical = currentBytes !== undefined && (
+    targetBinary ? currentBytes.equals(targetBytes) : currentBytes.toString("utf8") === targetContent
+  );
 
   if (!identical) {
     // 先留后改：当前内容先存成一条新版本，再写回目标版本。
-    if (typeof currentContent === "string") {
-      recordVersion(
-        { path: meta.path, content: currentContent, at: Date.now(), sessionId: recentSessionId, tool: "restore" },
-        { dir },
-      );
+    if (currentBytes !== undefined) {
+      const at = Date.now();
+      if (targetBinary || bufferLooksBinary(currentBytes)) {
+        recordBinaryVersion(
+          { path: meta.path, bytes: currentBytes, at, sessionId: recentSessionId, tool: "restore" },
+          { dir },
+        );
+      } else {
+        recordVersion(
+          { path: meta.path, content: currentBytes.toString("utf8"), at, sessionId: recentSessionId, tool: "restore" },
+          { dir },
+        );
+      }
     }
     try {
-      mkdirSync(dirname(meta.path), { recursive: true });
-      writeFileSync(meta.path, targetContent, "utf8");
+      if (targetBinary) {
+        writeBytesAtomically(meta.path, targetBytes);
+      } else {
+        mkdirSync(dirname(meta.path), { recursive: true });
+        writeFileSync(meta.path, targetContent, "utf8");
+      }
     } catch (error) {
       return restoreFail("write-failed", `写入失败：${error instanceof Error ? error.message : String(error)}`);
     }
@@ -426,7 +610,7 @@ function restoreVersion(key, id, options = {}) {
     const name = basename(meta.path);
     const when = formatAuditTime(target.at);
     const detail =
-      typeof currentContent === "string"
+      currentBytes !== undefined
         ? `用户把 ${name} 还原到 ${when}：当前内容已先存为一条新版本`
         : `用户把 ${name} 还原到 ${when}：文件此前已不在，已按该版本重新创建`;
     options.onAudit({ category: "file", outcome: "restored", detail: clipAuditDetail(detail) });
@@ -444,14 +628,17 @@ function restoreVersion(key, id, options = {}) {
 export {
   VERSION_BINARY_SNIFF,
   VERSION_LIST_MAX_FILES,
+  VERSION_MAX_BINARY_BYTES,
   VERSION_MAX_BYTES,
   VERSION_MAX_PER_FILE,
   // 变更审阅台读「当前磁盘文件」时复用同一个二进制判据（前 8 KiB 含 NUL），
   // 不能各写一套 —— 两处判据一旦分叉，同一个文件会在两个页面里有两种说法。
   looksBinary,
   listVersionFiles,
+  readVersionBytes,
   readVersionContent,
   readVersionFile,
+  recordBinaryVersion,
   recordVersion,
   restoreVersion,
   shouldRecordVersion,
