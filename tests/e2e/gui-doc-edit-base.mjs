@@ -836,12 +836,24 @@ await h.check("docx 建议：原文已变化 → 接受禁用、拒绝整条不�
 	assert.equal(accept.disabled, true, "过期时 docx 接受按钮必须禁用");
 	await h.shoot("docx-workbench-stale");
 
+	/*
+	 * 不假设「队列里只有这一条」：上一条 docx 接受用例在运行时未就绪时会 SKIP，
+	 * 它种下的建议仍在队列里。这里按「拒绝前后数量减一」断言，两种环境都成立。
+	 */
+	const beforeReject = (await win.evaluate(() => globalThis.kami.listDocEdits())).length;
 	await clickInDocCard("拒绝整条");
 	await waitDocView((state) => state.confirm !== "", "docx 拒绝的二次确认条出现");
 	await clickInDocCard("确认拒绝");
-	await waitDocView((state) => state.tabs[0]?.text === "待修订 0", "拒绝后待修订归零");
+	await waitDocView(
+		(state) => state.tabs[0]?.text === `待修订 ${beforeReject - 1}`,
+		"拒绝后待修订数量减一"
+	);
 	assert.deepEqual(readFileSync(seeded.absPath), changedBytes, "拒绝整条不该改动文件字节");
-	assert.equal((await win.evaluate(() => globalThis.kami.listDocEdits())).length, 0, "拒绝后建议应被删除");
+	assert.equal(
+		(await win.evaluate(() => globalThis.kami.listDocEdits())).length,
+		beforeReject - 1,
+		"拒绝后建议应被删除"
+	);
 });
 
 await mock.close();
