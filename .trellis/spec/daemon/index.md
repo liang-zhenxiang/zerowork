@@ -249,6 +249,18 @@ pi 的 `tool_call` `block` 在 live `tool_execution_end` 的 `result` 里**拿�
 fresh，且**不记空版本**（否则「创建新文件」永远无法接受）；只应用**选中的 hunk**，
 未选中的增删行回到原侧，拒绝整条建议时**不读写目标文件**。
 
+## 十二、docx 写回的两块地基：单 run 修补与二进制版本（2026-11-24，#479/#480）
+
+docx 不能当文本改。ADR-0001 决定了 v1 只做「一个 `w:t` 内的文字替换」，前置条件由
+引擎强制：唯一命中、不跨 run、不改结构；zip 条目顺序/时间戳/压缩方式/权限位原样保留，
+写后自检（其余条目 sha256 一致）通过后才 `os.replace`。引擎是
+`resources/docx-engine/patch_docx.py`（标准库，系统 python3 即可），Node 封装在
+`docx-patch.js` —— `resources/**` 不参与本项目 lint/格式化/测试。
+
+版本存储也必须能存二进制：`recordVersion` 只收字符串，前 8 KiB 含 NUL 会跳过；
+docx 写回前要用 `recordBinaryVersion`（20 MiB 上限、`.bin`、meta `binary:true`），
+否则「版本先行」不成立、写回不可回退。旧 meta 没有 `binary` 字段一律按文本读。
+
 ## 相关
 
 - `docs/ARCHITECTURE.md` —— 进程模型、模块划分、**设计决策与已否决方案**
