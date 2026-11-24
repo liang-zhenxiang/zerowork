@@ -32450,6 +32450,7 @@ import {
 	DOC_EDIT_EMPTY_DESC,
 	DOC_EDIT_EMPTY_TITLE,
 	DOC_EDIT_STALE_TEXT,
+	acceptDocxSuccessText,
 	acceptSuccessText,
 	defaultSelectedHunks,
 	formatHunkStats,
@@ -32457,6 +32458,7 @@ import {
 	groupProposalsByPath,
 	hunkApplyLabel,
 	hunkRangeText,
+	isDocxProposal,
 	mergeSelectAll,
 	proposalDirLabel,
 	proposalModeLabel,
@@ -76404,12 +76406,16 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
   }, [confirmingReject]);
   const hunks = Array.isArray(detail?.hunks) ? detail.hunks : [];
   const allIds = reactExports.useMemo(() => defaultSelectedHunks(detail), [detail]);
+  /* docx（#481 的 kind:"docx"）只有一处文字替换：没有 hunk，也没有勾选可言。 */
+  const isDocx = isDocxProposal(detail);
   const stale = detail?.stale === true || forceStale;
   /* 过期判据只保留一处：把 forceStale 折进对象再交给 summarizeSelection，
      视图不再「summary.canAccept && !stale」地重复判一次 —— 两处判据会让
      反向验证打偏（去掉任一处行为都不变，也就看不出断言是不是真的）。 */
   const summary = summarizeSelection(stale && detail !== void 0 ? { ...detail, stale: true } : detail, selected);
-  const canAccept = summary.canAccept;
+  /* docx 的接受条件是「没过期」（没有段可勾）；文本建议仍由 summarizeSelection 判
+     「至少选了一段且未过期」。两套判据各自只有这一个出口。 */
+  const canAccept = isDocx ? !stale : summary.canAccept;
   const name = typeof proposalHint?.name === "string" && proposalHint.name !== ""
     ? proposalHint.name
     : proposalNameOf(detail?.path);
@@ -76432,17 +76438,23 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
     setApplyError(void 0);
     void (async () => {
       try {
-        const res = await window.kami.applyDocEdit(detail.id, selected);
-        const applied = Array.isArray(res?.appliedHunks) ? res.appliedHunks.length : summary.count;
-        const total = typeof res?.totalHunks === "number" ? res.totalHunks : hunks.length;
-        const text = acceptSuccessText(
-          name,
-          applied,
-          total,
-          typeof res?.added === "number" ? res.added : summary.added,
-          typeof res?.removed === "number" ? res.removed : summary.removed
-        );
-        onToast(text, "ok");
+        if (isDocx) {
+          /* docx 的 hunkIds 没有意义：daemon 只按建议里的 find/replace 做一处替换。 */
+          await window.kami.applyDocEdit(detail.id, []);
+          onToast(acceptDocxSuccessText(name), "ok");
+        } else {
+          const res = await window.kami.applyDocEdit(detail.id, selected);
+          const applied = Array.isArray(res?.appliedHunks) ? res.appliedHunks.length : summary.count;
+          const total = typeof res?.totalHunks === "number" ? res.totalHunks : hunks.length;
+          const text = acceptSuccessText(
+            name,
+            applied,
+            total,
+            typeof res?.added === "number" ? res.added : summary.added,
+            typeof res?.removed === "number" ? res.removed : summary.removed
+          );
+          onToast(text, "ok");
+        }
         onResolved();
       } catch (e) {
         /* 哈希守卫的文案原样展示（daemon 已经写成一句可诊断的话）。 */
@@ -76485,11 +76497,38 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
   if (detail === void 0) {
     return /* @__PURE__ */ jsxRuntimeExports.jsx("section", { className: "fh-card", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoadingState, { text: "正在读取修订建议…" }) });
   }
-  const totalStats = proposalHint === void 0 ? formatProposalStats(summarizeSelection(detail, allIds)) : formatProposalStats(proposalHint);
+  const totalStats = isDocx
+    ? formatProposalStats(detail)
+    : proposalHint === void 0
+      ? formatProposalStats(summarizeSelection(detail, allIds))
+      : formatProposalStats(proposalHint);
+  /*
+   * docx 建议没有逐段 hunk：主体是「替换前 / 替换后」两块只读对照。
+   * 底色与符号复用 .rv-hunk-line 的 diff-add / diff-del（不新增颜色档），
+   * 段头复用 .rv-hunk-head 的排版但去掉了可点光标 —— 它只是一个标签。
+   */
+  const docxBlock = (label, key, sign, text, tone) =>
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+      className: "rv-hunk",
+      "data-docx-block": key,
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-hunk-head rv-hunk-head-static", children: /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: label }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rv-hunk-lines", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", {
+          className: `rv-hunk-line ${tone}`,
+          children: [
+            /* 前后不只靠底色：符号是第二通道，读屏另有「替换前 / 替换后」前缀。 */
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "sr-only", children: `${label}：` }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-hunk-sign", "aria-hidden": "true", children: sign }),
+            text === "" ? " " : text
+          ]
+        }) })
+      ]
+    });
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", {
     className: "fh-card",
     "data-doc-edit-card": true,
     "data-doc-edit-id": detail.id,
+    "data-docx": isDocx ? "true" : void 0,
     "data-stale": stale ? "true" : void 0,
     children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "fh-card-head", children: [
@@ -76509,7 +76548,20 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-boundary-text", children: DOC_EDIT_STALE_TEXT }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: recheck, children: "重新检查" })
       ] }),
-      hunks.length === 0
+      isDocx
+        ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+            /* 目标部件只作说明：v1 只处理正文，不给「选部件」这种并不存在的能力。 */
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "rv-docx-part", "data-docx-part": true, children: [
+              "目标部件：",
+              detail.part
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-hunks", role: "group", "aria-label": "替换前后的文字", children: [
+              docxBlock("替换前", "before", "−", detail.find, "diff-del"),
+              docxBlock("替换后", "after", "+", detail.replace, "diff-add")
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", "data-docx-note": true, children: "v1 只替换正文里这一处文字；不保留 Word 原生修订痕迹。接受前会先把当前文件存成版本。" })
+          ] })
+        : hunks.length === 0
         ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", role: "status", children: "这条建议里没有可应用的改动段。" })
         : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-hunk-tools", children: [
@@ -76557,9 +76609,9 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
           type: "button",
           className: "mini-btn",
           disabled: applying || !canAccept,
-          title: stale ? DOC_EDIT_STALE_TEXT : summary.count === 0 ? "至少选一段才能接受" : "只把这几个改动段写回目标文件",
+          title: stale ? DOC_EDIT_STALE_TEXT : isDocx ? "把这一处文字写回目标文件；接受前会先把当前文件存成版本" : summary.count === 0 ? "至少选一段才能接受" : "只把这几个改动段写回目标文件",
           onClick: apply,
-          children: applying ? "应用中…" : `接受选中（${summary.count} 段）`
+          children: applying ? (isDocx ? "替换中…" : "应用中…") : isDocx ? "接受替换（1 处）" : `接受选中（${summary.count} 段）`
         }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", {
           type: "button",
@@ -76601,7 +76653,7 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "fh-confirm-text", children: rejectError }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: rejecting, onClick: reject, children: "重试" })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note fh-card-note-tail", children: "接受只写回勾选的段落；未勾选的段落按拒绝处理，不会保留。拒绝整条只丢弃建议、不改文件。写回前会先把当前内容存成一条版本，之后可以在文件历史里还原。" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note fh-card-note-tail", children: isDocx ? "接受会把这一处文字替换进目标文件，并在写回前先把当前文件存成一条版本，之后可以在文件历史里还原到替换前。拒绝整条只丢弃建议、不改文件。" : "接受只写回勾选的段落；未勾选的段落按拒绝处理，不会保留。拒绝整条只丢弃建议、不改文件。写回前会先把当前内容存成一条版本，之后可以在文件历史里还原。" })
     ]
   });
 }
@@ -77029,7 +77081,7 @@ function ReviewView({ onClose, sessions, onResumeSession, onToast, onPendingChan
   const activeProposal = flatProposals.find((entry) => entry.id === activeProposalId);
   const proposalRow = (entry) => {
     const time = typeof entry.createdAt === "number" && entry.createdAt > 0 ? formatRelativeTime(entry.createdAt, now) : "时间未知";
-    const stats = `${entry.hunkCount ?? 0} 段 · ${formatProposalStats(entry)}`;
+    const stats = isDocxProposal(entry) ? formatProposalStats(entry) : `${entry.hunkCount ?? 0} 段 · ${formatProposalStats(entry)}`;
     return /* @__PURE__ */ jsxRuntimeExports.jsxs("button", {
       type: "button",
       className: `rv-row${entry.id === activeProposalId ? " selected" : ""}`,

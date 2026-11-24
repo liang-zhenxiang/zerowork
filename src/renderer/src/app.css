@@ -14267,6 +14267,19 @@ button.agent-row {
 	accent-color: var(--accent);
 }
 
+/* docx 文本替换（#482）：没有勾选，段头只是「替换前 / 替换后」标签 ——
+   去掉 .rv-hunk-head 为 label 设的可点光标，避免暗示它可交互。 */
+.rv-hunk-head-static {
+	cursor: default;
+}
+
+/* docx 预览的部件说明：与段工具条同一档上边距与文字档位（「改的是哪个部件」）。 */
+.rv-docx-part {
+	margin: var(--space-3) 0 0;
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
 .rv-hunk-stats {
 	flex: 0 0 auto;
 	font-family: var(--font-mono);

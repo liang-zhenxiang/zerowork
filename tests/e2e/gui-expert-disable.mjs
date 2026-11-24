@@ -675,17 +675,52 @@ await h.check("⑦·补 设置 → 提示词预览不列出停用专家", async 
 	);
 });
 
-/* ── ⑧ 提示词：停用后不含人格与私有技能；恢复后重新包含 ────── */
-await h.check("⑧ 停用后下一轮系统提示词不含人格与私有技能", async () => {
+/**
+ * 发一条消息，并返回 mock 为**这一条**新收到的请求。
+ *
+ * 慢 runner 上的真实竞态（#491）：上一条发出后界面可能仍在流式，此时 Enter 的
+ * 语义是「并进当前轮 / 排队」—— 不会产生一次新的模型请求，mock 就永远等不到
+ * 第 2、3 条，⑧·补 / ⑨ 于是 40s 超时（本地快、CI 慢，只在这个窗口里暴露）。
+ * 所以先等界面回到「没有运行中的轮次」，再填、再发。判据用流式期间才存在的
+ * 停止按钮（`aria-label="停止"`），而不是输入框占位文案 —— 占位文案在首页是
+ * 轮播示例、在会话里是「继续追问…」，按文案判断会把「首页」误当成「忙碌」。
+ *
+ * 请求按**发送前的基线**取，不用绝对下标：任何多余请求都不该让断言取错条目。
+ * Enter 被吞（焦点被抢 / 重渲染）时草稿还留在框里 —— 补按一次，而不是干等 40s；
+ * 已经发出的那条会立即清空草稿，因此不会重复发送。
+ */
+async function sendAndExpectRequest(text, desc) {
 	const box = win.locator('[aria-label="消息输入框"]');
 	await box.waitFor({ state: "visible", timeout: 30_000 });
-	await box.fill(`${USER_TEXT}（停用中）`);
-	await box.press("Enter");
-	await waitUntil(() => mock.requests.length >= 1 ? true : null, {
-		timeout: 40_000,
-		desc: "mock 收到停用后的第 1 轮",
+	await waitUntil(
+		() =>
+			win.evaluate(() =>
+				document.querySelector('[aria-label="停止"]') === null ? true : null,
+			),
+		{ timeout: 40_000, desc: `${desc}：等上一轮归位` },
+	);
+	const before = mock.requests.length;
+	await box.fill(text);
+	await waitUntil(async () => ((await box.inputValue()) === text ? true : null), {
+		timeout: 10_000,
+		desc: `${desc}：草稿进入输入框`,
 	});
-	const system = systemTextOf(mock.requests[0]);
+	await box.press("Enter");
+	await waitUntil(
+		async () => {
+			if (mock.requests.length > before) return true;
+			if ((await box.inputValue()) === text) await box.press("Enter");
+			return null;
+		},
+		{ timeout: 40_000, desc: `${desc}：mock 收到新请求` },
+	);
+	return mock.requests[before];
+}
+
+/* ── ⑧ 提示词：停用后不含人格与私有技能；恢复后重新包含 ────── */
+await h.check("⑧ 停用后下一轮系统提示词不含人格与私有技能", async () => {
+	const request = await sendAndExpectRequest(`${USER_TEXT}（停用中）`, "mock 收到停用后的第 1 轮");
+	const system = systemTextOf(request);
 	assert.ok(!system.includes(PERSONA_MARKER), "停用后系统提示词仍含专家人格正文");
 	assert.ok(!system.includes(SKILL_MARKER), "停用后系统提示词仍含专家私有技能");
 	// 反向对照：人格缺席不是因为整段提示词没组装出来。
@@ -693,15 +728,10 @@ await h.check("⑧ 停用后下一轮系统提示词不含人格与私有技能"
 });
 
 await h.check("⑧·补 停用后手动 /skill: 也展不开它的私有技能", async () => {
-	const box = win.locator('[aria-label="消息输入框"]');
-	await box.waitFor({ state: "visible", timeout: 30_000 });
-	await box.fill(`/skill:${SKILL_NAME} 停用中手动调用`);
-	await box.press("Enter");
-	await waitUntil(() => mock.requests.length >= 2 ? true : null, {
-		timeout: 40_000,
-		desc: "mock 收到停用后的手动技能请求",
-	});
-	const request = mock.requests[1];
+	const request = await sendAndExpectRequest(
+		`/skill:${SKILL_NAME} 停用中手动调用`,
+		"mock 收到停用后的手动技能请求",
+	);
 	const userText = skillPromptTextOf(request);
 	// 技能没被展开：正文标记不出现，命令原样留给模型（与未知技能同一形态）。
 	assert.ok(!userText.includes(SKILL_BODY_MARKER), "停用后手动调用仍展开了私有技能正文");
@@ -725,15 +755,10 @@ await h.check("⑨ 恢复后下一轮系统提示词重新包含人格与私有�
 		}),
 		{ timeout: 10_000, desc: "状态里的 expertDisabled 撤下" },
 	);
-	const box = win.locator('[aria-label="消息输入框"]');
-	await box.waitFor({ state: "visible", timeout: 30_000 });
-	await box.fill(`/skill:${SKILL_NAME} 已恢复手动调用`);
-	await box.press("Enter");
-	await waitUntil(() => mock.requests.length >= 3 ? true : null, {
-		timeout: 40_000,
-		desc: "mock 收到恢复后的第 3 轮",
-	});
-	const request = mock.requests[2];
+	const request = await sendAndExpectRequest(
+		`/skill:${SKILL_NAME} 已恢复手动调用`,
+		"mock 收到恢复后的第 3 轮",
+	);
 	const system = systemTextOf(request);
 	assert.ok(system.includes(PERSONA_MARKER), "恢复后系统提示词里没有人格正文");
 	assert.ok(system.includes(SKILL_MARKER), "恢复后系统提示词里没有私有技能描述");

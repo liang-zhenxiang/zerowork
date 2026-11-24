@@ -6,11 +6,13 @@
  * 这些在界面上只表现为一个数字或一句话，GUI 断言说不清，所以放进纯函数直测。
  *
  * 数据契约（doc-edits.js 的 summarize / readProposal）：
- *   列表项 { id, path, name, sessionId, createdAt, hunkCount, added, removed, toolName }
+ *   列表项 { id, kind, path, name, sessionId, createdAt, hunkCount, added, removed,
+ *            toolName, part? }
  *   详情   { ...列表字段, baseSha256, before, after, ops,
  *            hunks:[{ id, opsStart, opsEnd, oldStart, newStart, added, removed,
  *                     lines:[{ type:" "|"-"|"+", text }] }],
  *            stale, currentSha256, missing }
+ *   docx 详情 { id, kind:"docx", path, baseSha256, part, find, replace, ... }
  *
  * 本模块不碰 DOM、不读磁盘，对坏数据宽容处理（缺 path / 缺 hunks 不抛）。
  */
@@ -175,8 +177,21 @@ export function hunkApplyLabel(hunk, index) {
 	return `应用第 ${index + 1} 段：+${hunkLineCount(hunk, "+")} / -${hunkLineCount(hunk, "-")} 行`;
 }
 
+/**
+ * 这条建议是不是 docx 文本替换（#481 生成的 `kind:"docx"`）。
+ *
+ * 视图据此走两套完全不同的主体：docx 只有**一处**替换（`find` → `replace`），
+ * 没有逐段 hunk，也没有可勾选的东西 —— 不能把逐段 UI 套上去（那会承诺一个
+ * 不存在的「只应用其中一段」的能力）。
+ */
+export function isDocxProposal(proposal) {
+	return proposal?.kind === "docx";
+}
+
 /** 列表项的 `+N −M`；没有记录时如实说，不摆一个不存在的 +0 −0。 */
 export function formatProposalStats(entry) {
+	// docx 建议固定一处替换：报「1 处替换」而不是伪造的 +1 −1 行。
+	if (isDocxProposal(entry)) return "1 处替换";
 	const added = finiteNumber(entry?.added);
 	const removed = finiteNumber(entry?.removed);
 	if (added === undefined || removed === undefined) return "行数未记录";
@@ -228,6 +243,18 @@ export function acceptSuccessText(name, applied, total, added, removed) {
 	// 部分接受会丢弃未勾选的段落（写回后整条建议删除）：结果必须把这件事说出来。
 	const discarded = totalCount - appliedCount;
 	return discarded > 0 ? `${base}；其余 ${discarded} 段已丢弃` : base;
+}
+
+/**
+ * docx 建议接受成功后的 toast / 播报：v1 只有一处替换，说件数与位置就够。
+ *
+ * 与 `acceptSuccessText` 分开而不是复用：那条文案围绕「段 / 行 / 未勾选丢弃」，
+ * 而 docx 没有段也不存在丢弃 —— 硬套会说出「1 / 1 段（+1 −1 行）」这种
+ * 在文档里并不存在的东西。
+ */
+export function acceptDocxSuccessText(name) {
+	const file = typeof name === "string" && name !== "" ? name : "这份文档";
+	return `已替换「${file}」正文中的 1 处文字`;
 }
 
 /** 拒绝成功后的 toast / 播报：必须说清「文件没有被改动」。 */

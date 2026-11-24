@@ -14,12 +14,14 @@ import {
 	DOC_EDIT_DONE_TITLE,
 	DOC_EDIT_EMPTY_DESC,
 	DOC_EDIT_STALE_TEXT,
+	acceptDocxSuccessText,
 	acceptSuccessText,
 	formatHunkStats,
 	formatProposalStats,
 	groupProposalsByPath,
 	hunkApplyLabel,
 	hunkRangeText,
+	isDocxProposal,
 	mergeSelectAll,
 	proposalDirOf,
 	proposalModeLabel,
@@ -149,6 +151,17 @@ describe("段的显示文案", () => {
 		expect(formatProposalStats({})).toBe("行数未记录");
 	});
 
+	it("docx 建议没有「段」：列表统计报「1 处替换」", () => {
+		expect(isDocxProposal({ kind: "docx" })).toBe(true);
+		expect(isDocxProposal({ kind: "text" })).toBe(false);
+		expect(isDocxProposal(undefined)).toBe(false);
+		// 列表项即使带着 summarize 给的 hunkCount / added / removed，也不该显示成 +1 −1。
+		expect(formatProposalStats({ kind: "docx", hunkCount: 1, added: 1, removed: 1 })).toBe("1 处替换");
+		// 文本建议不受影响（kind 缺省是 #481 之前的记录，按文本处理）。
+		expect(formatProposalStats({ kind: "text", added: 3, removed: 1 })).toBe("+3 −1");
+		expect(formatProposalStats({ added: 0, removed: 0 })).toBe("+0 −0");
+	});
+
 	it("路径的末段与父目录跨平台都对", () => {
 		expect(proposalNameOf("/ws/a/周报.md")).toBe("周报.md");
 		expect(proposalNameOf("C:\\ws\\周报.md")).toBe("周报.md");
@@ -193,5 +206,11 @@ describe("文案（同一件事同一句话）", () => {
 		expect(rejectSuccessText("周报.md")).toContain("目标文件没有被改动");
 		expect(rejectConfirmText("周报.md")).toContain("拒绝");
 		expect(rejectConfirmText("周报.md")).toContain("周报.md");
+	});
+
+	it("docx 接受结果只报「1 处文字」，不套段 / 行口径", () => {
+		expect(acceptDocxSuccessText("季度报告.docx")).toBe("已替换「季度报告.docx」正文中的 1 处文字");
+		expect(acceptDocxSuccessText("")).toBe("已替换「这份文档」正文中的 1 处文字");
+		expect(acceptDocxSuccessText("季度报告.docx")).not.toContain("段");
 	});
 });
