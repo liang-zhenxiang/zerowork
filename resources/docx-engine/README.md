@@ -16,10 +16,15 @@
 resources/docx-engine/
   html_to_docx/        # 正向引擎包（顶层 23 个 .py + components/ 子包 6 个 .py）
   docx_to_html/        # 反向包（docx → HTML + 图片，见下文「反向模块」）
+  patch_docx.py        # 修订写回：包内 run 级文本替换（只用标准库，见下文）
   requirements.txt     # 运行依赖（含 pytest）
   pyproject.toml       # 包元数据（安装入口 html-to-docx = __main__:cli）
   examples/            # 本地验证样例（report-sample.html）
 ```
+
+> **本目录不参与项目工具链**：`resources/**` 是随安装包分发的内容资源，
+> eslint / prettier / vitest 三处都整目录排除（见仓库 `AGENTS.md` 红线 5）。
+> 本目录的编码风格与测试由它自己负责，不要拿本工程的规则去要求它。
 
 ## 调用契约
 
@@ -35,6 +40,34 @@ python -m html_to_docx convert input.html -o out.docx \
 - 输入 HTML 按 UTF-8 读取；相对路径图片以输入文件所在目录为 base_dir 解析。
 - 引擎**不经 pip install 使用**：把本目录加进 `PYTHONPATH`（或作为 cwd）后用
   venv 的 Python 直接 `python -m html_to_docx ...`。
+
+## 修订写回：`patch_docx.py`（只用标准库）
+
+把 `.docx` 里**某个 `w:t` 内的一段文字**替换成新文字，其余 zip 条目逐字节保留。
+这是 ADR-0001 决定的 v1 写回路径（`docs/adr/ADR-0001-docx-revision.md`）：
+
+```bash
+python3 patch_docx.py --in a.docx --out b.docx \
+  [--part word/document.xml] --find "本季度营收" --replace "本季度营业收入"
+```
+
+- **exit 0**：stdout 一行 JSON
+  `{"ok":true,"part","entries","changed","bytes_before","bytes_after","other_entries_unchanged":true}`
+- **exit 1**：stderr 一行 JSON `{"ok":false,"code","error"}`，且**不创建、不覆盖输出文件**；
+  错误码：`bad-input` / `not-docx` / `missing-part` / `not-found` / `multiple-matches` /
+  `cross-run` / `bad-xml` / `io-error` / `self-check-failed`。
+
+约束（与 ADR 的 v1 边界一致）：
+
+- 原文必须**完整落在同一个 `w:t` 内**，且在该部件里**唯一命中**；跨 run、找不到、
+  多处命中一律拒绝，不做模糊匹配、不改 run 边界；
+- 只改目标 `w:t` 的文本字节，标签、属性（含 `xml:space`）与 run 边界都不动；
+- zip 条目顺序、时间戳、压缩方式、权限位全部沿用原条目，其余条目**不经过解析**；
+- 先写同目录临时文件 → 在临时文件上做写后自检（重开、XML 合法、目标文本已替换、
+  其余条目 sha256 逐字节一致）→ 最后 `os.replace` 原子替换；自检失败只删临时文件。
+
+**不需要托管 venv**：本脚本只依赖 Python 标准库，系统 `python3` 即可运行
+（正向 / 反向引擎仍需托管 venv）。Node 端封装在 `src/main/daemon/docx-patch.js`。
 
 ## 反向模块 `docx_to_html`（docx → HTML + 图片）
 
