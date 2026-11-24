@@ -21473,3 +21473,42 @@ html[data-sidebar-density='compact'] .space-group-header {
 	color: var(--text-faint);
 	font-size: 11px;
 }
+
+/* ── §59 第三十一轮十连（#493 Composer 输入体验） ────────────────── */
+/* F3 草稿自动保存微提示 */
+.draft-saved-hint {
+	color: var(--text-faint);
+	font-size: 11px;
+}
+/* F8 长文本发送确认面板（composer 上方浮层） */
+.long-text-confirm {
+	position: absolute;
+	left: var(--space-4);
+	right: var(--space-4);
+	bottom: calc(100% + var(--space-2));
+	background: var(--bg-elevated);
+	border: 1px solid var(--warning);
+	border-radius: var(--radius-md);
+	padding: var(--space-3) var(--space-4);
+	z-index: 31;
+	box-shadow: var(--shadow-md);
+}
+.long-text-confirm p {
+	margin: 0 0 var(--space-2);
+	font-size: var(--text-sm);
+	color: var(--text);
+}
+.long-text-confirm-actions {
+	display: flex;
+	gap: var(--space-2);
+	justify-content: flex-end;
+}
+.mini-btn.is-primary {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-contrast);
+}
+/* F5 斜杠菜单选中高亮 */
+.slash-menu-item.is-active {
+	background: var(--accent-soft, var(--bg));
+}
