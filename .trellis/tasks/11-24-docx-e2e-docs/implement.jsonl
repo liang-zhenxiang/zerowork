@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/testing/index.md", "reason": "e2e 断言与等待纪律、截图卫生"}
+{"file": ".trellis/spec/daemon/index.md", "reason": "docx 工具与引擎契约、版本存储"}
