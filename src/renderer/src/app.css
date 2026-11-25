@@ -21512,3 +21512,39 @@ html[data-sidebar-density='compact'] .space-group-header {
 .slash-menu-item.is-active {
 	background: var(--accent-soft, var(--bg));
 }
+
+/* ── §60 第三十二轮十连（#496 设置页信息架构） ────────────────────── */
+/* F1 设置搜索框 */
+.settings-search {
+	margin: 0 var(--space-3) var(--space-2);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text);
+	padding: 4px 10px;
+	font: inherit;
+	font-size: var(--text-sm);
+}
+.settings-search:focus {
+	border-color: var(--accent);
+	outline: none;
+}
+.settings-search-empty {
+	color: var(--text-faint);
+	font-size: 12px;
+	padding: var(--space-2) var(--space-3);
+}
+/* F7 最近访问分组 */
+.settings-recent {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding-bottom: var(--space-2);
+	margin-bottom: var(--space-2);
+	border-bottom: 1px solid var(--border);
+}
+.settings-recent-label {
+	color: var(--text-faint);
+	font-size: 11px;
+	padding: 0 var(--space-3);
+}

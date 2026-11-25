@@ -71716,15 +71716,15 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
   ] });
 }
 const NAV_ITEMS = [
-  { id: "general", label: "通用" },
-  { id: "personalization", label: "个性化" },
-  { id: "memory", label: "记忆与进化" },
-  { id: "models", label: "模型" },
-  { id: "runtimes", label: "内置运行时" },
-  { id: "data", label: "数据管理" },
-  { id: "audit", label: "审计中心" },
-  { id: "prompt", label: "提示词预览" },
-  { id: "about", label: "关于" }
+  { id: "general", label: "通用", desc: "外观、主题、桌面行为、权限与 hooks" },
+  { id: "personalization", label: "个性化", desc: "场景、专家、语气与快捷短语" },
+  { id: "memory", label: "记忆与进化", desc: "长期记忆与自动进化的开关" },
+  { id: "models", label: "模型", desc: "服务商、模型与密钥配置" },
+  { id: "runtimes", label: "内置运行时", desc: "Python / Node 运行时管理" },
+  { id: "data", label: "数据管理", desc: "会话备份、导入导出与体检" },
+  { id: "audit", label: "审计中心", desc: "工具调用与文件改动的审计日志" },
+  { id: "prompt", label: "提示词预览", desc: "查看发给模型的最终提示词" },
+  { id: "about", label: "关于", desc: "版本、更新与隐私说明" }
 ];
 function isSettingsPage(value) {
   return typeof value === "string" && NAV_ITEMS.some((item) => item.id === value);
@@ -71751,6 +71751,21 @@ function SettingsProgressBar() {
 }
 function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
   const [page2, setPage] = reactExports.useState(initialPage ?? "general");
+  /* #496 第三十二轮 F1/F7：设置搜索 + 最近访问分组。 */
+  const [settingsQuery, setSettingsQuery] = reactExports.useState("");
+  const [recentPages, setRecentPages] = reactExports.useState(() => {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem("zw:settings-recent") ?? "[]");
+      return Array.isArray(parsed) ? parsed.slice(0, 3) : [];
+    } catch {
+      return [];
+    }
+  });
+  const navFiltered = reactExports.useMemo(() => {
+    const q = settingsQuery.trim().toLowerCase();
+    if (q === "") return NAV_ITEMS;
+    return NAV_ITEMS.filter((item) => item.label.toLowerCase().includes(q) || (item.desc ?? "").toLowerCase().includes(q));
+  }, [settingsQuery]);
   const [snapshot, setSnapshot] = reactExports.useState(void 0);
   const [error, setError] = reactExports.useState(void 0);
   const [busy, setBusy] = reactExports.useState(false);
@@ -71808,17 +71823,49 @@ function SettingsView({ onClose, onOpenDiagnostics, initialPage }) {
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-card", role: "dialog", "aria-modal": "true", "aria-label": "设置", ref: cardRef, children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(SettingsProgressBar, {}),
           /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "bar-btn settings-card-close", "aria-label": "关闭设置", onClick: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsx(IconClose, { size: 16 }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "settings-nav", "aria-label": "设置分组", children: NAV_ITEMS.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "button",
-            {
-              type: "button",
-              className: `settings-nav-item${page2 === item.id ? " active" : ""}`,
-              "aria-current": page2 === item.id ? "page" : void 0,
-              onClick: () => setPage(item.id),
-              children: item.label
-            },
-            item.id
-          )) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("nav", { className: "settings-nav", "aria-label": "设置分组", children: [
+            /* #496 第三十二轮 F1：设置搜索（输入即过滤 nav 项）。 */
+            jsxRuntimeExports.jsx("input", {
+              type: "search",
+              className: "settings-search",
+              placeholder: "搜索设置…",
+              "aria-label": "搜索设置",
+              value: settingsQuery,
+              onChange: (e) => setSettingsQuery(e.target.value)
+            }),
+            /* #496 第三十二轮 F7：最近访问的分组置顶。 */
+            recentPages.length > 0 && settingsQuery === "" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-recent", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "settings-recent-label", children: "最近访问" }),
+              recentPages.map((id) => {
+                const item = NAV_ITEMS.find((n) => n.id === id);
+                return item === void 0 ? null : /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: `settings-nav-item${page2 === item.id ? " active" : ""}`, onClick: () => setPage(item.id), children: item.label }, `recent-${item.id}`);
+              })
+            ] }),
+            navFiltered.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                className: `settings-nav-item${page2 === item.id ? " active" : ""}`,
+                "aria-current": page2 === item.id ? "page" : void 0,
+                title: item.desc,
+                onClick: () => {
+                  setPage(item.id);
+                  /* F7：记录最近访问（去重、最多 3 个）。 */
+                  setRecentPages((current) => {
+                    const next = [item.id, ...current.filter((id) => id !== item.id)].slice(0, 3);
+                    try {
+                      window.localStorage.setItem("zw:settings-recent", JSON.stringify(next));
+                    } catch {
+                    }
+                    return next;
+                  });
+                },
+                children: item.label
+              },
+              item.id
+            )),
+            navFiltered.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "settings-search-empty", children: "没有匹配的设置分组" })
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "settings-panel", children: [
             !modelsAwaitingSnapshot && error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
             page2 === "general" && /* @__PURE__ */ jsxRuntimeExports.jsx(GeneralSection, { busy }),
@@ -81028,6 +81075,15 @@ function App() {
       keywords: [task.prompt ?? ""],
       run: () => openAutomations()
     }));
+    /* #496 第三十二轮 F6：设置分组直达（⌘K 搜分组名直接打开对应页）。 */
+    const settingsPageEntries = NAV_ITEMS.map((item) => ({
+      id: `settings:${item.id}`,
+      kind: "settings",
+      title: `设置：${item.label}`,
+      subtitle: "打开设置分组",
+      keywords: [item.desc ?? "", "设置", item.label],
+      run: () => openSettings(item.id)
+    }));
     /* #363 第二十轮 F1+F7：片段库条目。兑现「⌘K 搜『片段』可取用」的承诺
        （#316 存片段时 toast 是这么说的，但面板条目一直没实装）。
        条目形状兼容旧字符串与新 {text,tag}；run 在会话页插入草稿，首页复制。 */
@@ -81071,7 +81127,7 @@ function App() {
       keywords: [],
       run: () => openSearchHit({ sessionId: session.sessionId, entryId: hit.entryId, path: session.path, query })
     }));
-    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...snippetEntries, ...hitEntries];
+    return [...actions, ...sessions, ...spaces, ...expertEntries, ...skillEntries, ...connectorEntries, ...automationEntries, ...settingsPageEntries, ...snippetEntries, ...hitEntries];
     // 依赖数组**只能靠人维护**：本文件不在 eslint 的覆盖内（eslint.config.mjs 的
     // ignores 列了 "src/renderer/src/**"），react-hooks/exhaustive-deps 根本不加载，
     // 所以这里既不会有警告、也不会有人提醒你补依赖。漏加依赖的后果不是报错，
