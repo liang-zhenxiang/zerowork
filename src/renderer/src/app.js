@@ -71363,15 +71363,15 @@ function AuditSection() {
       }),
       /* #503 第三十三轮 F3：时间范围 chips。 */
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "audit-time-chips", role: "group", "aria-label": "时间范围筛选", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "all" ? "mini-btn active" : "mini-btn", onClick: () => {
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "all" ? "audit-chip is-active" : "audit-chip", onClick: () => {
           setTimeRange("all");
           setVisibleCount(200);
         }, children: "全部时间" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "today" ? "mini-btn active" : "mini-btn", onClick: () => {
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "today" ? "audit-chip is-active" : "audit-chip", onClick: () => {
           setTimeRange("today");
           setVisibleCount(200);
         }, children: "今天" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "7d" ? "mini-btn active" : "mini-btn", onClick: () => {
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "7d" ? "audit-chip is-active" : "audit-chip", onClick: () => {
           setTimeRange("7d");
           setVisibleCount(200);
         }, children: "7 天内" })

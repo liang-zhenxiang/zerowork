@@ -21566,3 +21566,20 @@ html[data-sidebar-density='compact'] .space-group-header {
 	display: flex;
 	gap: var(--space-1);
 }
+/* chips 用独立类（不用 mini-btn——gui-ui-audit 断言 .settings-panel 内
+   .mini-btn.active 唯一，审计筛选的 active 会撞它） */
+.audit-chip {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg);
+	color: var(--text-secondary);
+	padding: 2px 10px;
+	font: inherit;
+	font-size: var(--text-sm);
+	cursor: pointer;
+}
+.audit-chip.is-active {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--accent-contrast);
+}
