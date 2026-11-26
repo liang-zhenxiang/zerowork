@@ -293,6 +293,7 @@ describe("修订模式关闭 —— 直接写回", () => {
 			path: absPath,
 			part: DOCX_PART_DEFAULT,
 			replaced: 1,
+			mergedRuns: false,
 			bytesBefore: 200,
 			bytesAfter: 240,
 		});

@@ -145,22 +145,80 @@ def _element_texts(root: ET.Element) -> list[str]:
     return [element.text or "" for element in root.iter(f"{{{WORD_NS}}}t")]
 
 
-def _paragraph_texts(root: ET.Element) -> list[str]:
-    """按「最近的 w:p 祖先」把 w:t 文本归组，供跨 run 判定使用。"""
+def _paragraph_groups(
+    root: ET.Element,
+) -> list[tuple[object, list[ET.Element]]]:
+    """按「最近的 w:p 祖先」把 w:t 归组，保持文档顺序。
+
+    组键是段落元素；**不在任何段落内的 w:t 各自成组**（键就是该元素本身）：
+    它们仍可被单独替换，但不能和别的 w:t 拼接 —— 拼接的前提是同一段落里
+    视觉上连续的文字。
+    """
     parent = {child: node for node in root.iter() for child in node}
-    grouped: dict[ET.Element, list[str]] = {}
-    order: list[ET.Element] = []
+    grouped: dict[object, list[ET.Element]] = {}
+    order: list[object] = []
     for element in root.iter(f"{{{WORD_NS}}}t"):
         node: ET.Element | None = element
         while node is not None and node.tag != f"{{{WORD_NS}}}p":
             node = parent.get(node)
-        if node is None:
+        key: object = node if node is not None else element
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append(element)
+    return [(key, grouped[key]) for key in order]
+
+
+def _paragraph_texts(root: ET.Element) -> list[str]:
+    """按段落拼出的纯文本（跨 run 拼接；制表符 / 换行不计入）。"""
+    return [
+        "".join(element.text or "" for element in elements)
+        for _, elements in _paragraph_groups(root)
+    ]
+
+
+def _run_of(
+    element: ET.Element, parent: dict[ET.Element, ET.Element]
+) -> ET.Element | None:
+    node = parent.get(element)
+    while node is not None and node.tag != f"{{{WORD_NS}}}r":
+        node = parent.get(node)
+    return node
+
+
+def _run_format(run: ET.Element) -> str | None:
+    """run 的格式签名：没有 rPr 时为 None。
+
+    用序列化结果比较，**属性顺序不同的等价格式会被保守判为不同** ——
+    宁可拒绝，也不猜「这两个 run 看起来一样」。
+    """
+    rpr = run.find(f"{{{WORD_NS}}}rPr")
+    return None if rpr is None else ET.tostring(rpr, encoding="unicode")
+
+
+def _has_break_between(parent_element: ET.Element, first: ET.Element, last: ET.Element) -> bool:
+    """first 与 last 之间是否夹着制表符 / 换行 / 软回车。
+
+    段落拼接只看 w:t，但 tab 与换行在视觉上把文字断开；跨这样的边界合并，
+    等于把用户没连在一起的文字当成一句话。
+    """
+    seen = False
+    for node in parent_element.iter():
+        if node is first:
+            seen = True
             continue
-        if node not in grouped:
-            grouped[node] = []
-            order.append(node)
-        grouped[node].append(element.text or "")
-    return ["".join(grouped[node]) for node in order]
+        if not seen:
+            continue
+        if node is last:
+            return False
+        if node.tag in (
+            f"{{{WORD_NS}}}tab",
+            f"{{{WORD_NS}}}br",
+            f"{{{WORD_NS}}}cr",
+        ):
+            return True
+    return False
+
 
 
 def _parse_xml(xml_bytes: bytes, part: str) -> ET.Element:
@@ -172,11 +230,16 @@ def _parse_xml(xml_bytes: bytes, part: str) -> ET.Element:
 
 def patch_part(
     part_bytes: bytes, find: str, replace: str, part: str
-) -> tuple[bytes, dict[str, int], list[str]]:
+) -> tuple[bytes, dict[str, int], list[str], bool]:
     """在目标部件内定位并替换唯一命中的一段文字。
 
-    返回 `(改后的字节, 统计, 替换后的完整 w:t 文本清单)` —— 第三项供写后自检使用，
-    避免调用方再按同样的规则推一遍预期值。
+    定位分两层：先在**段落拼接串**里找（同一段落内相邻 w:t 的文字视作连续），
+    命中落在单个 w:t 内时走最小改动路径；跨多个 w:t 时要求它们格式一致
+    （同 rPr）且中间没有制表符 / 换行，然后把新文字写进第一个 w:t、清空其余，
+    run 与节点都不移动。
+
+    返回 `(改后的字节, 统计, 替换后的完整 w:t 文本清单, 是否跨 run 合并)`
+    —— 第三项供写后自检使用，避免调用方再按同样的规则推一遍预期值。
     """
     if find == "":
         raise PatchError("bad-input", "要查找的原文不能为空")
@@ -218,16 +281,24 @@ def patch_part(
                 "（可能嵌入了子元素、注释或 CDATA）",
             )
 
-    hits = [(index, text) for index, text in enumerate(element_texts) if find in text]
-    total = sum(text.count(find) for _, text in hits)
+    text_index = {
+        id(element): index for index, element in enumerate(root.iter(f"{{{WORD_NS}}}t"))
+    }
+    parents = {child: node for node in root.iter() for child in node}
+
+    # 段落级定位：同一段落内相邻 w:t 的文字拼起来找，跨段落不拼接。
+    occurrences: list[tuple[int, object, list[ET.Element], str]] = []
+    total = 0
+    for group_index, (key, elements) in enumerate(_paragraph_groups(root)):
+        paragraph_text = "".join(
+            element_texts[text_index[id(element)]] for element in elements
+        )
+        count = paragraph_text.count(find)
+        if count:
+            occurrences.append((group_index, key, elements, paragraph_text))
+            total += count
 
     if total == 0:
-        if any(find in text for text in _paragraph_texts(root)):
-            raise PatchError(
-                "cross-run",
-                f"目标文字在 {part} 中被 Word 拆成了多个 run（跨 w:t）："
-                "v1 只支持完整落在一个 run 内的文字，请在 Word 中手动修改这一处后重试。",
-            )
         raise PatchError(
             "not-found",
             f"在 {part} 中找不到目标文字：{find!r}（未做任何改动）",
@@ -239,47 +310,153 @@ def patch_part(
             "请给出更长的、能唯一定位的原文（未做任何改动）。",
         )
 
-    target_index, old_text = hits[0]
-    offset = old_text.find(find)
-    assert offset >= 0  # hits 的构造保证至少出现一次
-    new_text = old_text[:offset] + replace + old_text[offset + len(find):]
+    group_index, paragraph, elements, paragraph_text = occurrences[0]
+    hit_start = paragraph_text.find(find)
+    hit_end = hit_start + len(find)
 
-    match = matches[target_index]
-    start, end = match.span(2)
-    raw_inner = match.group(2) or ""
-    if raw_inner == escape(old_text):
-        # 原文本是规范转义：只动命中的那一段，其余字节保持不变。
-        new_inner = (
-            escape(old_text[:offset])
-            + escape(replace)
-            + escape(old_text[offset + len(find):])
+    # 每个 w:t 在段落拼接串里的区间；只保留与命中区间相交的那些。
+    spans: list[tuple[int, int, int]] = []
+    cursor = 0
+    for element in elements:
+        index = text_index[id(element)]
+        length = len(element_texts[index])
+        spans.append((index, cursor, cursor + length))
+        cursor += length
+
+    covered: list[tuple[int, int, int]] = []
+    for index, span_start, span_end in spans:
+        if span_end <= hit_start or span_start >= hit_end:
+            continue
+        covered.append(
+            (
+                index,
+                max(hit_start, span_start) - span_start,
+                min(hit_end, span_end) - span_start,
+            )
         )
-    else:
-        # 原文本用了数字字符引用等非规范转义：整段 w:t 文本重新转义，
-        # 文本语义不变，且仍然只改目标部件这一个条目的这几个字节。
-        new_inner = escape(new_text)
-
-    if _xml_unescape(new_inner) != new_text:
+    if not covered:
         raise PatchError(
             "self-check-failed",
-            f"内部校验失败：{part} 第 {target_index + 1} 个 w:t 的替换结果与预期不一致",
+            f"内部校验失败：{part} 的命中位置无法映射回 w:t（未写入任何文件）",
         )
 
-    patched = (xml_text[:start] + new_inner + xml_text[end:]).encode("utf-8")
+    if len(covered) == 1:
+        # 单 w:t：保留 v1 的最小改动路径（只动命中那一段的字节）。
+        target_index, local_start, _ = covered[0]
+        old_text = element_texts[target_index]
+        new_text = old_text[:local_start] + replace + old_text[local_start + len(find):]
+
+        match = matches[target_index]
+        span_start, span_end = match.span(2)
+        raw_inner = match.group(2) or ""
+        if raw_inner == escape(old_text):
+            # 原文本是规范转义：只动命中的那一段，其余字节保持不变。
+            new_inner = (
+                escape(old_text[:local_start])
+                + escape(replace)
+                + escape(old_text[local_start + len(find):])
+            )
+        else:
+            # 原文本用了数字字符引用等非规范转义：整段 w:t 文本重新转义，
+            # 文本语义不变，且仍然只改目标部件这一个条目的这几个字节。
+            new_inner = escape(new_text)
+
+        if _xml_unescape(new_inner) != new_text:
+            raise PatchError(
+                "self-check-failed",
+                f"内部校验失败：{part} 第 {target_index + 1} 个 w:t 的替换结果与预期不一致",
+            )
+
+        patched = (xml_text[:span_start] + new_inner + xml_text[span_end:]).encode("utf-8")
+
+        expected_texts = list(element_texts)
+        expected_texts[target_index] = new_text
+        patched_texts = _element_texts(_parse_xml(patched, part))
+        if patched_texts != expected_texts:
+            raise PatchError(
+                "self-check-failed",
+                f"内部校验失败：替换后 {part} 的文本与预期不一致（未写入任何文件）",
+            )
+
+        return patched, {
+            "bytes_before": len(find.encode("utf-8")),
+            "bytes_after": len(replace.encode("utf-8")),
+        }, expected_texts, False
+
+    # ── 跨 w:t：合并路径 ────────────────────────────────────────────────
+    if paragraph is None:
+        raise PatchError(
+            "cross-run",
+            f"目标文字跨了多个 w:t，但不在同一段落内，无法安全合并；请在 Word 中手动修改（{part}）。",
+        )
+
+    elements_by_index = {text_index[id(element)]: element for element in elements}
+    runs: list[ET.Element] = []
+    for index, _, _ in covered:
+        run = _run_of(elements_by_index[index], parents)
+        if run is None:
+            raise PatchError(
+                "cross-run",
+                f"目标文字跨了多个 w:t，但其中有的不在 run 内，无法安全合并；请在 Word 中手动修改（{part}）。",
+            )
+        runs.append(run)
+
+    if len({_run_format(run) for run in runs}) > 1:
+        raise PatchError(
+            "cross-run",
+            "目标文字跨了格式不同的 run（例如一半加粗、一半不加粗）。"
+            "v2 只合并格式一致的相邻 run：请在 Word 中手动修改，"
+            "或缩短原文，让它落在一段同样格式的文字里。",
+        )
+
+    if _has_break_between(
+        paragraph, elements_by_index[covered[0][0]], elements_by_index[covered[-1][0]]
+    ):
+        raise PatchError(
+            "cross-run",
+            "目标文字中间夹着制表符或换行，视觉上不是一句话；"
+            "请按实际看到的文字分段给出原文，或在 Word 中手动修改。",
+        )
+
+    # 新文字写进第一个 w:t，其余被覆盖的 w:t 清空：不删节点、不动 run 边界。
+    new_texts: dict[int, str] = {}
+    first_index, first_start, _ = covered[0]
+    new_texts[first_index] = element_texts[first_index][:first_start] + replace
+    for index, _, _ in covered[1:-1]:
+        new_texts[index] = ""
+    last_index, _, last_end = covered[-1]
+    new_texts[last_index] = element_texts[last_index][last_end:]
 
     expected_texts = list(element_texts)
-    expected_texts[target_index] = new_text
-    patched_texts = _element_texts(_parse_xml(patched, part))
-    if patched_texts != expected_texts:
+    for index, text in new_texts.items():
+        expected_texts[index] = text
+
+    patched = xml_text
+    for index in sorted(new_texts, reverse=True):
+        span_start, span_end = matches[index].span(2)
+        patched = patched[:span_start] + escape(new_texts[index]) + patched[span_end:]
+    patched_bytes = patched.encode("utf-8")
+
+    if _element_texts(_parse_xml(patched_bytes, part)) != expected_texts:
         raise PatchError(
             "self-check-failed",
-            f"内部校验失败：替换后 {part} 的文本与预期不一致（未写入任何文件）",
+            f"内部校验失败：跨 run 替换后 {part} 的文本与预期不一致（未写入任何文件）",
         )
 
-    return patched, {
+    expected_paragraphs = _paragraph_texts(root)
+    expected_paragraphs[group_index] = (
+        paragraph_text[:hit_start] + replace + paragraph_text[hit_end:]
+    )
+    if _paragraph_texts(_parse_xml(patched_bytes, part)) != expected_paragraphs:
+        raise PatchError(
+            "self-check-failed",
+            f"内部校验失败：跨 run 替换后 {part} 的段落文本与预期不一致（未写入任何文件）",
+        )
+
+    return patched_bytes, {
         "bytes_before": len(find.encode("utf-8")),
         "bytes_after": len(replace.encode("utf-8")),
-    }, expected_texts
+    }, expected_texts, True
 
 
 # ---------------------------------------------------------------------------
@@ -426,6 +603,14 @@ def write_patched(
             pass
         with zipfile.ZipFile(source, "r") as archive:
             infos = archive.infolist()
+            for info in infos:
+                # Python 的 zipfile 在写条目时会把「未声明」的 external_attr（0）
+                # 固定改写成 0600（见 CPython `_open_to_write`），无法保留 0。
+                # 这里把预期值同步成实际写出的值 —— 否则写后自检会把「原包没声明
+                # 权限位」误判成「权限位被改坏」，而这类包（JSZip 等工具生成）
+                # 明明可以安全修订。非零值仍按原值严格比较。
+                if info.external_attr == 0:
+                    info.external_attr = 0o600 << 16
             metadata = [_entry_metadata(info) for info in infos]
             source_comment = archive.comment
             original_sha: dict[str, str] = {}
@@ -521,7 +706,7 @@ def main(argv: list[str] | None = None) -> int:
         source = Path(args.source)
         target = Path(args.target)
         part_bytes = _read_source_part(source, part)
-        patched, stats, expected_texts = patch_part(
+        patched, stats, expected_texts, cross_run_merged = patch_part(
             part_bytes, args.find, args.replace, part
         )
         entries = write_patched(source, target, part, patched, expected_texts)
@@ -547,6 +732,7 @@ def main(argv: list[str] | None = None) -> int:
             "bytes_before": stats["bytes_before"],
             "bytes_after": stats["bytes_after"],
             "other_entries_unchanged": True,
+            "cross_run_merged": cross_run_merged,
         },
     )
     return EXIT_OK

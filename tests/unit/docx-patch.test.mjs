@@ -78,6 +78,7 @@ const OK_REPORT = {
 	bytes_before: 15,
 	bytes_after: 21,
 	other_entries_unchanged: true,
+	cross_run_merged: false,
 };
 
 function successOutcome(report = OK_REPORT) {
@@ -118,6 +119,7 @@ describe("patchDocx：请求与参数", () => {
 			bytesBefore: 15,
 			bytesAfter: 21,
 			otherEntriesUnchanged: true,
+			crossRunMerged: false,
 		});
 		expect(calls).toHaveLength(1);
 		expect(calls[0]).toMatchObject({
@@ -378,6 +380,58 @@ function zipEntryText(path, name) {
 	return result.stdout.toString("utf8");
 }
 
+const WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+/** 构造一个最小可用的 docx（只含 [Content_Types].xml 与正文部件）。
+ *
+ * `createFolders: false`：JSZip 默认会额外写 `word/` 目录条目，而 Python 的
+ * `writestr` 会把目录条目的 external_attr 规范化成目录位 —— 写后自检因此
+ * 判「元数据未保留」。真实 Word 文档通常没有这种目录条目；这里也不制造它。
+ */
+async function makeDocx(documentBody) {
+	const zip = new JSZip();
+	zip.file("[Content_Types].xml", "<Types/>", { createFolders: false });
+	zip.file("word/document.xml", documentBody, { createFolders: false });
+	return zip.generateAsync({ type: "nodebuffer" });
+}
+
+function documentXml(body) {
+	return (
+		`<?xml version="1.0" encoding="UTF-8"?>` +
+		`<w:document xmlns:w="${WORD_NS}"><w:body>${body}</w:body></w:document>`
+	);
+}
+
+/** 按段落拼出 w:t 文本 —— 与引擎的定位口径一致（跨 run 拼接、段落不拼接）。 */
+function paragraphTexts(path) {
+	const script = [
+		"import json, sys, zipfile",
+		"from xml.etree import ElementTree as ET",
+		`W = "{${WORD_NS}}"`,
+		"root = ET.fromstring(zipfile.ZipFile(sys.argv[1]).read('word/document.xml'))",
+		"parent = {child: node for node in root.iter() for child in node}",
+		"grouped, order = {}, []",
+		"for element in root.iter(W + 't'):",
+		"    node = element",
+		"    while node is not None and node.tag != W + 'p':",
+		"        node = parent.get(node)",
+		"    key = node if node is not None else element",
+		"    if key not in grouped:",
+		"        grouped[key] = []",
+		"        order.append(key)",
+		"    grouped[key].append(element.text or '')",
+		"print(json.dumps([''.join(grouped[key]) for key in order], ensure_ascii=False))",
+	].join("\n");
+	const result = spawnSync(PYTHON.command, [...PYTHON.prefix, "-c", script, path], {
+		encoding: "utf8",
+		windowsHide: true,
+		timeout: 30_000,
+	});
+	expect(result.status, result.stderr).toBe(0);
+	return JSON.parse(result.stdout);
+}
+
+
 const describeEngine = PYTHON === null ? describe.skip : describe;
 
 describeEngine("真跑引擎（需要 python3 / python / py -3；本机没有解释器时整组跳过）", () => {
@@ -402,6 +456,7 @@ describeEngine("真跑引擎（需要 python3 / python / py -3；本机没有解
 			bytes_before: 15,
 			bytes_after: 21,
 			other_entries_unchanged: true,
+			cross_run_merged: false,
 		});
 		expect(sha256File(DOCX_A)).toBe(sourceBefore);
 
@@ -508,7 +563,56 @@ describeEngine("真跑引擎（需要 python3 / python / py -3；本机没有解
 		expect(statSync(out).mode & 0o777).toBe(0o640);
 	});
 
-	it("跨 run → cross-run，退出非零且不产出输出文件", () => {
+	it("跨 run（同格式）→ 合并替换成功，其余条目逐字节一致", async () => {
+		const dir = tempDir();
+		const source = join(dir, "crossrun.docx");
+		const out = join(dir, "crossrun-out.docx");
+		/*
+		 * 夹具 A 的跨 run 段落**故意**是格式不同的（「跨 run 」常规 + 「的文本」斜体），
+		 * 它守的是拒绝面。成功路径单独造一份同格式的：两个 run 都没有 rPr。
+		 */
+		writeFileSync(
+			source,
+			await makeDocx(
+				documentXml(
+					"<w:p><w:r><w:t xml:space=\"preserve\">跨 run </w:t></w:r>"
+						+ "<w:r><w:t>的文本</w:t></w:r></w:p>",
+				),
+			),
+		);
+		const result = runEngine([
+			`--in=${source}`,
+			`--out=${out}`,
+			"--find=跨 run 的文本",
+			"--replace=合并后的整句",
+		]);
+		expect(result.status, result.stderr).toBe(0);
+		const report = JSON.parse(result.stdout.trim());
+		expect(report).toMatchObject({
+			ok: true,
+			part: "word/document.xml",
+			changed: 1,
+			cross_run_merged: true,
+		});
+
+		const before = inspectZip(source);
+		const after = inspectZip(out);
+		const changed = after.entries
+			.filter((entry, index) => entry.sha256 !== before.entries[index].sha256)
+			.map((entry) => entry.name);
+		expect(changed).toEqual(["word/document.xml"]);
+
+		/* 段落拼接文本是「用户实际看到的那句话」：旧文字消失、新文字出现。 */
+		const paragraphs = paragraphTexts(out);
+		expect(paragraphs.some((text) => text.includes("合并后的整句"))).toBe(true);
+		expect(paragraphs.some((text) => text.includes("跨 run 的文本"))).toBe(false);
+		/* 新文字落在第一个 run 里，第二个 run 的节点还在（不删节点）。 */
+		const xml = zipEntryText(out, "word/document.xml");
+		expect(xml).toContain(">合并后的整句</w:t>");
+		expect(xml).toContain("<w:t></w:t>");
+	});
+
+	it("跨 run 且格式不同（真实夹具）→ cross-run，且不产出输出文件", () => {
 		const dir = tempDir();
 		const out = join(dir, "never.docx");
 		const sourceBefore = sha256File(DOCX_A);
@@ -520,12 +624,81 @@ describeEngine("真跑引擎（需要 python3 / python / py -3；本机没有解
 		]);
 		expect(result.status).toBe(1);
 		const error = JSON.parse(result.stderr.trim());
-		expect(error.ok).toBe(false);
 		expect(error.code).toBe("cross-run");
-		expect(error.error).toContain("run");
+		expect(error.error).toContain("格式不同");
 		expectNoOutput(out);
 		expect(sha256File(DOCX_A)).toBe(sourceBefore);
 	});
+
+
+	it("跨 run 但中间夹制表符 → cross-run，不产出输出文件", async () => {
+		const dir = tempDir();
+		const bad = join(dir, "with-tab.docx");
+		const out = join(dir, "never.docx");
+		writeFileSync(
+			bad,
+			await makeDocx(
+				documentXml(
+					"<w:p><w:r><w:t>跨 run 的</w:t></w:r>"
+						+ "<w:r><w:tab/><w:t>文本</w:t></w:r></w:p>",
+				),
+			),
+		);
+		const result = runEngine([
+			`--in=${bad}`,
+			`--out=${out}`,
+			"--find=跨 run 的文本",
+			"--replace=改掉",
+		]);
+		expect(result.status).toBe(1);
+		const error = JSON.parse(result.stderr.trim());
+		expect(error.code).toBe("cross-run");
+		expect(error.error).toContain("制表符");
+		expectNoOutput(out);
+	});
+
+	it("原文跨两个段落 → not-found（段落之间不拼接）", async () => {
+		const dir = tempDir();
+		const bad = join(dir, "two-paragraphs.docx");
+		const out = join(dir, "never.docx");
+		writeFileSync(
+			bad,
+			await makeDocx(
+				documentXml(
+					"<w:p><w:r><w:t>前半</w:t></w:r></w:p>"
+						+ "<w:p><w:r><w:t>后半</w:t></w:r></w:p>",
+				),
+			),
+		);
+		const result = runEngine([
+			`--in=${bad}`,
+			`--out=${out}`,
+			"--find=前半后半",
+			"--replace=改掉",
+		]);
+		expect(result.status).toBe(1);
+		expect(JSON.parse(result.stderr.trim()).code).toBe("not-found");
+		expectNoOutput(out);
+	});
+
+	it("跨 run 且拼接后多处命中 → multiple-matches（唯一性不放宽）", async () => {
+		const dir = tempDir();
+		const bad = join(dir, "two-hits.docx");
+		const out = join(dir, "never.docx");
+		const paragraph = "<w:p><w:r><w:t>跨</w:t></w:r><w:r><w:t>run</w:t></w:r></w:p>";
+		writeFileSync(bad, await makeDocx(documentXml(paragraph + paragraph)));
+		const result = runEngine([
+			`--in=${bad}`,
+			`--out=${out}`,
+			"--find=跨run",
+			"--replace=改掉",
+		]);
+		expect(result.status).toBe(1);
+		const error = JSON.parse(result.stderr.trim());
+		expect(error.code).toBe("multiple-matches");
+		expectNoOutput(out);
+	});
+
 
 	it("找不到 → not-found，不产出输出文件", () => {
 		const dir = tempDir();

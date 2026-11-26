@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/daemon/index.md", "reason": "docx 引擎契约、错误码与写回约束"}
+{"file": ".trellis/spec/resources/index.md", "reason": "resources/** 不参与本项目工具链"}

@@ -158,6 +158,14 @@ function parsePatchSuccess(stdout) {
 	if (parsed.other_entries_unchanged !== true) {
 		throw contractError("other_entries_unchanged 不为 true（其余条目可能被改动）");
 	}
+	/*
+	 * 可选字段：v1 引擎没有它（单 w:t 路径），v2 起为布尔。
+	 * 缺省按 false —— 旧引擎的响应仍可用；给了却不是布尔则是契约错误。
+	 */
+	const merged = parsed.cross_run_merged;
+	if (merged !== void 0 && typeof merged !== "boolean") {
+		throw contractError(`cross_run_merged 不是布尔值（收到 ${String(merged)}）`);
+	}
 	return {
 		part,
 		entries,
@@ -165,6 +173,7 @@ function parsePatchSuccess(stdout) {
 		bytesBefore,
 		bytesAfter,
 		otherEntriesUnchanged: true,
+		crossRunMerged: merged === true,
 	};
 }
 
@@ -201,7 +210,7 @@ function parsePatchFailure(stderr, exitCode) {
  *
  * @param {object} req `{ python, engineDir, inputPath, outputPath, part?, find, replace, timeoutMs?, maxOutputBytes? }`
  * @param {Function} [run] 与 `doc-extract.js` 的 `defaultRun` 同形态，测试可注入。
- * @returns {Promise<{part:string, entries:number, changed:number, bytesBefore:number, bytesAfter:number, otherEntriesUnchanged:true}>}
+ * @returns {Promise<{part:string, entries:number, changed:number, bytesBefore:number, bytesAfter:number, otherEntriesUnchanged:true, crossRunMerged:boolean}>}
  */
 async function patchDocx(req, run = defaultRun) {
 	const options = normalizeRequest(req);
