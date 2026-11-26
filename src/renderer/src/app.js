@@ -71264,6 +71264,12 @@ function AuditSection() {
   const [error, setError] = reactExports.useState(void 0);
   const [busy, setBusy] = reactExports.useState(false);
   const [confirming, setConfirming] = reactExports.useState(false);
+  /* #503 第三十三轮 F1/F3：detail 关键字筛选 + 时间范围（前端过滤，不动 daemon 查询）。
+     审计记录形状是 {ts, category, outcome, detail}——没有独立工具名字段，
+     「工具名筛选」落地为 detail 子串匹配（工具调用审计的 detail 以命令开头）。 */
+  const [toolFilter, setToolFilter] = reactExports.useState("");
+  const [timeRange, setTimeRange] = reactExports.useState("all");
+  const [visibleCount, setVisibleCount] = reactExports.useState(200);
   const [exported, setExported] = reactExports.useState(
     void 0
   );
@@ -71297,14 +71303,28 @@ function AuditSection() {
       setError(void 0);
     }).catch((e) => setError(errorText$2(e))).finally(() => setBusy(false));
   }, []);
-  const rows = data === void 0 ? [] : [...data.records].reverse();
+  const rowsAll = data === void 0 ? [] : [...data.records].reverse();
+  const rows = reactExports.useMemo(() => {
+    let filtered = rowsAll;
+    if (toolFilter !== "") filtered = filtered.filter((record) => (record.detail ?? "").toLowerCase().includes(toolFilter.toLowerCase()));
+    if (timeRange !== "all") {
+      const cutoff = Date.now() - (timeRange === "today" ? 1 : 7) * 864e5;
+      filtered = filtered.filter((record) => new Date(record.ts ?? record.at ?? 0).getTime() >= cutoff);
+    }
+    return filtered.slice(0, visibleCount);
+  }, [rowsAll, toolFilter, timeRange, visibleCount]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("section", { className: "settings-section", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("header", { className: "settings-section-head", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { children: "审计中心" }),
       data !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "provider-meta", children: [
         "共 ",
         data.total,
-        " 条"
+        " 条",
+        (toolFilter !== "" || timeRange !== "all") && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          " · 筛选后 ",
+          rows.length,
+          " 条"
+        ] })
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "provider-main", children: [
@@ -71329,6 +71349,33 @@ function AuditSection() {
         },
         item
       )),
+      /* #503 第三十三轮 F1：工具名筛选下拉（distinct）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        type: "search",
+        className: "audit-tool-filter",
+        "aria-label": "按内容筛选审计记录",
+        placeholder: "筛选内容…",
+        value: toolFilter,
+        onChange: (e) => {
+          setToolFilter(e.target.value);
+          setVisibleCount(200);
+        }
+      }),
+      /* #503 第三十三轮 F3：时间范围 chips。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "audit-time-chips", role: "group", "aria-label": "时间范围筛选", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "all" ? "mini-btn active" : "mini-btn", onClick: () => {
+          setTimeRange("all");
+          setVisibleCount(200);
+        }, children: "全部时间" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "today" ? "mini-btn active" : "mini-btn", onClick: () => {
+          setTimeRange("today");
+          setVisibleCount(200);
+        }, children: "今天" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: timeRange === "7d" ? "mini-btn active" : "mini-btn", onClick: () => {
+          setTimeRange("7d");
+          setVisibleCount(200);
+        }, children: "7 天内" })
+      ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bar-spacer" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
@@ -71340,6 +71387,32 @@ function AuditSection() {
           children: "导出日志"
         }
       ),
+      /* #503 第三十三轮 F6/F7：前端导出 JSON / CSV（Blob 下载，当前筛选口径）。
+         空记录也可导出（导出空列表），按钮常驻更可发现。 */
+      data !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => {
+        const blob = new Blob([JSON.stringify(rows, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "audit-filtered.json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }, children: "导出 JSON" }),
+      data !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", disabled: busy, onClick: () => {
+        const esc = (value) => {
+          const s = String(value ?? "");
+          return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+        };
+        const header = "time,category,tool,summary";
+        const lines = rows.map((record) => [record.ts ?? record.at ?? "", record.category ?? "", record.toolName ?? record.tool ?? "", auditLine(record)].map(esc).join(","));
+        const blob = new Blob([`${header}\n${lines.join("\n")}`], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "audit-filtered.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+      }, children: "导出 CSV" }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         "button",
         {
@@ -71387,7 +71460,8 @@ function AuditSection() {
       }
     ) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
       error !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: error }),
-      data.total > rows.length && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "settings-foot", children: [
+      rowsAll.length > rows.length && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: () => setVisibleCount((count) => count + 200), children: `加载更多（已显示 ${rows.length} / ${rowsAll.length}）` }),
+      data.total > rowsAll.length && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "settings-foot", children: [
         "仅显示最近 ",
         data.limit,
         " 条（共 ",
