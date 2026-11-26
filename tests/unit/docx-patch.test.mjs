@@ -402,7 +402,12 @@ function documentXml(body) {
 	);
 }
 
-/** 按段落拼出 w:t 文本 —— 与引擎的定位口径一致（跨 run 拼接、段落不拼接）。 */
+/** 按段落拼出 w:t 文本 —— 与引擎的定位口径一致（跨 run 拼接、段落不拼接）。
+ *
+ * 输出用 `json.dumps` 的默认 `ensure_ascii=True`：Windows runner 的 Python
+ * stdout 是 cp1252，直接打印中文会 UnicodeEncodeError；转义后的 `\uXXXX`
+ * 在 Node 侧 JSON.parse 回中文，语义不变。
+ */
 function paragraphTexts(path) {
 	const script = [
 		"import json, sys, zipfile",
@@ -420,7 +425,7 @@ function paragraphTexts(path) {
 		"        grouped[key] = []",
 		"        order.append(key)",
 		"    grouped[key].append(element.text or '')",
-		"print(json.dumps([''.join(grouped[key]) for key in order], ensure_ascii=False))",
+		"print(json.dumps([''.join(grouped[key]) for key in order]))",
 	].join("\n");
 	const result = spawnSync(PYTHON.command, [...PYTHON.prefix, "-c", script, path], {
 		encoding: "utf8",
