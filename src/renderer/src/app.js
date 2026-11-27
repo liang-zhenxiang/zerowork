@@ -13367,11 +13367,14 @@ function LoadingState({ text: text2 = "正在读取…" }) {
 }
 function ErrorState({
   message,
-  onRetry
+  onRetry,
+  onDiagnostics
 }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "state-error", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "state-error-text", children: message }),
-    onRetry !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onRetry, children: "重试" })
+    onRetry !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onRetry, children: "重试" }),
+    /* #493 第三十四轮 F5：连接/加载失败时给「查看诊断」直达（错误要可诊断）。 */
+    onDiagnostics !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "mini-btn", onClick: onDiagnostics, children: "查看诊断" })
   ] });
 }
 const NAV_ITEMS$1 = [
@@ -15127,11 +15130,11 @@ const [spacesCollapsed, setSpacesCollapsed] = reactExports.useState(false);
             }
           }
         }),
-        !tasksCollapsed && (tasksError !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: tasksError, onRetry: onReloadTasks }) : tasks === void 0 && groupsUnavailable ? (
+        !tasksCollapsed && (tasksError !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: tasksError, onRetry: onReloadTasks, onDiagnostics }) : tasks === void 0 && groupsUnavailable ? (
           /* 断开原因（含 daemon 退出码）已在底部状态行如实显示，这里只给短结论：
               窄栏里再抄一遍长文本没有信息增量。重试会拿到 daemon 的真实报错
               （连接没恢复时立即失败），也是恢复后唯一的重新拉取入口。 */
-          /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: "连接已断开，未能读取历史任务", onRetry: onReloadTasks })
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorState, { message: "连接已断开，未能读取历史任务", onRetry: onReloadTasks, onDiagnostics })
         ) : tasks === void 0 ? (
           /* 结构已知的等待用骨架（docs/DESIGN.md §4「加载」一列）。行结构与真行同一批
              类名、同尺寸（见 TASK_SKELETON_*），所以列表到达时是「同一片区域被填上」，
@@ -15330,7 +15333,39 @@ function menuBarLabel(item, withMnemonic) {
 }
 /* round14 F9：帮助入口聚合浮层。三个入口各走既有通道：快捷键表发
    zw:shortcut-sheet-open（round4 已有监听），诊断走设置页锚点，文档开外部链接。 */
+/* #508 第三十四轮：帮助浮层重写——按主题分组、搜索过滤、FAQ 折叠组、
+   可打印、反馈入口。原三项入口（快捷键/诊断/文档）保留为「快捷入口」组。 */
+const HELP_TOPICS = [
+  { group: "入门", items: [
+    { name: "第一次使用", desc: "配置模型 → 新建任务 → 提问", action: "settings-models" },
+    { name: "会话管理", desc: "置顶、归档、重命名与看板视图", action: "settings-data" }
+  ] },
+  { group: "会话", items: [
+    { name: "斜杠命令", desc: "输入 / 使用 /help /stats /focus /new" },
+    { name: "长文本确认", desc: "超过 2000 字先确认再发送（可在面板里关）" },
+    { name: "附件", desc: "粘贴或 + 按钮添加图片与文档" }
+  ] },
+  { group: "模型", items: [
+    { name: "服务商与密钥", desc: "设置 → 模型 → 添加服务商", action: "settings-models" },
+    { name: "内置运行时", desc: "设置 → 内置运行时管理 Python/Node", action: "settings-runtimes" }
+  ] },
+  { group: "数据", items: [
+    { name: "备份与恢复", desc: "设置 → 数据管理 → 备份全部会话", action: "settings-data" },
+    { name: "审计日志", desc: "设置 → 审计中心，可筛选与导出", action: "settings-audit" }
+  ] }
+];
+const HELP_FAQ = [
+  { q: "模型配置后还是不能用？", a: "检查 API Key 是否填写、模型是否点选为当前模型；诊断页可跑健康检查。" },
+  { q: "会话数据存在哪里？", a: "本机配置目录下的 sessions/（数据管理页显示完整路径）。数据不出本机。" },
+  { q: "误关了窗口怎么办？", a: "关闭默认最小化到托盘（可关）；会话与任务都在，重新打开即可继续。" },
+  { q: "审计日志会记录会话内容吗？", a: "不会。审计只记工具调用与文件改动的事件级信息。" },
+  { q: "怎么把会话交给别人？", a: "行菜单 → 复制全文，或导出为 Markdown/HTML。" },
+  { q: "快捷键冲突了？", a: "全局唤起键可在设置里修改；应用内快捷键见 ⌘/ 速查表。" },
+  { q: "升级会丢配置吗？", a: "不会。配置与会话都在用户目录，升级只替换程序。" },
+  { q: "支持哪些系统？", a: "完整支持 Windows；macOS 可用（命令沙箱受限档会如实拒绝）。" }
+];
 function HelpSheet({ onClose, onOpenSettings }) {
+  const [query, setQuery] = reactExports.useState("");
   reactExports.useEffect(() => {
     const onKey = (event) => {
       if (event.key === "Escape") onClose();
@@ -15338,11 +15373,59 @@ function HelpSheet({ onClose, onOpenSettings }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+  const q = query.trim().toLowerCase();
+  const matchTopic = (text) => q === "" || text.toLowerCase().includes(q);
+  const openAction = (action) => {
+    onClose();
+    if (typeof action === "string" && action.startsWith("settings-")) {
+      onOpenSettings(action.replace("settings-", ""));
+    }
+  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-backdrop", onClick: onClose, "aria-hidden": "true" }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "help-sheet", role: "dialog", "aria-label": "帮助", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-title", children: "帮助" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "help-title", children: [
+        "帮助",
+        /* #493 第三十四轮 F6：可打印。 */
+        /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "help-print-btn", onClick: () => window.print(), children: "打印" })
+      ] }),
+      /* #493 第三十四轮 F2：搜索框。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("input", {
+        type: "search",
+        className: "help-search",
+        placeholder: "搜索帮助主题…",
+        "aria-label": "搜索帮助主题",
+        value: query,
+        onChange: (e) => setQuery(e.target.value)
+      }),
+      HELP_TOPICS.map((topic) => {
+        const items = topic.items.filter((item) => matchTopic(`${topic.group} ${item.name} ${item.desc}`));
+        if (items.length === 0) return null;
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "help-group", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-group-title", children: topic.group }),
+          ...items.map((item) => item.action !== void 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "help-item", onClick: () => openAction(item.action), children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-name", children: item.name }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: item.desc })
+          ] }, item.name) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-item help-item-static", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-name", children: item.name }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: item.desc })
+          ] }, item.name))
+        ] }, topic.group);
+      }),
+      /* #493 第三十四轮 F3：常见问题折叠组。 */
+      (() => {
+        const faq = HELP_FAQ.filter((item) => matchTopic(`${item.q} ${item.a}`));
+        if (faq.length === 0) return null;
+        return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-group", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "help-group-title", children: "常见问题" }),
+          ...faq.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("details", { className: "help-faq", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("summary", { children: item.q }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "help-faq-a", children: item.a })
+          ] }, item.q))
+        ] });
+      })(),
+      /* 快捷入口（原三项保留）。 */
+      jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
@@ -15352,12 +15435,12 @@ function HelpSheet({ onClose, onOpenSettings }) {
             window.dispatchEvent(new CustomEvent("zw:shortcut-sheet-open"));
           },
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "help-item-name", children: ["键盘快捷键", /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { children: "⌘/" })] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "全部快捷键速查表" })
+            jsxRuntimeExports.jsxs("span", { className: "help-item-name", children: ["键盘快捷键", jsxRuntimeExports.jsx("kbd", { children: "⌘/" })] }),
+            jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "全部快捷键速查表" })
           ]
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
+      jsxRuntimeExports.jsx(
         "button",
         {
           type: "button",
@@ -15367,12 +15450,12 @@ function HelpSheet({ onClose, onOpenSettings }) {
             onOpenSettings("about");
           },
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "help-item-name", children: ["诊断与关于", /* @__PURE__ */ jsxRuntimeExports.jsx("kbd", { children: "⌘," })] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "健康检查、日志与版本信息" })
+            jsxRuntimeExports.jsxs("span", { className: "help-item-name", children: ["诊断与关于", jsxRuntimeExports.jsx("kbd", { children: "⌘," })] }),
+            jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "健康检查、日志与版本信息" })
           ]
         }
       ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
+      jsxRuntimeExports.jsx(
         "a",
         {
           className: "help-item",
@@ -15380,8 +15463,22 @@ function HelpSheet({ onClose, onOpenSettings }) {
           target: "_blank",
           rel: "noreferrer",
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-name", children: "使用文档" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "GitHub README（浏览器打开）" })
+            jsxRuntimeExports.jsx("span", { className: "help-item-name", children: "使用文档" }),
+            jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "GitHub README（浏览器打开）" })
+          ]
+        }
+      ),
+      /* #493 第三十四轮 F10：反馈入口。 */
+      jsxRuntimeExports.jsx(
+        "a",
+        {
+          className: "help-item",
+          href: "https://github.com/liang-zhenxiang/zerowork/issues/new?template=issue.md",
+          target: "_blank",
+          rel: "noreferrer",
+          children: [
+            jsxRuntimeExports.jsx("span", { className: "help-item-name", children: "没找到答案？" }),
+            jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "提一个 issue（GitHub 打开）" })
           ]
         }
       )
@@ -71785,7 +71882,12 @@ function AboutSection({ configDir, onOpenDiagnostics }) {
       /* @__PURE__ */ jsxRuntimeExports.jsx("ul", { className: "whats-new-list", children: CHANGELOG_FEATURES.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { className: "whats-new-item", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: item.title }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "whats-new-desc", children: item.desc })
-      ] }, item.title)) })
+      ] }, item.title)) }),
+      /* #493 第三十四轮 F7：完整更新日志入口（仓库 CHANGELOG.md）。 */
+      /* @__PURE__ */ jsxRuntimeExports.jsx("a", { className: "help-item", href: "https://github.com/liang-zhenxiang/zerowork/blob/main/CHANGELOG.md", target: "_blank", rel: "noreferrer", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-name", children: "查看完整更新日志" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "help-item-desc", children: "GitHub 上的 CHANGELOG.md" })
+      ] })
     ] }),
   ] });
 }
