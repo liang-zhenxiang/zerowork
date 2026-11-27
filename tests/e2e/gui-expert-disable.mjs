@@ -678,42 +678,26 @@ await h.check("⑦·补 设置 → 提示词预览不列出停用专家", async 
 /**
  * 发一条消息，并返回 mock 为**这一条**新收到的请求。
  *
- * 慢 runner 上的真实竞态（#491）：上一条发出后界面可能仍在流式，此时 Enter 的
- * 语义是「并进当前轮 / 排队」—— 不会产生一次新的模型请求，mock 就永远等不到
- * 第 2、3 条，⑧·补 / ⑨ 于是 40s 超时（本地快、CI 慢，只在这个窗口里暴露）。
- * 所以先等界面回到「没有运行中的轮次」，再填、再发。判据用流式期间才存在的
- * 停止按钮（`aria-label="停止"`），而不是输入框占位文案 —— 占位文案在首页是
- * 轮播示例、在会话里是「继续追问…」，按文案判断会把「首页」误当成「忙碌」。
+ * 慢 runner 上的真实竞态（#491 / #505）：上一条发出后界面可能仍在流式，此时
+ * Enter 的语义是「并进当前轮 / 排队」—— 不会产生一次新的模型请求，mock 就
+ * 永远等不到第 2、3 条，⑧·补 / ⑨ 于是 40s 超时。Enter 还有第二种坏形态：
+ * 受控输入框在 React 重渲染时把 `fill` 设的值清回空，Enter 发出的是空消息，
+ * 草稿也被清空 —— 补按 Enter 的兜底因此完全失效（这些用例断言的是提示词与
+ * 技能展开，与输入框本身无关，输入框路径已由 #456 的用例覆盖）。
  *
- * 请求按**发送前的基线**取，不用绝对下标：任何多余请求都不该让断言取错条目。
- * Enter 被吞（焦点被抢 / 重渲染）时草稿还留在框里 —— 补按一次，而不是干等 40s；
- * 已经发出的那条会立即清空草稿，因此不会重复发送。
+ * 所以发送直接走 UI 的底层通道 `kami.prompt`（与点发送按钮同一条 IPC），
+ * 只用「发送按钮可见」作为「上一轮已归位」的判据：流式期间这个位置是
+ * 「停止」，只有回到空闲才出现「发送」。请求仍按发送前的基线取。
  */
 async function sendAndExpectRequest(text, desc) {
-	const box = win.locator('[aria-label="消息输入框"]');
-	await box.waitFor({ state: "visible", timeout: 30_000 });
-	await waitUntil(
-		() =>
-			win.evaluate(() =>
-				document.querySelector('[aria-label="停止"]') === null ? true : null,
-			),
-		{ timeout: 40_000, desc: `${desc}：等上一轮归位` },
-	);
+	const send = win.locator('button[aria-label="发送"]:visible').first();
+	await send.waitFor({ state: "visible", timeout: 40_000 });
 	const before = mock.requests.length;
-	await box.fill(text);
-	await waitUntil(async () => ((await box.inputValue()) === text ? true : null), {
-		timeout: 10_000,
-		desc: `${desc}：草稿进入输入框`,
+	await win.evaluate((value) => globalThis.kami.prompt({ text: value }), text);
+	await waitUntil(() => (mock.requests.length > before ? true : null), {
+		timeout: 40_000,
+		desc: `${desc}：mock 收到新请求`,
 	});
-	await box.press("Enter");
-	await waitUntil(
-		async () => {
-			if (mock.requests.length > before) return true;
-			if ((await box.inputValue()) === text) await box.press("Enter");
-			return null;
-		},
-		{ timeout: 40_000, desc: `${desc}：mock 收到新请求` },
-	);
 	return mock.requests[before];
 }
 
