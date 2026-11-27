@@ -183,7 +183,7 @@ function describePatchFailure(error, name) {
 	const code = error instanceof DocxPatchError ? error.code : "unknown";
 	const where = `${name}${code === "unknown" ? "" : `（${code}）`}`;
 	if (SEMANTIC_ENGINE_CODES.has(code)) {
-		return `${message}\nv1 只处理正文部件 word/document.xml 里**唯一命中**的纯文本；找不到原文、多处命中、或被 Word 拆在多个 run 中的情况请在 Word 里手动修改（${where}）。文件未修改。`;
+		return `${message}\n只处理正文部件 word/document.xml 里**唯一命中**的纯文本（可以跨同格式的相邻 run）；找不到原文、多处命中、跨格式不同的 run，或中间夹着制表符/换行，请在 Word 里手动修改（${where}）。文件未修改。`;
 	}
 	return `${message}\n文件未修改（${where}）。可重试一次；反复失败请检查目标文件是否被占用、运行时是否正常。`;
 }
@@ -221,12 +221,12 @@ function createDocxReplaceTool(options) {
 			name: DOCX_REPLACE_TOOL_NAME,
 			label: "在原 docx 上替换文本",
 			description:
-				"在已有的 .docx 文件正文里做一次文本替换（find → replace），保留原文档版式。v1 只支持正文部件 word/document.xml，且原文必须在正文里**唯一命中**：找不到、多处命中、或被 Word 拆在多个 run 中都会拒绝并说明原因 —— 这类情况请在 Word 里手动修改，不要改用 powershell 直接改压缩包。修改前先用 read_document 确认原文与文档里逐字一致（含标点与空格）。修订模式开启时不会写盘，而是保存为待审建议，由用户在审阅台接受或拒绝。Python 环境按需安装、不会自动下载。",
+				"在已有的 .docx 文件正文里做一次文本替换（find → replace），保留原文档版式。只处理正文部件 word/document.xml，且原文必须在正文里**唯一命中**；原文可以跨**同格式**的相邻 run（Word 常把一句话拆开，这是正常情况），但跨格式不同的 run、中间夹制表符或换行仍会拒绝。找不到、多处命中、跨格式的 run 都会说明原因 —— 这类情况请在 Word 里手动修改，不要改用 powershell 直接改压缩包。修改前先用 read_document 确认原文与文档里逐字一致（含标点与空格）。修订模式开启时不会写盘，而是保存为待审建议，由用户在审阅台接受或拒绝。Python 环境按需安装、不会自动下载。",
 			promptSnippet:
-				"docx_replace: 在 .docx 正文里替换唯一命中的一段原文（path + find + replace），保留版式；跨 run / 多处命中会被拒绝",
+				"docx_replace: 在 .docx 正文里替换唯一命中的一段原文（path + find + replace），保留版式；可跨同格式 run，跨格式 run / 多处命中会被拒绝",
 			promptGuidelines: [
 				"只在用户明确要求修改**已有** docx 时使用；要重新生成整份文档用 docx_convert（那会丢原版式）。",
-				"find 必须与文档正文逐字一致且唯一命中；被拒绝时把原因如实转述给用户，不要原样重试、也不要绕过本工具直接改 zip。",
+				"find 必须与文档正文逐字一致且唯一命中；一句话被 Word 拆成同格式的多个 run 时可以正常替换，但跨格式不同 run 或夹着制表符/换行会被拒绝。被拒绝时把原因如实转述给用户，不要原样重试、也不要绕过本工具直接改 zip。",
 				"修订模式开启时这一步不会写盘：告诉用户改动已存为待审建议，需要到审阅台接受后才生效。",
 			],
 			parameters: Type.Object({
@@ -336,13 +336,14 @@ function createDocxReplaceTool(options) {
 					options,
 					"file",
 					"allowed",
-					`docx_replace：替换 ${name} 正文中的 1 处（${result.bytesBefore} → ${result.bytesAfter} 字节）`,
+					`docx_replace：替换 ${name} 正文中的 1 处（${result.bytesBefore} → ${result.bytesAfter} 字节${result.crossRunMerged === true ? "，跨 run 合并" : ""}）`,
 				);
 				return toolResult({
 					type: "docx_replace_result",
 					path: absPath,
 					part: result.part,
 					replaced: 1,
+					mergedRuns: result.crossRunMerged === true,
 					bytesBefore: result.bytesBefore,
 					bytesAfter: result.bytesAfter,
 					message: "已在原文件上完成替换；改动前的旧版本已保存在文件历史里，可以回退。",
