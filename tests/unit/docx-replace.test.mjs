@@ -18,13 +18,14 @@
 import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // 真跑 Python 引擎的用例在 Windows runner 上启动较慢：单条 5s 不够。
 vi.setConfig({ testTimeout: 30_000 });
 import JSZip from "jszip";
 import {
+	DOCX_MAX_EDITS,
 	DOCX_PART_DEFAULT,
 	applyDocxProposal,
 	buildDocxProposal,
@@ -51,6 +52,9 @@ const FIXTURE = join(ROOT, "tests", "fixtures", "docx-revision", "a-styles.docx"
 /** 夹具正文里唯一出现的一段原文（与 docx-patch.test.mjs 同一条）。 */
 const FIND = "本季度营收";
 const REPLACE = "本季度营业收入";
+/* 第二条：夹具 A 里同样唯一命中，用来验证「一次多条」。 */
+const SECOND_FIND = "以上数据未经审计。";
+const SECOND_REPLACE = "以上数据已经审计。";
 
 let roots = [];
 
@@ -157,6 +161,32 @@ describe("参数与目标校验 —— 拒绝面", () => {
 		expect(proposalsIn(ctx.store)).toEqual([]);
 	});
 
+	it("edits 与 find/replace 互斥；每条非空、确实有改动、条数有上限", async () => {
+		const ctx = setup();
+		const absPath = seedDocx(ctx);
+		const { tool } = makeTool(ctx);
+		await expect(
+			run(tool, {
+				path: absPath,
+				find: FIND,
+				replace: REPLACE,
+				edits: [{ find: FIND, replace: REPLACE }],
+			}),
+		).rejects.toThrow(/不能同时/);
+		await expect(run(tool, { path: absPath, edits: [] })).rejects.toThrow(/非空数组/);
+		await expect(run(tool, { path: absPath, edits: [{ find: FIND }] })).rejects.toThrow(/replace/);
+		await expect(run(tool, { path: absPath, edits: [{ find: "", replace: REPLACE }] })).rejects.toThrow(/find/);
+		await expect(
+			run(tool, { path: absPath, edits: [{ find: FIND, replace: FIND }] }),
+		).rejects.toThrow(/不会产生改动/);
+		await expect(
+			run(tool, {
+				path: absPath,
+				edits: Array.from({ length: DOCX_MAX_EDITS + 1 }, () => ({ find: FIND, replace: REPLACE })),
+			}),
+		).rejects.toThrow(/最多/);
+	});
+
 	it("工作区外的路径（.. 逃逸与绝对路径）一律拒绝", async () => {
 		const ctx = setup();
 		const outside = tempDir("zerowork-docx-replace-outside-");
@@ -225,11 +255,28 @@ describe("修订模式开启 —— 只生成建议，不写盘、不启动 Pyth
 		expect(receipt.type).toBe("docx_replace_suggestion");
 		expect(receipt.id).toMatch(/^[a-z0-9]+-[a-f0-9]{6}$/);
 		expect(receipt.path).toBe(absPath);
-		expect(receipt.find).toBe(FIND);
-		expect(receipt.replace).toBe(REPLACE);
+		expect(receipt.edits).toEqual([{ find: FIND, replace: REPLACE }]);
 		expect(receipt.message).toContain("文件尚未修改");
 		expect(bytesOf(absPath)).toEqual(before);
 		expect(proposalsIn(ctx.store)).toHaveLength(1);
+	});
+
+	it("edits 多条 → 一条建议里带全部条目，回执也带", async () => {
+		const { ctx, absPath, before, tool } = revisionCtx();
+		const receipt = await run(tool, {
+			path: absPath,
+			edits: [
+				{ find: FIND, replace: REPLACE },
+				{ find: SECOND_FIND, replace: SECOND_REPLACE },
+			],
+		});
+		expect(receipt.edits).toEqual([
+			{ find: FIND, replace: REPLACE },
+			{ find: SECOND_FIND, replace: SECOND_REPLACE },
+		]);
+		const proposal = readProposal(receipt.id, { dir: ctx.store });
+		expect(proposal.edits).toHaveLength(2);
+		expect(bytesOf(absPath)).toEqual(before);
 	});
 
 	it("建议字段完整（kind / part / baseSha256 / 来源会话 / 工具名）", async () => {
@@ -300,16 +347,20 @@ describe("修订模式关闭 —— 直接写回", () => {
 		// 版本拿到的必须是「改前」的同一份字节
 		expect(calls.record[0].input).toMatchObject({ path: absPath, sessionId: "sess-docx-replace", tool: "docx_replace" });
 		expect(Buffer.compare(calls.record[0].input.bytes, before)).toBe(0);
-		// 引擎入参：同一个文件进出、默认正文部件、find / replace 原样
+		/*
+		 * 引擎在**同目录临时副本**上工作（全有或全无），全部成功后才 rename 覆盖原文件；
+		 * 所以 inputPath / outputPath 是临时文件，不是目标本身。
+		 */
 		expect(calls.patch[0]).toMatchObject({
 			python: "/venv/python",
 			engineDir: join(ROOT, "resources", "docx-engine"),
-			inputPath: absPath,
-			outputPath: absPath,
 			part: DOCX_PART_DEFAULT,
 			find: FIND,
 			replace: REPLACE,
 		});
+		expect(calls.patch[0].inputPath).toBe(calls.patch[0].outputPath);
+		expect(dirname(calls.patch[0].inputPath)).toBe(dirname(absPath));
+		expect(calls.patch[0].inputPath).toContain("report.docx");
 		// 成功路径不产生建议
 		expect(proposalsIn(ctx.store)).toEqual([]);
 
@@ -448,9 +499,29 @@ describe("Proposal 模型扩展 —— kind:docx 与旧文本建议兼容", () =
 	it("buildDocxProposal 拒绝不完整与无改动", () => {
 		expect(() => buildDocxProposal({})).toThrow(/绝对路径/);
 		expect(() => buildDocxProposal(docxProposalInput({ baseSha256: "xyz" }))).toThrow(/基准哈希/);
-		expect(() => buildDocxProposal(docxProposalInput({ find: "" }))).toThrow(/原文/);
-		expect(() => buildDocxProposal(docxProposalInput({ replace: "" }))).toThrow(/替换后的文本/);
-		expect(() => buildDocxProposal(docxProposalInput({ replace: FIND }))).toThrow(/没有产生任何实际改动/);
+		expect(() => buildDocxProposal(docxProposalInput({ find: "" }))).toThrow(/替换条目/);
+		expect(() => buildDocxProposal(docxProposalInput({ replace: "" }))).toThrow(/替换条目/);
+		expect(() => buildDocxProposal(docxProposalInput({ replace: FIND }))).toThrow(/替换条目/);
+	});
+
+	it("旧 docx 建议（只有 find/replace）读取时归一化为一条 edits", () => {
+		const legacy = {
+			id: "abc-123abc",
+			kind: "docx",
+			path: "/ws/a.docx",
+			baseSha256: "b".repeat(64),
+			part: "word/document.xml",
+			find: "a",
+			replace: "b",
+			sessionId: "",
+			createdAt: 1,
+			toolName: "docx_replace",
+		};
+		expect(parseProposal(legacy)).toMatchObject({
+			edits: [{ find: "a", replace: "b" }],
+			find: "a",
+			replace: "b",
+		});
 	});
 
 	it("parseProposal：docx 往返 / 未知 kind 当损坏 / 缺 part 当损坏", () => {
@@ -620,6 +691,86 @@ describe("applyDocxProposal —— 接受 docx 建议", () => {
 		expect(readProposal(proposal.id, { dir: ctx.store })).not.toBeUndefined();
 	});
 
+	it("只应用选中的条目；未选中的不传给引擎", async () => {
+		const ctx = setup();
+		const absPath = seedDocx(ctx);
+		const bytes = bytesOf(absPath);
+		const proposal = buildDocxProposal({
+			absPath,
+			baseSha256: sha256Bytes(bytes),
+			edits: [
+				{ find: FIND, replace: REPLACE },
+				{ find: SECOND_FIND, replace: SECOND_REPLACE },
+			],
+			sessionId: "sess-accept",
+			toolName: "docx_replace",
+			at: 1_700_000_000_000,
+		});
+		saveProposal(proposal, { dir: ctx.store });
+		const calls = [];
+		const patch = async (req) => {
+			calls.push(req);
+			return {
+				part: req.part,
+				entries: 1,
+				changed: 1,
+				bytesBefore: 1,
+				bytesAfter: 1,
+				otherEntriesUnchanged: true,
+			};
+		};
+		const result = await applyDocxProposal(
+			proposal.id,
+			acceptOptions(ctx, { patch, selectedEdits: [1] }),
+		);
+		expect(result.replaced).toBe(1);
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ find: SECOND_FIND, replace: SECOND_REPLACE });
+	});
+
+	it("全有或全无：第 2 条失败 → 原文件字节不变、建议仍在、错误指明第 2 条", async () => {
+		const ctx = setup();
+		const absPath = seedDocx(ctx);
+		const bytes = bytesOf(absPath);
+		const proposal = buildDocxProposal({
+			absPath,
+			baseSha256: sha256Bytes(bytes),
+			edits: [
+				{ find: FIND, replace: REPLACE },
+				{ find: SECOND_FIND, replace: SECOND_REPLACE },
+			],
+			sessionId: "sess-accept",
+			toolName: "docx_replace",
+			at: 1_700_000_000_000,
+		});
+		saveProposal(proposal, { dir: ctx.store });
+		let calls = 0;
+		const patch = async (req) => {
+			calls += 1;
+			if (calls === 2) throw new DocxPatchError("not-found", "找不到第二条原文");
+			return {
+				part: req.part,
+				entries: 1,
+				changed: 1,
+				bytesBefore: 1,
+				bytesAfter: 1,
+				otherEntriesUnchanged: true,
+			};
+		};
+		await expect(applyDocxProposal(proposal.id, acceptOptions(ctx, { patch }))).rejects.toThrow(/第 2 条/);
+		expect(bytesOf(absPath)).toEqual(bytes);
+		expect(readProposal(proposal.id, { dir: ctx.store })).not.toBeUndefined();
+		expect(readAudit(ctx.audit)[0]).toMatchObject({ category: "file", outcome: "failed" });
+	});
+
+	it("没有选中条目 → 拒绝（不会当作「全部」）", async () => {
+		const ctx = setup();
+		const { proposal } = seedProposal(ctx);
+		await expect(
+			applyDocxProposal(proposal.id, acceptOptions(ctx, { selectedEdits: [] })),
+		).rejects.toThrow(/没有选中/);
+	});
+
 	it("文本建议不能走 docx 接受通道；未知 id 报可读错误", async () => {
 		const ctx = setup();
 		const textProposal = saveProposal(
@@ -693,6 +844,58 @@ function detectPlainPython() {
 const PYTHON = detectPlainPython();
 
 describe.skipIf(PYTHON === null)("真跑引擎（需要 python3 / python；没有解释器时整组跳过）", () => {
+	it("全有或全无（真跑引擎）：第 2 条找不到 → 原文件字节不变", async () => {
+		const ctx = setup();
+		const absPath = seedDocx(ctx);
+		const before = bytesOf(absPath);
+		const { tool } = makeTool(ctx, {
+			ensure: async () => ({ status: "ready", python: PYTHON }),
+			patch: void 0,
+			recordBinaryVersion: void 0,
+		});
+		await expect(
+			run(tool, {
+				path: absPath,
+				edits: [
+					{ find: FIND, replace: REPLACE },
+					{ find: "文档里不存在的整句", replace: "改掉" },
+				],
+			}),
+		).rejects.toThrow(/第 2 条/);
+		/* 第 1 条即使能成功，也不能因为第 2 条失败而留在原文件里。 */
+		expect(bytesOf(absPath)).toEqual(before);
+	});
+
+	it("一次两条替换：两条都生效、只留一版旧文件", async () => {
+		const ctx = setup();
+		const absPath = seedDocx(ctx);
+		const before = bytesOf(absPath);
+		const { tool } = makeTool(ctx, {
+			ensure: async () => ({ status: "ready", python: PYTHON }),
+			patch: void 0,
+			recordBinaryVersion: void 0,
+		});
+		const receipt = await run(tool, {
+			path: absPath,
+			edits: [
+				{ find: FIND, replace: REPLACE },
+				{ find: SECOND_FIND, replace: SECOND_REPLACE },
+			],
+		});
+		expect(receipt.replaced).toBe(2);
+		const body = await (await JSZip.loadAsync(bytesOf(absPath))).file("word/document.xml").async("string");
+		expect(body).toContain(REPLACE);
+		expect(body).toContain(SECOND_REPLACE);
+		expect(body).not.toContain(FIND);
+		expect(body).not.toContain(SECOND_FIND);
+
+		/* 一次接受只留一版「改前」的字节。 */
+		const key = versionKeyOf(absPath);
+		const history = readVersionFile(key, { dir: ctx.versions });
+		expect(history.versions).toHaveLength(1);
+		expect(readVersionBytes(key, history.versions[0].id, { dir: ctx.versions }).bytes).toEqual(before);
+	});
+
 	it("直接写回：正文被替换、其余部件不变、旧字节留在文件历史里", async () => {
 		const ctx = setup();
 		const absPath = seedDocx(ctx);

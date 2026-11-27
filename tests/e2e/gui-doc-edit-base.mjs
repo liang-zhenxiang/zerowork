@@ -476,6 +476,18 @@ function readDocView() {
 			docxAfterSign: card?.querySelector('[data-docx-block="after"] .rv-hunk-sign')?.textContent ?? "",
 			docxAfterSr: card?.querySelector('[data-docx-block="after"] .sr-only')?.textContent ?? "",
 			docxNote: (card?.querySelector("[data-docx-note]")?.textContent ?? "").trim(),
+			/* 多条（#499）：每条一个块，勾选态与前后文都读出来。 */
+			docxEdits: card === null
+				? []
+				: [...card.querySelectorAll("[data-docx-edit]")].map((node) => ({
+						index: node.getAttribute("data-docx-edit"),
+						checked: node.querySelector("input[type=checkbox]")?.checked ?? false,
+						label: node.querySelector("input[type=checkbox]")?.getAttribute("aria-label") ?? "",
+						before: (node.querySelector('[data-docx-block$="-before"] .rv-hunk-line')?.textContent ?? "").trim(),
+						after: (node.querySelector('[data-docx-block$="-after"] .rv-hunk-line')?.textContent ?? "").trim(),
+					})),
+			docxSummary: (card?.querySelector("[data-docx-summary]")?.textContent ?? "").trim(),
+			docxDiscard: (card?.querySelector("[data-docx-discard]")?.textContent ?? "").trim(),
 			hasCheckbox: card === null ? false : card.querySelector(".rv-hunk-head input[type=checkbox]") !== null,
 			hunkToolButtons: card === null ? 0 : card.querySelectorAll(".rv-hunk-tools button").length,
 			rowStats: [...main.querySelectorAll("[data-doc-edit-entry] .rv-row-stats")].map((s) => (s.textContent ?? "").trim()),
@@ -740,6 +752,26 @@ function seedDocxEdit(at) {
 	return { proposal, absPath, originalBytes: bytes };
 }
 
+function seedDocxMultiEdit(at) {
+	const absPath = join(h.WORKSPACE_DIR, "批量替换.docx");
+	copyFileSync(DOCX_FIXTURE, absPath);
+	const bytes = readFileSync(absPath);
+	const proposal = buildDocxProposal({
+		absPath,
+		baseSha256: sha256Bytes(bytes),
+		edits: [
+			{ find: DOCX_FIND, replace: DOCX_REPLACE },
+			{ find: "以上数据未经审计。", replace: "以上数据已经审计。" },
+		],
+		part: DOCX_PART_DEFAULT,
+		sessionId: "sess-doc-workbench-e2e",
+		toolName: "docx_replace",
+		at
+	});
+	saveProposal(proposal, { dir: DOC_EDITS_DIR });
+	return { proposal, absPath, originalBytes: bytes };
+}
+
 await h.check("docx 建议：显示替换前/后与目标部件，没有逐段勾选", async () => {
 	docxSeed = seedDocxEdit(Date.now());
 	await clickReviewRefresh();
@@ -919,6 +951,40 @@ async function sessionCwd() {
 	return cwd;
 }
 
+await h.check("docx 多条建议：逐条勾选，未勾选的按拒绝提示", async () => {
+	const seeded = seedDocxMultiEdit(Date.now() + 2_000);
+	await clickReviewRefresh();
+	const view = await waitDocView(
+		(state) => state.docx === true && state.docxEdits.length === 2,
+		"两条 docx 建议卡渲染"
+	);
+	await h.waitForSettled();
+	assert.equal(view.docxEdits[0].label, "第 1 处替换");
+	assert.equal(view.docxEdits[0].checked, true);
+	assert.equal(view.docxEdits[1].checked, true);
+	assert.match(view.docxSummary, /已选 2 \/ 2 处/);
+	assert.equal(view.docxDiscard, "", "全选时不该出现「未勾选」提示");
+	const acceptAll = view.actions.find((action) => action.text.startsWith("接受替换"));
+	assert.equal(acceptAll?.text, "接受替换（2 处）");
+
+	await win.evaluate(() => {
+		document.querySelectorAll("[data-docx-edit] input[type=checkbox]")[1].click();
+	});
+	const one = await waitDocView(
+		(state) => state.docxEdits.length === 2 && state.docxEdits[1].checked === false,
+		"取消第二处后勾选态更新"
+	);
+	assert.match(one.docxSummary, /已选 1 \/ 2 处/);
+	assert.match(one.docxDiscard, /未勾选的 1 处会在接受时一并丢弃/);
+	const acceptOne = one.actions.find((action) => action.text.startsWith("接受替换"));
+	assert.equal(acceptOne?.text, "接受替换（1 处）");
+	await h.waitForSettled();
+	await h.shoot("docx-multi-select");
+
+	/* 只验证 UI 选择与提示；实际写回（含只写勾选项）由单测覆盖。 */
+	await win.evaluate((id) => globalThis.kami.rejectDocEdit(id), seeded.proposal.id);
+});
+
 await h.check("docx 工具：模型调用在修订模式下生成建议、文件不变", async () => {
 	const cwd = await sessionCwd();
 	const target = join(cwd, DOCX_TOOL_NAME);
@@ -995,8 +1061,9 @@ await h.check("docx 工具：接受后保真清单与版本还原", async () => 
 	const target = docxToolTarget;
 	assert.ok(target !== undefined, "上一条用例没有留下真实链路的建议");
 
+	/* docx 的第二个参数是替换条目下标；这条建议只有一条 → [0]。 */
 	const accepted = await win.evaluate(
-		({ id }) => globalThis.kami.applyDocEdit(id, []),
+		({ id }) => globalThis.kami.applyDocEdit(id, [0]),
 		{ id: docxToolProposal.id }
 	);
 	/* 成功时返回的是写回结果（不是 `{ok:true}`）；失败会抛错、由 h.check 记为失败。 */

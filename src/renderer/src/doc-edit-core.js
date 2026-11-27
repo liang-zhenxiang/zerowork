@@ -180,9 +180,8 @@ export function hunkApplyLabel(hunk, index) {
 /**
  * 这条建议是不是 docx 文本替换（#481 生成的 `kind:"docx"`）。
  *
- * 视图据此走两套完全不同的主体：docx 只有**一处**替换（`find` → `replace`），
- * 没有逐段 hunk，也没有可勾选的东西 —— 不能把逐段 UI 套上去（那会承诺一个
- * 不存在的「只应用其中一段」的能力）。
+ * 视图据此走两套完全不同的主体：docx 的条目是 `edits`（v2 起可多条），
+ * 没有逐段 hunk。多条时可以逐条勾选；单条时与 v1 一样只展示一处替换。
  */
 export function isDocxProposal(proposal) {
 	return proposal?.kind === "docx";
@@ -190,8 +189,11 @@ export function isDocxProposal(proposal) {
 
 /** 列表项的 `+N −M`；没有记录时如实说，不摆一个不存在的 +0 −0。 */
 export function formatProposalStats(entry) {
-	// docx 建议固定一处替换：报「1 处替换」而不是伪造的 +1 −1 行。
-	if (isDocxProposal(entry)) return "1 处替换";
+	// docx 报真实的替换条数，而不是伪造的 +N −M 行。
+	if (isDocxProposal(entry)) {
+		const count = Array.isArray(entry?.edits) && entry.edits.length > 0 ? entry.edits.length : 1;
+		return `${count} 处替换`;
+	}
 	const added = finiteNumber(entry?.added);
 	const removed = finiteNumber(entry?.removed);
 	if (added === undefined || removed === undefined) return "行数未记录";
@@ -252,9 +254,10 @@ export function acceptSuccessText(name, applied, total, added, removed) {
  * 而 docx 没有段也不存在丢弃 —— 硬套会说出「1 / 1 段（+1 −1 行）」这种
  * 在文档里并不存在的东西。
  */
-export function acceptDocxSuccessText(name) {
+export function acceptDocxSuccessText(name, count = 1) {
 	const file = typeof name === "string" && name !== "" ? name : "这份文档";
-	return `已替换「${file}」正文中的 1 处文字`;
+	const total = Number.isInteger(count) && count > 0 ? count : 1;
+	return `已替换「${file}」正文中的 ${total} 处文字`;
 }
 
 /** 拒绝成功后的 toast / 播报：必须说清「文件没有被改动」。 */
