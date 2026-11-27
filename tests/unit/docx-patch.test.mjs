@@ -32,6 +32,7 @@ import {
 	DEFAULT_PATCH_PART,
 	DEFAULT_PATCH_TIMEOUT_MS,
 	DocxPatchError,
+	inspectDocx,
 	patchDocx,
 } from "../../src/main/daemon/docx-patch.js";
 
@@ -177,6 +178,75 @@ describe("patchDocx：请求与参数", () => {
 	it("请求不是对象、run 不是函数也拒绝", async () => {
 		expect((await capture(patchDocx(null, fakeRun(successOutcome()).run))).code).toBe("bad-request");
 		expect((await capture(patchDocx(makeReq(), null))).code).toBe("bad-request");
+	});
+});
+
+describe("inspectDocx：只读定位", () => {
+	const OK = {
+		ok: true,
+		part: "word/document.xml",
+		context: {
+			paragraph: 2,
+			heading: "季度报告",
+			text: "本季度营收 增长 12%，详见 公开报告。",
+			offset: 0,
+			length: 5,
+		},
+	};
+	const okOutcome = () => ({ code: 0, stdout: `${JSON.stringify(OK)}\n`, stderr: "" });
+	const req = (overrides = {}) => ({
+		python: "python3",
+		engineDir: join(ROOT, "resources", "docx-engine"),
+		inputPath: "/tmp/a.docx",
+		find: "本季度营收",
+		...overrides,
+	});
+
+	it("成功 → part + context，并带 --inspect 与定位参数", async () => {
+		const { run, calls } = fakeRun(okOutcome());
+		const result = await inspectDocx(req(), run);
+		expect(result).toEqual({ part: "word/document.xml", context: OK.context });
+		expect(calls[0].args).toEqual([
+			join(ROOT, "resources", "docx-engine", "patch_docx.py"),
+			"--inspect",
+			"--in=/tmp/a.docx",
+			`--part=${DEFAULT_PATCH_PART}`,
+			"--find=本季度营收",
+		]);
+	});
+
+	it("参数不合法 → bad-request，且不启动进程", async () => {
+		for (const overrides of [{ python: "" }, { engineDir: "" }, { inputPath: "" }, { find: "" }]) {
+			const { run, calls } = fakeRun(okOutcome());
+			const error = await capture(inspectDocx(req(overrides), run));
+			expect(error.code).toBe("bad-request");
+			expect(calls).toHaveLength(0);
+		}
+	});
+
+	it.each([
+		["paragraph 为 0", { paragraph: 0 }],
+		["paragraph 不是整数", { paragraph: 1.5 }],
+		["text 不是字符串", { text: 1 }],
+		["offset 为负", { offset: -1 }],
+		["length 为 0", { length: 0 }],
+		["offset+length 越界", { offset: 10, length: 100 }],
+		["heading 既不是字符串也不是 null", { heading: 1 }],
+	])("context 字段不合法（%s）→ engine-output-invalid", async (_label, patch) => {
+		const { run } = fakeRun({
+			code: 0,
+			stdout: `${JSON.stringify({ ...OK, context: { ...OK.context, ...patch } })}\n`,
+			stderr: "",
+		});
+		const error = await capture(inspectDocx(req(), run));
+		expect(error.code).toBe("engine-output-invalid");
+	});
+
+	it("引擎拒绝（not-found）按错误码带出，不当作成功", async () => {
+		const { run } = fakeRun(failureOutcome("not-found", "找不到原文"));
+		const error = await capture(inspectDocx(req(), run));
+		expect(error.code).toBe("not-found");
+		expect(error.message).toContain("找不到原文");
 	});
 });
 
@@ -440,6 +510,57 @@ function paragraphTexts(path) {
 const describeEngine = PYTHON === null ? describe.skip : describe;
 
 describeEngine("真跑引擎（需要 python3 / python / py -3；本机没有解释器时整组跳过）", () => {
+	it("inspect：只读报告第 2 段、标题与窗口偏移，不产出任何文件", () => {
+		const dir = tempDir();
+		const sourceBefore = sha256File(DOCX_A);
+		const out = join(dir, "never.docx");
+		const result = runEngine([
+			`--in=${DOCX_A}`,
+			"--inspect",
+			"--find=本季度营收",
+		]);
+		expect(result.status, result.stderr).toBe(0);
+		const report = JSON.parse(result.stdout.trim());
+		expect(report).toMatchObject({
+			ok: true,
+			part: "word/document.xml",
+			context: { paragraph: 2, heading: "季度报告", offset: 0, length: 5 },
+		});
+		expect(report.context.text).toContain("本季度营收");
+		expectNoOutput(out);
+		expect(sha256File(DOCX_A)).toBe(sourceBefore);
+	});
+
+	it("inspect：找不到 / 多条命中按错误码拒绝，且不写文件", () => {
+		const dir = tempDir();
+		const out = join(dir, "never.docx");
+		const missing = runEngine([`--in=${DOCX_A}`, "--inspect", "--find=不存在的文本"]);
+		expect(missing.status).toBe(1);
+		expect(JSON.parse(missing.stderr.trim()).code).toBe("not-found");
+		const repeat = runEngine([`--in=${DOCX_A}`, "--inspect", "--find=第"]);
+		expect(repeat.status).toBe(1);
+		expect(JSON.parse(repeat.stderr.trim()).code).toBe("multiple-matches");
+		expectNoOutput(out);
+	});
+
+	it("inspect：文档没有标题时 heading 为 null（不编造）", async () => {
+		const dir = tempDir();
+		const doc = join(dir, "no-heading.docx");
+		writeFileSync(
+			doc,
+			await makeDocx(
+				documentXml(
+					"<w:p><w:r><w:t>第一段</w:t></w:r></w:p>"
+						+ "<w:p><w:r><w:t>目标文字</w:t></w:r></w:p>",
+				),
+			),
+		);
+		const result = runEngine([`--in=${doc}`, "--inspect", "--find=目标文字"]);
+		expect(result.status, result.stderr).toBe(0);
+		const report = JSON.parse(result.stdout.trim());
+		expect(report.context).toMatchObject({ paragraph: 2, heading: null });
+	});
+
 	it("正文替换：退出 0、目标条目变化、其余条目逐字节一致", () => {
 		const dir = tempDir();
 		const out = join(dir, "a-patched.docx");

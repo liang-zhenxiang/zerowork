@@ -386,6 +386,27 @@ function normalizeDocxEdits(raw) {
 }
 
 /**
+ * docx 建议的可选上下文（#500）：命中所在段落的位置信息。
+ * 字段不合法一律丢弃 —— 它是锦上添花，不该让一条能用的建议变成损坏记录。
+ */
+function normalizeDocxContext(raw) {
+	if (!isPlainObject(raw)) return undefined;
+	if (!Number.isInteger(raw.paragraph) || raw.paragraph < 1) return undefined;
+	if (typeof raw.text !== "string") return undefined;
+	if (!Number.isInteger(raw.offset) || raw.offset < 0) return undefined;
+	if (!Number.isInteger(raw.length) || raw.length <= 0) return undefined;
+	if (raw.offset + raw.length > raw.text.length) return undefined;
+	if (raw.heading !== null && typeof raw.heading !== "string") return undefined;
+	return {
+		paragraph: raw.paragraph,
+		heading: raw.heading,
+		text: raw.text,
+		offset: raw.offset,
+		length: raw.length,
+	};
+}
+
+/**
  * 生成一条 **docx 文本替换**建议（纯计算，不碰磁盘，#481）。
  *
  * 与文本建议的区别：docx 是二进制压缩包，没有「前后全文」可给 —— 建议里存的是
@@ -398,7 +419,7 @@ function normalizeDocxEdits(raw) {
  * 落盘时同时写 `edits` 与首条的 `find` / `replace`：旧版本读回时仍能工作，
  * 新版本读取时优先 `edits`。
  */
-function buildDocxProposal({ absPath, baseSha256, find, replace, edits, part, sessionId, toolName, at } = {}) {
+function buildDocxProposal({ absPath, baseSha256, find, replace, edits, context, part, sessionId, toolName, at } = {}) {
 	if (typeof absPath !== "string" || absPath === "") throw new Error("缺少目标文件的绝对路径，无法生成待审建议");
 	if (typeof baseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(baseSha256)) {
 		throw new Error("缺少目标文件的基准哈希（sha256），无法生成待审建议");
@@ -417,6 +438,7 @@ function buildDocxProposal({ absPath, baseSha256, find, replace, edits, part, se
 		edits: normalized,
 		find: normalized[0].find,
 		replace: normalized[0].replace,
+		context: normalizeDocxContext(context),
 		sessionId: typeof sessionId === "string" ? sessionId : "",
 		createdAt,
 		toolName: typeof toolName === "string" ? toolName : "",
@@ -477,6 +499,7 @@ function parseProposal(raw) {
 			edits,
 			find: edits[0].find,
 			replace: edits[0].replace,
+			context: normalizeDocxContext(raw.context),
 			sessionId: typeof raw.sessionId === "string" ? raw.sessionId : "",
 			createdAt: raw.createdAt,
 			toolName: typeof raw.toolName === "string" ? raw.toolName : "",
@@ -1374,6 +1397,7 @@ export {
 	lineOps,
 	listProposals,
 	mergeSelectedHunks,
+	normalizeDocxContext,
 	normalizeDocxEdits,
 	normalizeSelectedEdits,
 	parseProposal,

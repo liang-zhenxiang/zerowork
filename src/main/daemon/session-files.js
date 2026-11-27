@@ -3711,6 +3711,18 @@ async function createHost(bucket, sessionManager) {
         homeDir: homedir(),
         getDocEditMode: () => bucket.conversation.state.docEditMode === true,
         getSessionId: () => adoptedSessionId(bucket),
+        /*
+         * 建议的上下文（#500）：只有运行时**已就绪**时才尝试定位；
+         * 未就绪直接跳过 —— 不 ensure、不阻塞建议生成。
+         */
+        getPythonStatus: () => {
+          const item = collectRuntimeInventory().items.find((entry) => entry.id === "python");
+          const status = item?.status ?? {};
+          return {
+            ready: status.kind === "ready",
+            python: typeof item?.executable === "string" ? item.executable : ""
+          };
+        },
         onAudit: writeAuditRecord
       }),
       // 内联可视化（read_me + show_widget）：无副作用、无用户交互，

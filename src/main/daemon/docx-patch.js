@@ -263,15 +263,128 @@ async function patchDocx(req, run = defaultRun) {
 	throw parsePatchFailure(stderr, outcome.code);
 }
 
+
+/** inspect 请求的校验：只需要 python / engineDir / inputPath / find（part 可选）。 */
+function normalizeInspectRequest(req) {
+	if (typeof req !== "object" || req === null) {
+		throw new DocxPatchError("bad-request", "inspectDocx 的请求必须是对象");
+	}
+	const python = requireNonEmptyString(req.python, "python");
+	const engineDir = requireNonEmptyString(req.engineDir, "engineDir");
+	const inputPath = requireNonEmptyString(req.inputPath, "inputPath");
+	const find = requireNonEmptyString(req.find, "find");
+	const part = req.part === void 0 ? DEFAULT_PATCH_PART : requireNonEmptyString(req.part, "part");
+	return {
+		python,
+		engineDir,
+		scriptPath: join(engineDir, DEFAULT_PATCH_SCRIPT),
+		inputPath,
+		part,
+		find,
+		timeoutMs: optionalPositiveNumber(req.timeoutMs, "timeoutMs", DEFAULT_PATCH_TIMEOUT_MS),
+		maxOutputBytes: optionalPositiveNumber(
+			req.maxOutputBytes,
+			"maxOutputBytes",
+			DEFAULT_MAX_OUTPUT_BYTES,
+		),
+	};
+}
+
+/** 解析 inspect 成功输出；context 字段严格校验（UI 直接按 offset/length 切文本）。 */
+function parseInspectSuccess(stdout) {
+	let parsed;
+	try {
+		parsed = JSON.parse(stdout.trim());
+	} catch {
+		throw contractError(`stdout 不是 JSON：${excerpt(stdout)}`);
+	}
+	if (typeof parsed !== "object" || parsed === null || parsed.ok !== true) {
+		throw contractError(`stdout 缺少 ok:true：${excerpt(stdout)}`);
+	}
+	const { part, context } = parsed;
+	if (typeof part !== "string" || part === "") {
+		throw contractError("part 字段缺失或不是非空字符串");
+	}
+	if (typeof context !== "object" || context === null) {
+		throw contractError("context 字段缺失或不是对象");
+	}
+	const { paragraph, heading, text, offset, length } = context;
+	if (!Number.isInteger(paragraph) || paragraph < 1) {
+		throw contractError(`context.paragraph 不是正整数（收到 ${String(paragraph)}）`);
+	}
+	if (typeof text !== "string") {
+		throw contractError("context.text 不是字符串");
+	}
+	if (!Number.isInteger(offset) || offset < 0) {
+		throw contractError(`context.offset 不是非负整数（收到 ${String(offset)}）`);
+	}
+	if (!Number.isInteger(length) || length <= 0) {
+		throw contractError(`context.length 不是正整数（收到 ${String(length)}）`);
+	}
+	if (offset + length > text.length) {
+		throw contractError("context 的 offset / length 超出 text 范围");
+	}
+	if (heading !== null && typeof heading !== "string") {
+		throw contractError("context.heading 既不是字符串也不是 null");
+	}
+	return { part, context: { paragraph, heading, text, offset, length } };
+}
+
+/**
+ * 只读定位（#500）：返回命中位置的段落序号、最近标题与窗口文本，**不写文件**。
+ * 与 `patchDocx` 共用引擎的定位逻辑，所以「看到的位置」与「改动的位置」一致。
+ */
+async function inspectDocx(req, run = defaultRun) {
+	const options = normalizeInspectRequest(req);
+	if (typeof run !== "function") {
+		throw new DocxPatchError("bad-request", "inspectDocx 的 run 参数必须是函数");
+	}
+	const outcome = await run({
+		command: options.python,
+		args: [
+			options.scriptPath,
+			"--inspect",
+			`--in=${options.inputPath}`,
+			`--part=${options.part}`,
+			`--find=${options.find}`,
+		],
+		cwd: options.engineDir,
+		env: { PYTHONPATH: options.engineDir },
+		timeoutMs: options.timeoutMs,
+		maxOutputBytes: options.maxOutputBytes,
+	}).catch((error) => {
+		const detail = error instanceof Error ? error.message : String(error);
+		throw new DocxPatchError("spawn-failed", `Python 调用失败：${detail}（${options.python}）`);
+	});
+	if (typeof outcome !== "object" || outcome === null) {
+		throw contractError("run 没有返回 { code, stdout, stderr } 形态的结果");
+	}
+	if (outcome.timedOut === true) {
+		throw new DocxPatchError("timeout", `docx 定位超时（>${options.timeoutMs}ms）`);
+	}
+	if (outcome.outputTruncated === true) {
+		throw new DocxPatchError("output-too-large", `引擎输出超过上限（${options.maxOutputBytes} 字节）`);
+	}
+	if (outcome.code === null) {
+		throw new DocxPatchError("spawn-failed", `Python 未能启动：${outcome.error ?? "未知原因"}`);
+	}
+	const stdout = typeof outcome.stdout === "string" ? outcome.stdout : "";
+	const stderr = typeof outcome.stderr === "string" ? outcome.stderr : "";
+	if (outcome.code === 0) return parseInspectSuccess(stdout);
+	throw parsePatchFailure(stderr, outcome.code);
+}
+
 export {
 	DEFAULT_MAX_OUTPUT_BYTES,
 	DEFAULT_PATCH_PART,
 	DEFAULT_PATCH_SCRIPT,
 	DEFAULT_PATCH_TIMEOUT_MS,
 	DocxPatchError,
+	inspectDocx,
 	ENGINE_FAILURE_HINTS,
 	buildPatchArgs,
 	normalizeRequest,
+	parseInspectSuccess,
 	parsePatchFailure,
 	parsePatchSuccess,
 	patchDocx,

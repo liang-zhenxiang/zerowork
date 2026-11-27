@@ -32546,6 +32546,7 @@ import {
 	hunkRangeText,
 	isDocxProposal,
 	mergeSelectAll,
+	splitDocxContext,
 	proposalDirLabel,
 	proposalModeLabel,
 	proposalNameOf,
@@ -76797,6 +76798,23 @@ function DocEditDetail({ proposalId, proposalHint, sessions, onResumeSession, on
                   docxBlock("替换前", "before", "−", edit.find, "diff-del"),
                   docxBlock("替换后", "after", "+", edit.replace, "diff-add")
                 ] }, `docx-${index}`)) }),
+            multiDocx
+              ? null
+              : (() => {
+                  const parts = splitDocxContext(detail.context);
+                  if (detail.context === void 0 || detail.context === null) {
+                    return /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", "data-docx-context-missing": true, children: "位置信息不可用（运行时未就绪，或这条建议来自旧版本）。" });
+                  }
+                  const badge = `第 ${detail.context.paragraph} 段${detail.context.heading === null || detail.context.heading === void 0 || detail.context.heading === "" ? "" : ` · 标题：${detail.context.heading}`}`;
+                  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "rv-docx-where", "data-docx-where": true, children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "rv-docx-where-badge", children: badge }),
+                    parts !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "rv-docx-context", "data-docx-context": true, children: [
+                      parts.before,
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("mark", { className: "rv-docx-hit", children: parts.match }),
+                      parts.after
+                    ] })
+                  ] });
+                })(),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "fh-card-note", "data-docx-note": true, children: multiDocx ? "勾选的条目会写回正文，未勾选的按拒绝处理；不保留 Word 原生修订痕迹。接受前会先把当前文件存成版本。" : "v1 只替换正文里这一处文字；不保留 Word 原生修订痕迹。接受前会先把当前文件存成版本。" })
           ] })
         : hunks.length === 0
