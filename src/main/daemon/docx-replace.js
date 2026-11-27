@@ -32,8 +32,10 @@ import { basename, extname } from "node:path";
 import { Type } from "typebox";
 import { clipAuditDetail, writeAuditRecord } from "./audit.js";
 import {
+	applyDocxEditsToFile,
 	buildDocxProposal,
 	DOCX_MAX_BYTES,
+	DOCX_MAX_EDITS,
 	resolveInsideWorkspace,
 	saveProposal,
 	sha256Bytes,
@@ -90,21 +92,52 @@ function requireNonEmptyString(value, name) {
 }
 
 /**
- * 入参校验。`replace` 也要求非空：v1 不支持「把原文删成空」（那会让 Word 里的
- * 段落标记/空格归属变复杂，且与本工具的「替换一段文字」定位不符）。要删文字请
- * 在 Word 里手动删，或换成等价的改写。
+ * 入参校验。两种形状二选一：
+ *
+ * - 单条：`path + find + replace`（#481 起的旧形状，保留）；
+ * - 多条：`path + edits: [{ find, replace }]`（#499）。两者同时出现直接拒绝 ——
+ *   否则「到底以哪个为准」就是一个要猜的语义。
+ *
+ * `replace` 要求非空：不支持「把原文删成空」（那会让 Word 里的段落标记/空格归属
+ * 变复杂，且与本工具的「替换一段文字」定位不符）。要删文字请在 Word 里手动删，
+ * 或换成等价的改写。条数上限见 `DOCX_MAX_EDITS`。
  */
 function normalizeParams(params) {
 	if (typeof params !== "object" || params === null) {
-		throw new Error("docx_replace 的参数必须是对象（path / find / replace）");
+		throw new Error("docx_replace 的参数必须是对象（path 与 edits，或 path + find + replace）");
 	}
 	const path = requireNonEmptyString(params.path, "path");
+	const hasEdits = params.edits !== void 0;
+	const hasSingle = params.find !== void 0 || params.replace !== void 0;
+	if (hasEdits && hasSingle) {
+		throw new Error("docx_replace 的 edits 与 find/replace 不能同时给出：多条修改用 edits，单条用 find/replace");
+	}
+	if (hasEdits) {
+		if (!Array.isArray(params.edits) || params.edits.length === 0) {
+			throw new Error("docx_replace 的 edits 必须是非空数组（至少一条 { find, replace }）");
+		}
+		if (params.edits.length > DOCX_MAX_EDITS) {
+			throw new Error(`docx_replace 一次最多 ${DOCX_MAX_EDITS} 条替换（收到 ${params.edits.length} 条）；请拆成几次调用`);
+		}
+		const edits = params.edits.map((edit, index) => {
+			if (typeof edit !== "object" || edit === null || Array.isArray(edit)) {
+				throw new Error(`docx_replace 的 edits[${index}] 必须是对象 { find, replace }`);
+			}
+			const find = requireNonEmptyString(edit.find, `edits[${index}].find`);
+			const replace = requireNonEmptyString(edit.replace, `edits[${index}].replace`);
+			if (find === replace) {
+				throw new Error(`docx_replace 的 edits[${index}] 前后完全相同，不会产生改动`);
+			}
+			return { find, replace };
+		});
+		return { path, edits };
+	}
 	const find = requireNonEmptyString(params.find, "find");
 	const replace = requireNonEmptyString(params.replace, "replace");
 	if (find === replace) {
 		throw new Error("docx_replace 的 find 与 replace 完全相同，这次调用不会产生任何改动");
 	}
-	return { path, find, replace };
+	return { path, edits: [{ find, replace }] };
 }
 
 /** 目标路径 → 工作区内的绝对路径；越界/逃逸一律给出可读拒绝，不静默降级。 */
@@ -181,7 +214,9 @@ async function ensureRuntime(options) {
 function describePatchFailure(error, name) {
 	const message = error instanceof Error ? error.message : String(error);
 	const code = error instanceof DocxPatchError ? error.code : "unknown";
-	const where = `${name}${code === "unknown" ? "" : `（${code}）`}`;
+	const edit =
+		typeof error?.editIndex === "number" ? ` 第 ${error.editIndex + 1} 条替换` : "";
+	const where = `${name}${edit}${code === "unknown" ? "" : `（${code}）`}`;
 	if (SEMANTIC_ENGINE_CODES.has(code)) {
 		return `${message}\n只处理正文部件 word/document.xml 里**唯一命中**的纯文本（可以跨同格式的相邻 run）；找不到原文、多处命中、跨格式不同的 run，或中间夹着制表符/换行，请在 Word 里手动修改（${where}）。文件未修改。`;
 	}
@@ -231,8 +266,24 @@ function createDocxReplaceTool(options) {
 			],
 			parameters: Type.Object({
 				path: Type.String({ description: "要修改的 .docx 文件路径（必须位于工作区内）。" }),
-				find: Type.String({ description: "要替换的原文；必须与文档正文逐字一致，且在正文里只出现一次。" }),
-				replace: Type.String({ description: "替换后的文本（非空；v1 不支持把原文替换成空串）。" }),
+				edits: Type.Optional(
+					Type.Array(
+						Type.Object({
+							find: Type.String({ description: "要替换的原文；必须与文档正文逐字一致，且在正文里只出现一次。" }),
+							replace: Type.String({ description: "替换后的文本（非空）。" }),
+						}),
+						{
+							description:
+								"一次提交多条替换（最多 50 条）；每条独立要求唯一命中。与 find/replace 二选一。",
+						},
+					),
+				),
+				find: Type.Optional(
+					Type.String({ description: "单条替换的原文；与 edits 二选一。" }),
+				),
+				replace: Type.Optional(
+					Type.String({ description: "单条替换后的文本（非空）；与 edits 二选一。" }),
+				),
 			}),
 			async execute(_toolCallId, params) {
 				const input = normalizeParams(params);
@@ -251,8 +302,7 @@ function createDocxReplaceTool(options) {
 						proposal = buildDocxProposal({
 							absPath,
 							baseSha256,
-							find: input.find,
-							replace: input.replace,
+							edits: input.edits,
 							part: DEFAULT_PATCH_PART,
 							sessionId,
 							toolName: DOCX_REPLACE_TOOL_NAME,
@@ -268,10 +318,11 @@ function createDocxReplaceTool(options) {
 						id: saved.id,
 						path: absPath,
 						part: proposal.part,
-						find: input.find,
-						replace: input.replace,
+						edits: proposal.edits,
 						message:
-							"修订模式已开启：这次替换已保存为待审建议，**文件尚未修改**。请告知用户到审阅台接受或拒绝，不要原样重试。",
+							proposal.edits.length === 1
+								? "修订模式已开启：这次替换已保存为待审建议，**文件尚未修改**。请告知用户到审阅台接受或拒绝，不要原样重试。"
+								: `修订模式已开启：这 ${proposal.edits.length} 处替换已保存为一条待审建议，**文件尚未修改**。请告知用户到审阅台逐条勾选后接受或拒绝，不要原样重试。`,
 					});
 				}
 
@@ -310,21 +361,18 @@ function createDocxReplaceTool(options) {
 					);
 				}
 
-				const patch = options.patch ?? patchDocx;
 				let result;
 				try {
-					result = await patch(
-						{
-							python: env.python,
-							engineDir: options.engineDir,
-							inputPath: absPath,
-							outputPath: absPath,
-							part: DEFAULT_PATCH_PART,
-							find: input.find,
-							replace: input.replace,
-						},
-						options.run,
-					);
+					result = await applyDocxEditsToFile({
+						path: absPath,
+						bytes: currentBytes,
+						edits: input.edits,
+						python: env.python,
+						engineDir: options.engineDir,
+						part: DEFAULT_PATCH_PART,
+						patch: options.patch,
+						run: options.run,
+					});
 				} catch (error) {
 					const detail = error instanceof Error ? error.message : String(error);
 					const code = error instanceof DocxPatchError ? error.code : "unknown";
@@ -336,17 +384,20 @@ function createDocxReplaceTool(options) {
 					options,
 					"file",
 					"allowed",
-					`docx_replace：替换 ${name} 正文中的 1 处（${result.bytesBefore} → ${result.bytesAfter} 字节${result.crossRunMerged === true ? "，跨 run 合并" : ""}）`,
+					`docx_replace：替换 ${name} 正文中的 ${result.replaced} 处（共 ${result.bytesBefore} → ${result.bytesAfter} 字节${result.crossRunMerged === true ? "，跨 run 合并" : ""}）`,
 				);
 				return toolResult({
 					type: "docx_replace_result",
 					path: absPath,
-					part: result.part,
-					replaced: 1,
+					part: DEFAULT_PATCH_PART,
+					replaced: result.replaced,
 					mergedRuns: result.crossRunMerged === true,
 					bytesBefore: result.bytesBefore,
 					bytesAfter: result.bytesAfter,
-					message: "已在原文件上完成替换；改动前的旧版本已保存在文件历史里，可以回退。",
+					message:
+						result.replaced === 1
+							? "已在原文件上完成替换；改动前的旧版本已保存在文件历史里，可以回退。"
+							: `已在原文件上完成 ${result.replaced} 处替换；改动前的旧版本已保存在文件历史里，可以回退。`,
 				});
 			},
 		});

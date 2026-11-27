@@ -84,6 +84,9 @@ const DOCX_PART_DEFAULT = "word/document.xml";
  */
 const DOCX_MAX_BYTES = 20 * 1024 * 1024;
 
+/** 一次建议里最多几条替换。改太多说明模型在猜，逐条更可控。 */
+const DOCX_MAX_EDITS = 50;
+
 const PROPOSAL_EXT = ".json";
 const TMP_SUFFIX = ".tmp";
 
@@ -354,25 +357,56 @@ function buildProposal({ absPath, before, after, sessionId, toolName, at } = {})
 }
 
 /**
+ * 把「单条 find/replace」与「edits 数组」归一化成统一的 `[{ find, replace }]`。
+ *
+ * 单条路径保留是为了兼容 #481/#482 已落盘的建议与旧的工具调用；两者同时出现时
+ * **以 edits 为准**（本模块落盘时两个字段都写，读取时不该因此判成损坏）。
+ * 校验失败返回 `undefined`，由调用方给出场景化的错误。
+ */
+function normalizeDocxEdits(raw) {
+	if (!isPlainObject(raw)) return undefined;
+	if (raw.edits !== void 0) {
+		if (!Array.isArray(raw.edits) || raw.edits.length === 0 || raw.edits.length > DOCX_MAX_EDITS) {
+			return undefined;
+		}
+		const edits = [];
+		for (const edit of raw.edits) {
+			if (!isPlainObject(edit)) return undefined;
+			if (typeof edit.find !== "string" || edit.find === "") return undefined;
+			if (typeof edit.replace !== "string" || edit.replace === "") return undefined;
+			if (edit.find === edit.replace) return undefined;
+			edits.push({ find: edit.find, replace: edit.replace });
+		}
+		return edits;
+	}
+	if (typeof raw.find !== "string" || raw.find === "") return undefined;
+	if (typeof raw.replace !== "string" || raw.replace === "") return undefined;
+	if (raw.find === raw.replace) return undefined;
+	return [{ find: raw.find, replace: raw.replace }];
+}
+
+/**
  * 生成一条 **docx 文本替换**建议（纯计算，不碰磁盘，#481）。
  *
  * 与文本建议的区别：docx 是二进制压缩包，没有「前后全文」可给 —— 建议里存的是
- * 一处替换的三要素（`find` / `replace` / `part`）与**文件字节的基准哈希**。
- * 接受时按基准哈希判定原文是否变过，再让引擎在同一部件里做唯一命中替换。
+ * 替换条目（`edits`，v2 起可多条）与**文件字节的基准哈希**。接受时按基准哈希
+ * 判定原文是否变过，再让引擎在同一部件里逐条做唯一命中替换。
  *
  * `find === replace` 直接拒绝：那不会产生改动，留着只会让用户点一次「接受」却
  * 什么也没变（与文本建议的「没有实际改动」同一条纪律）。
+ *
+ * 落盘时同时写 `edits` 与首条的 `find` / `replace`：旧版本读回时仍能工作，
+ * 新版本读取时优先 `edits`。
  */
-function buildDocxProposal({ absPath, baseSha256, find, replace, part, sessionId, toolName, at } = {}) {
+function buildDocxProposal({ absPath, baseSha256, find, replace, edits, part, sessionId, toolName, at } = {}) {
 	if (typeof absPath !== "string" || absPath === "") throw new Error("缺少目标文件的绝对路径，无法生成待审建议");
 	if (typeof baseSha256 !== "string" || !/^[0-9a-f]{64}$/.test(baseSha256)) {
 		throw new Error("缺少目标文件的基准哈希（sha256），无法生成待审建议");
 	}
-	if (typeof find !== "string" || find === "") throw new Error("缺少要替换的原文（find），无法生成待审建议");
-	if (typeof replace !== "string" || replace === "") {
-		throw new Error("缺少替换后的文本（replace），无法生成待审建议");
+	const normalized = normalizeDocxEdits({ find, replace, edits });
+	if (normalized === undefined) {
+		throw new Error(`缺少有效的替换条目（find / replace 或 1–${DOCX_MAX_EDITS} 条 edits），无法生成待审建议`);
 	}
-	if (find === replace) throw new Error("这次替换没有产生任何实际改动（find 与 replace 完全相同）");
 	const createdAt = typeof at === "number" && Number.isFinite(at) ? at : Date.now();
 	return {
 		id: makeId(createdAt),
@@ -380,8 +414,9 @@ function buildDocxProposal({ absPath, baseSha256, find, replace, part, sessionId
 		path: absPath,
 		baseSha256,
 		part: typeof part === "string" && part !== "" ? part : DOCX_PART_DEFAULT,
-		find,
-		replace,
+		edits: normalized,
+		find: normalized[0].find,
+		replace: normalized[0].replace,
 		sessionId: typeof sessionId === "string" ? sessionId : "",
 		createdAt,
 		toolName: typeof toolName === "string" ? toolName : "",
@@ -406,7 +441,9 @@ function summarize(proposal) {
 		toolName: proposal.toolName,
 	};
 	if (proposal.kind === DOC_EDIT_KIND_DOCX) {
-		return { ...common, hunkCount: 1, added: 1, removed: 1, part: proposal.part };
+		const edits = normalizeDocxEdits(proposal) ?? [];
+		const count = edits.length;
+		return { ...common, hunkCount: count, added: count, removed: count, part: proposal.part };
 	}
 	const { added, removed } = countOps(proposal.ops);
 	return { ...common, hunkCount: proposal.hunks.length, added, removed };
@@ -429,16 +466,17 @@ function parseProposal(raw) {
 	if (typeof raw.createdAt !== "number" || !Number.isFinite(raw.createdAt)) return undefined;
 	if (raw.kind === DOC_EDIT_KIND_DOCX) {
 		if (typeof raw.part !== "string" || raw.part === "") return undefined;
-		if (typeof raw.find !== "string" || raw.find === "") return undefined;
-		if (typeof raw.replace !== "string" || raw.replace === "") return undefined;
+		const edits = normalizeDocxEdits(raw);
+		if (edits === undefined) return undefined;
 		return {
 			id: raw.id,
 			kind: DOC_EDIT_KIND_DOCX,
 			path: raw.path,
 			baseSha256: raw.baseSha256,
 			part: raw.part,
-			find: raw.find,
-			replace: raw.replace,
+			edits,
+			find: edits[0].find,
+			replace: edits[0].replace,
 			sessionId: typeof raw.sessionId === "string" ? raw.sessionId : "",
 			createdAt: raw.createdAt,
 			toolName: typeof raw.toolName === "string" ? raw.toolName : "",
@@ -1000,6 +1038,84 @@ function applyProposal(id, hunkIds, options = {}) {
  * @param {object} options `{ python, engineDir, dir?, versionsDir?, auditDir?, now?, run?, patch?, recordBinaryVersion? }`
  * @returns {Promise<{path:string, part:string, replaced:1, bytesBefore:number, bytesAfter:number, proposalDeleted:boolean}>}
  */
+/**
+ * 把「选中的条目下标」归一化：缺省 = 全部；空数组 = 明确什么都没选（拒绝）。
+ * 越界 / 非整数一律拒绝 —— 静默丢弃会让用户以为全改了。
+ */
+function normalizeSelectedEdits(value, total) {
+	if (value === void 0 || value === null) {
+		return Array.from({ length: total }, (_, index) => index);
+	}
+	if (!Array.isArray(value)) {
+		throw new Error("选择参数必须是替换条目的下标数组；目标文件没有被修改。");
+	}
+	const seen = new Set();
+	for (const item of value) {
+		if (!Number.isInteger(item) || item < 0 || item >= total) {
+			throw new Error(`选择的替换条目序号不合法（${String(item)}，共 ${total} 条）；目标文件没有被修改。`);
+		}
+		seen.add(item);
+	}
+	if (seen.size === 0) {
+		throw new Error("没有选中任何替换条目，本次没有修改文件。取消全部就是拒绝这条建议。");
+	}
+	return [...seen].sort((a, b) => a - b);
+}
+
+/**
+ * 在目标文件上**原子地**应用多条替换：先在同目录临时副本上逐条修补，全部
+ * 成功才用 rename 覆盖原文件。
+ *
+ * 为什么不是「引擎批量接口」：Node 侧循环就能复用现有的「单条 patch + 写后
+ * 自检」，而且天然满足**全有或全无** —— 任一 条失败时只删临时副本，原文件
+ * 一个字节都没动，不需要为批量扩大引擎的 CLI 面。
+ *
+ * 失败的原始错误上会带 `editIndex`（0 基），调用方据此告诉用户「第几条、为什么」。
+ * `bytesBefore` / `bytesAfter` 是**各条 find / replace 文字长度之和**（与单条
+ * 路径的口径一致），不是文件大小。
+ */
+async function applyDocxEditsToFile({ path, bytes, edits, python, engineDir, part, patch = patchDocx, run }) {
+	const tempPath = join(
+		dirname(path),
+		`.${basename(path)}.${randomBytes(6).toString("hex")}${TMP_SUFFIX}`,
+	);
+	const mode = statSync(path).mode & 0o777;
+	let bytesBefore = 0;
+	let bytesAfter = 0;
+	let crossRunMerged = false;
+	try {
+		writeFileSync(tempPath, bytes, { mode });
+		for (let index = 0; index < edits.length; index += 1) {
+			let result;
+			try {
+				result = await patch(
+					{
+						python,
+						engineDir,
+						inputPath: tempPath,
+						outputPath: tempPath,
+						part,
+						find: edits[index].find,
+						replace: edits[index].replace,
+					},
+					run,
+				);
+			} catch (error) {
+				const wrapped = error instanceof Error ? error : new Error(String(error));
+				wrapped.editIndex = index;
+				throw wrapped;
+			}
+			bytesBefore += result.bytesBefore;
+			bytesAfter += result.bytesAfter;
+			if (result.crossRunMerged === true) crossRunMerged = true;
+		}
+		renameSync(tempPath, path);
+		return { replaced: edits.length, bytesBefore, bytesAfter, crossRunMerged };
+	} finally {
+		rmSync(tempPath, { force: true });
+	}
+}
+
 async function applyDocxProposal(id, options = {}) {
 	if (!isDocEditId(id)) throw new Error(`修订建议 id 格式不正确：${String(id)}`);
 	const proposal = readProposal(id, { dir: options.dir });
@@ -1058,35 +1174,35 @@ async function applyDocxProposal(id, options = {}) {
 		);
 	}
 
-	const patch = options.patch ?? patchDocx;
+	const selected = normalizeSelectedEdits(options.selectedEdits, proposal.edits.length);
+	const chosen = selected.map((index) => proposal.edits[index]);
 	let result;
 	try {
-		result = await patch(
-			{
-				python: options.python,
-				engineDir: options.engineDir,
-				inputPath: proposal.path,
-				outputPath: proposal.path,
-				part: proposal.part,
-				find: proposal.find,
-				replace: proposal.replace,
-			},
-			options.run,
-		);
+		result = await applyDocxEditsToFile({
+			path: proposal.path,
+			bytes: state.bytes,
+			edits: chosen,
+			python: options.python,
+			engineDir: options.engineDir,
+			part: proposal.part,
+			patch: options.patch,
+			run: options.run,
+		});
 	} catch (error) {
 		const detail = error instanceof Error ? error.message : String(error);
 		const code = typeof error?.code === "string" && error.code !== "" ? error.code : "unknown";
+		const which = typeof error?.editIndex === "number" ? `第 ${error.editIndex + 1} 条替换失败：` : "";
 		writeFileAudit(
 			"failed",
 			`接受 docx 修订建议 ${id} 中止：引擎修补失败（${name}，${code}）：${detail}`,
 			options.auditDir,
 		);
-		throw error instanceof Error ? error : new Error(detail);
+		throw new Error(`${which}${detail}；目标文件没有被修改。`, { cause: error });
 	}
 
 	writeFileAudit(
 		"allowed",
-		`接受 docx 修订建议 ${id}：替换 ${name} 正文中的 1 处（${result.bytesBefore} → ${result.bytesAfter} 字节）`,
+		`接受 docx 修订建议 ${id}：替换 ${name} 正文中的 ${result.replaced} 处（共 ${result.bytesBefore} → ${result.bytesAfter} 字节）`,
 		options.auditDir,
 	);
 
@@ -1105,8 +1221,8 @@ async function applyDocxProposal(id, options = {}) {
 
 	return {
 		path: proposal.path,
-		part: result.part,
-		replaced: 1,
+		part: proposal.part,
+		replaced: result.replaced,
 		bytesBefore: result.bytesBefore,
 		bytesAfter: result.bytesAfter,
 		proposalDeleted,
@@ -1233,6 +1349,7 @@ function createDocEditExtension(options) {
 
 export {
 	DOCX_MAX_BYTES,
+	DOCX_MAX_EDITS,
 	DOCX_PART_DEFAULT,
 	DOC_EDIT_BLOCK_PREFIX,
 	DOC_EDIT_EXTENSIONS,
@@ -1241,6 +1358,7 @@ export {
 	DOC_EDIT_KIND_TEXT,
 	DOC_EDIT_MAX_BYTES,
 	DOC_EDIT_MAX_ENTRIES,
+	applyDocxEditsToFile,
 	applyDocxProposal,
 	applyProposal,
 	applyToolInput,
@@ -1256,6 +1374,8 @@ export {
 	lineOps,
 	listProposals,
 	mergeSelectedHunks,
+	normalizeDocxEdits,
+	normalizeSelectedEdits,
 	parseProposal,
 	readProposal,
 	rejectProposal,

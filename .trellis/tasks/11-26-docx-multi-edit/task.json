@@ -1,8 +1,8 @@
 {
-  "id": "docx-cross-run",
-  "name": "docx-cross-run",
-  "title": "跨 run 文本替换",
-  "description": "docx_replace 支持同格式相邻 run 的合并定位与替换，格式不同仍拒绝；补齐夹具、单测与 ADR（#498）",
+  "id": "docx-multi-edit",
+  "name": "docx-multi-edit",
+  "title": "一次多处 docx 替换",
+  "description": "docx_replace 支持一次提交多条替换、工作台逐条勾选、全有或全无地写盘（#499）",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,

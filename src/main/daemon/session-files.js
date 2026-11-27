@@ -6109,9 +6109,9 @@ const handlers = {
    * 三道闸（建议可读 / 原文未变 / 旧版已留下）任一不过都**不写目标文件**；
    * 校验与写回的细节在 doc-edits.js（可单测），这里只做入参形状检查。
    *
-   * **docx 建议走另一条通道**（#482）：它不是逐段文本，`hunkIds` 没有意义
-   * （可以是空数组），真正的写回是「一处文字替换」。这条通道**在运行时 ensure
-   * 之后**才由 `applyDocxProposal` 重读文件做哈希守卫 —— ensure 可能装几分钟，
+   * **docx 建议走另一条通道**（#482）：它的「选择」是替换条目的下标（v2 起可多条，
+   * 单条时是 `[0]`），不是 hunk id；真正的写回由引擎逐条完成。这条通道**在运行时
+   * ensure 之后**才由 `applyDocxProposal` 重读文件做哈希守卫 —— ensure 可能装几分钟，
    * 期间用户手改过的话，守卫看到的是最新字节，不会悄悄覆盖。
    */
   [INVOKE.applyDocEdit]: async ([id, hunkIds]) => {
@@ -6119,7 +6119,7 @@ const handlers = {
       throw new Error(`修订建议 id 格式不正确：${String(id)}`);
     }
     if (!Array.isArray(hunkIds)) {
-      throw new Error("要应用的改动段必须是数组 —— 元素是 hunk 的 id，形如 h1。");
+      throw new Error("要应用的选择必须是数组 —— 文本建议传 hunk id（形如 h1），docx 建议传替换条目下标。");
     }
     const proposal = readProposal(id);
     if (proposal?.kind !== "docx") {
@@ -6157,7 +6157,7 @@ const handlers = {
         `docx 替换环境未就绪（${env?.phase ?? "unknown"}）：${env?.error ?? "未知原因"}\n请到「设置 → 内置运行时」安装后再试。目标文件没有被修改。`,
       );
     }
-    return applyDocxProposal(id, { python: env.python, engineDir });
+    return applyDocxProposal(id, { python: env.python, engineDir, selectedEdits: hunkIds });
   },
   /** 拒绝一条建议（#458）：丢弃整条建议、**不碰目标文件**；拒绝也留审计。 */
   [INVOKE.rejectDocEdit]: async ([id]) => {
