@@ -19,6 +19,7 @@ import {
 	saveProposal,
 	sha256Bytes,
 } from "../../src/main/daemon/doc-edits.js";
+import JSZip from "jszip";
 import { ROOT, createHarness, waitUntil } from "./lib/harness.mjs";
 
 const runFile = promisify(execFile);
@@ -73,10 +74,11 @@ function startWriteServer() {
 			 *   · 「docx 跨 run」→ 夹具里被 Word 拆开的那段文字，应当被引擎拒绝。
 			 */
 			const wantsDocxReplace = userText.includes("docx 替换");
-			const wantsDocxCrossRun = userText.includes("docx 跨 run");
+			const wantsDocxCrossRunMerged = userText.includes("docx 跨 run 成功");
+			const wantsDocxCrossRun = !wantsDocxCrossRunMerged && userText.includes("docx 跨 run");
 			if (
 				!afterLastUser.some((message) => message.role === "tool") &&
-				(wantsDocxReplace || wantsDocxCrossRun)
+				(wantsDocxReplace || wantsDocxCrossRun || wantsDocxCrossRunMerged)
 			) {
 				send({
 					tool_calls: [
@@ -87,9 +89,11 @@ function startWriteServer() {
 							function: {
 								name: "docx_replace",
 								arguments: JSON.stringify(
-									wantsDocxCrossRun
-										? { path: "跨run.docx", find: "跨 run 的文本", replace: "改掉" }
-										: { path: "季度报告工具链.docx", find: "本季度营收", replace: "本季度净收入" },
+									wantsDocxCrossRunMerged
+										? { path: "同格式跨run.docx", find: "跨 run 的文本", replace: "合并后的整句" }
+										: wantsDocxCrossRun
+											? { path: "跨run.docx", find: "跨 run 的文本", replace: "改掉" }
+											: { path: "季度报告工具链.docx", find: "本季度营收", replace: "本季度净收入" },
 								),
 							},
 						},
@@ -1003,6 +1007,138 @@ await h.check("docx 多条建议：逐条勾选，未勾选的按拒绝提示", 
 
 	/* 只验证 UI 选择与提示；实际写回（含只写勾选项）由单测覆盖。 */
 	await win.evaluate((id) => globalThis.kami.rejectDocEdit(id), seeded.proposal.id);
+});
+
+const E2E_WORD_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+
+/** 造一份「标题 + 同格式跨 run 的一段」的 docx（#501）：两个 run 都没有 rPr。 */
+async function makeCrossRunDocx(target) {
+	const zip = new JSZip();
+	zip.file("[Content_Types].xml", "<Types/>", { createFolders: false });
+	zip.file(
+		"word/document.xml",
+		`<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="${E2E_WORD_NS}"><w:body>` +
+			`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>季度报告</w:t></w:r></w:p>` +
+			`<w:p><w:r><w:t xml:space="preserve">跨 run </w:t></w:r><w:r><w:t>的文本</w:t></w:r></w:p>` +
+			`</w:body></w:document>`,
+		{ createFolders: false },
+	);
+	writeFileSync(target, await zip.generateAsync({ type: "nodebuffer" }));
+}
+
+let crossRunMergedProposal;
+let crossRunMergedTarget;
+let crossRunMergedBeforeBytes;
+
+await h.check("docx v2：同格式跨 run 经真实工具调用生成建议（文件不变）", async () => {
+	const cwd = await sessionCwd();
+	const target = join(cwd, "同格式跨run.docx");
+	await makeCrossRunDocx(target);
+	const beforeBytes = readFileSync(target);
+	await win.evaluate(() => globalThis.kami.setDocEditMode(true));
+	await win.evaluate((text) => globalThis.kami.prompt({ text }), "docx 跨 run 成功：把那段文字合并");
+
+	const proposal = await waitUntil(
+		async () => {
+			const list = await win.evaluate(() => globalThis.kami.listDocEdits());
+			return list.find((item) => item.kind === "docx" && item.path === target) ?? null;
+		},
+		{ timeout: 90_000, interval: 500, desc: "同格式跨 run 的建议出现" }
+	);
+	assert.deepEqual(readFileSync(target), beforeBytes, "建议阶段不该写盘");
+
+	const detail = await win.evaluate((id) => globalThis.kami.readDocEdit(id), proposal.id);
+	assert.equal(detail.edits[0].find, "跨 run 的文本");
+	assert.equal(detail.edits[0].replace, "合并后的整句");
+	/* 运行时就绪时上下文应指向第 2 段、标题「季度报告」。 */
+	if (detail.context !== undefined) {
+		assert.equal(detail.context.paragraph, 2, "上下文段落序号不对");
+		assert.equal(detail.context.heading, "季度报告", "上下文标题不对");
+	}
+	crossRunMergedProposal = proposal;
+	crossRunMergedTarget = target;
+	crossRunMergedBeforeBytes = beforeBytes;
+});
+
+await h.check("docx v2：同格式跨 run 接受后段落已合并、其余条目不变", async () => {
+	const py = await readyPython();
+	if (py === null) {
+		h.skip(
+			"docx v2：同格式跨 run 接受后段落已合并、其余条目不变",
+			"Python 运行时未就绪：接受与保真断言需要内置运行时"
+		);
+	}
+	const original = `${crossRunMergedTarget}.orig`;
+	writeFileSync(original, crossRunMergedBeforeBytes);
+
+	const accepted = await win.evaluate(
+		({ id }) => globalThis.kami.applyDocEdit(id, [0]),
+		{ id: crossRunMergedProposal.id }
+	);
+	assert.equal(accepted?.replaced, 1, `接受结果不对：${JSON.stringify(accepted)}`);
+
+	const after = await inspectDocx(py, crossRunMergedTarget);
+	const before = await inspectDocx(py, original);
+	assert.ok(after.document.text.some((line) => line.includes("合并后的整句")), "合并后的整句不在正文里");
+	assert.ok(!after.document.text.some((line) => line.includes("跨 run 的文本")), "旧的跨 run 文字仍在正文里");
+	const changed = after.entries
+		.filter((entry, index) => entry.sha256 !== before.entries[index].sha256)
+		.map((entry) => entry.name);
+	assert.deepEqual(changed, ["word/document.xml"], `不该改动的条目：${changed.join(", ")}`);
+	assert.deepEqual(after.document.paragraph_styles, before.document.paragraph_styles, "段落样式变了");
+});
+
+await h.check("docx v2：批量建议只勾一条 → 只写回那一处", async () => {
+	const py = await readyPython();
+	if (py === null) {
+		h.skip("docx v2：批量建议只勾一条 → 只写回那一处", "Python 运行时未就绪：接受需要内置运行时");
+	}
+	const seeded = seedDocxMultiEdit(Date.now() + 5_000);
+	const result = await win.evaluate(
+		({ id }) => globalThis.kami.applyDocEdit(id, [0]),
+		{ id: seeded.proposal.id }
+	);
+	assert.equal(result?.replaced, 1, `只该写一处：${JSON.stringify(result)}`);
+	const info = await inspectDocx(py, seeded.absPath);
+	assert.ok(info.document.text.some((line) => line.includes(DOCX_REPLACE)), "勾选的那处没写回");
+	assert.ok(
+		info.document.text.some((line) => line.includes("以上数据未经审计。")),
+		"未勾选的那处被改掉了"
+	);
+});
+
+await h.check("docx v2：批量中第 2 条失败 → 整次不写盘", async () => {
+	const py = await readyPython();
+	if (py === null) {
+		h.skip("docx v2：批量中第 2 条失败 → 整次不写盘", "Python 运行时未就绪：引擎拒绝需要内置运行时");
+	}
+	const absPath = join(h.WORKSPACE_DIR, "批量失败.docx");
+	copyFileSync(DOCX_FIXTURE, absPath);
+	const bytes = readFileSync(absPath);
+	const proposal = buildDocxProposal({
+		absPath,
+		baseSha256: sha256Bytes(bytes),
+		edits: [
+			{ find: DOCX_FIND, replace: DOCX_REPLACE },
+			{ find: "文档里不存在的整句", replace: "改掉" },
+		],
+		part: DOCX_PART_DEFAULT,
+		sessionId: "sess-doc-workbench-e2e",
+		toolName: "docx_replace",
+		at: Date.now() + 6_000,
+	});
+	saveProposal(proposal, { dir: DOC_EDITS_DIR });
+
+	let error;
+	try {
+		await win.evaluate(({ id }) => globalThis.kami.applyDocEdit(id, [0, 1]), { id: proposal.id });
+	} catch (caught) {
+		error = String(caught?.message ?? caught);
+	}
+	assert.ok(error !== undefined, "第 2 条失败时接受应报错");
+	assert.match(error, /第 2 条/, `错误没有指明第几条：${error}`);
+	assert.deepEqual(readFileSync(absPath), bytes, "整次不该写盘");
+	await win.evaluate((id) => globalThis.kami.rejectDocEdit(id), proposal.id);
 });
 
 await h.check("docx 工具：模型调用在修订模式下生成建议、文件不变", async () => {
