@@ -32660,6 +32660,7 @@ import {
 	roleLabel,
 	summarizeSearch,
 } from "./session-search-core.js";
+import { matchPinyinInitials } from "./session-search-core.js";
 import { TaskBoardSection } from "./task-board-section.js";
 import {
 	automationToastText,
@@ -75978,6 +75979,24 @@ function SearchView({ onClose, onOpenHit }) {
       return visibleIds.has(session.sessionId);
     });
   }, [result, rows, timeRange]);
+  /* #493 第三十五轮 F6：拼音首字母提示。全文无命中时，用零依赖字表对
+     会话标题做首字母匹配——命中则提示「试试搜会话名」（不假装修改结果）。 */
+  /* #493 第三十五轮 F6：拼音匹配的数据源是**全部会话列表**（搜索无命中时
+     daemon 返回空 sessions，用列表兜底）。挂载时拉一次即可（检索页是瞬时页）。 */
+  const [allSessionsForPinyin, setAllSessionsForPinyin] = reactExports.useState([]);
+  reactExports.useEffect(() => {
+    void window.kami.listSessions().then((sessions) => {
+      setAllSessionsForPinyin(sessions.map((s) => ({ title: s.title, modifiedAt: s.modifiedAt })));
+    }).catch(() => {
+    });
+  }, []);
+  const pinyinHint = reactExports.useMemo(() => {
+    if (result === void 0 || rows.length > 0) return null;
+    if (!/^[a-zA-Z]{2,8}$/.test(trimmed)) return null;
+    const hits = allSessionsForPinyin.filter((s) => matchPinyinInitials(trimmed, s.title ?? ""));
+    if (hits.length === 0) return null;
+    return hits.slice(0, 3).map((s) => s.title);
+  }, [result, rows, trimmed, allSessionsForPinyin]);
   /* F4：命中数统计（过滤后口径）。 */
   const hitStats = reactExports.useMemo(() => {
     const sessionIds = new Set(rows.map((row) => row.sessionId));
@@ -76200,6 +76219,12 @@ function SearchView({ onClose, onOpenHit }) {
           /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ss-recent-label", children: "最近搜索" }),
           recentQueries.map((item) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-chip", onClick: () => setQuery(item), children: item }, item))
         ] })
+      ] }),
+      pinyinHint !== null && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "ss-pinyin-hint", children: [
+        "全文没搜到。会话标题里像有「",
+        trimmed,
+        "」的首字母——试试搜：",
+        pinyinHint.map((title) => /* @__PURE__ */ jsxRuntimeExports.jsx("button", { type: "button", className: "ss-chip", onClick: () => setQuery(title), children: title }, title))
       ] }),
       body
     ] })
@@ -78717,6 +78742,11 @@ const SHORTCUT_SHEET = [
 		{ combo: ["Enter"], desc: "发送消息", where: "Composer" },
 		{ combo: ["⇧", "Enter"], desc: "换行", where: "Composer" },
 		{ combo: ["Esc"], desc: "停止生成 / 放弃编辑", where: "Composer" },
+		/* #493 第三十五轮 F8：新快捷键入表。 */
+		{ combo: ["⌘", "⇧", "C"], desc: "复制最后一条回复", where: "App 键盘监听" },
+		{ combo: ["⌘", "⇧", "A"], desc: "归档当前会话", where: "App 键盘监听" },
+		{ combo: ["⌘", "G"], desc: "跳到最新消息", where: "App 键盘监听" },
+		{ combo: ["⌘", "L"], desc: "聚焦输入框", where: "App 键盘监听" },
 	] },
 	{ group: "系统", keys: [
 		{ combo: ["⌥", "⇧", "W"], desc: "全局唤起窗口（可在设置改）", where: "主进程 globalShortcut" },
@@ -80118,6 +80148,55 @@ function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+  /* #493 第三十五轮 F1-F4：效率快捷键。⌘⇧C 复制最后回复 / ⌘⇧A 归档当前
+     会话 / ⌘G 跳到最新消息 / ⌘L 聚焦输入框。全部经真实 DOM/props 链路，
+     不走新通道；焦点在可编辑元素里时不劫持（数字直达同款守卫）。 */
+  reactExports.useEffect(() => {
+    const onKey = (event) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      const key = event.key.toLowerCase();
+      const active = document.activeElement;
+      const inEditable = active !== null && (active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable);
+      if (key === "c" && event.shiftKey) {
+        /* F1：复制最后一条 assistant 回复。 */
+        const blocks = [...document.querySelectorAll(".entry.assistant .markdown, .markdown")];
+        const last = blocks[blocks.length - 1];
+        if (last === void 0) return;
+        event.preventDefault();
+        navigator.clipboard.writeText(last.innerText).then(() => {
+          window.dispatchEvent(new CustomEvent("zw:toast", { detail: [{ type: "success", text: "已复制最后一条回复" }] }));
+        }).catch(() => {
+        });
+        return;
+      }
+      if (key === "a" && event.shiftKey && !inEditable) {
+        /* F2：归档当前会话（toast 反馈由归档链路承担）。 */
+        const current = taskListRef.current?.find((t) => t.path === visibleSessionIdRef.current);
+        if (current === void 0) return;
+        event.preventDefault();
+        archiveTask(current.path);
+        return;
+      }
+      if (key === "g" && !event.shiftKey && viewRef.current === "chat") {
+        /* F3：跳到最新消息（滚到流底部）。 */
+        const stream = document.querySelector(".stream");
+        if (stream === null) return;
+        event.preventDefault();
+        stream.scrollTo({ top: stream.scrollHeight, behavior: "smooth" });
+        return;
+      }
+      if (key === "l" && !event.shiftKey) {
+        /* F4：聚焦输入框（composer 优先，首页是搜索框）。 */
+        const composer = document.querySelector('[aria-label="消息输入框"]');
+        if (composer === null || inEditable && active === composer) return;
+        event.preventDefault();
+        composer.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   /* ⌘1-6 / Ctrl+1-6 数字直达侧栏（#300 F2）：点第 N 个可用导航项。
    * 通过真实 DOM click 走 React 合成事件 —— 与各 nav-item 的既有 onClick
    * 语义零重复（焦点在输入框里时不劫持数字输入：activeElement 是可编辑
