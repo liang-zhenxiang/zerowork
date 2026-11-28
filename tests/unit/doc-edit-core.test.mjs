@@ -15,6 +15,7 @@ import {
 	DOC_EDIT_EMPTY_DESC,
 	DOC_EDIT_STALE_TEXT,
 	acceptDocxSuccessText,
+	splitDocxContext,
 	acceptSuccessText,
 	formatHunkStats,
 	formatProposalStats,
@@ -206,6 +207,18 @@ describe("文案（同一件事同一句话）", () => {
 		expect(rejectSuccessText("周报.md")).toContain("目标文件没有被改动");
 		expect(rejectConfirmText("周报.md")).toContain("拒绝");
 		expect(rejectConfirmText("周报.md")).toContain("周报.md");
+	});
+
+	it("docx 上下文切成前文 / 命中 / 后文；非法字段返回 undefined", () => {
+		expect(splitDocxContext({ paragraph: 2, heading: "季度报告", text: "…前文旧文字后文…", offset: 3, length: 3 })).toEqual({
+			before: "…前文",
+			match: "旧文字",
+			after: "后文…",
+		});
+		expect(splitDocxContext(undefined)).toBeUndefined();
+		expect(splitDocxContext({ text: "abc", offset: 2, length: 2 })).toBeUndefined();
+		expect(splitDocxContext({ text: "abc", offset: -1, length: 1 })).toBeUndefined();
+		expect(splitDocxContext({ text: "abc", offset: 0, length: 0 })).toBeUndefined();
 	});
 
 	it("docx 接受结果只报「1 处文字」，不套段 / 行口径", () => {

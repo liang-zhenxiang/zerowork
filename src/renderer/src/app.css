@@ -14280,6 +14280,41 @@ button.agent-row {
 	color: var(--text);
 }
 
+/* 命中位置（#500）：徽标说「在哪一段」，上下文行说「前后是什么」。
+ * 旧文字用现有 diff-del 底色，不新增颜色档。 */
+.rv-docx-where {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin: var(--space-2) 0 0;
+	font-size: var(--text-meta);
+	color: var(--text);
+}
+
+.rv-docx-where-badge {
+	flex: 0 0 auto;
+	padding: 1px 6px;
+	border-radius: var(--radius-sm);
+	background: var(--surface-2, var(--surface));
+	color: var(--text-secondary);
+	white-space: nowrap;
+}
+
+.rv-docx-context {
+	flex: 1 1 240px;
+	min-width: 0;
+	color: var(--text-secondary);
+	word-break: break-word;
+}
+
+.rv-docx-hit {
+	padding: 0 2px;
+	border-radius: 2px;
+	background: color-mix(in srgb, var(--danger) 10%, transparent);
+	color: var(--text);
+}
+
 .rv-hunk-stats {
 	flex: 0 0 auto;
 	font-family: var(--font-mono);

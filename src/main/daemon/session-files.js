@@ -2610,6 +2610,24 @@ function sanitizeForLog(event) {
 
 const pendingApprovals = /* @__PURE__ */ new Map();
 
+/**
+ * 最近一次 `runtimesSnapshot` 的结果（#500）。
+ *
+ * 工具层补「docx 建议的上下文」时需要知道 Python 是否就绪。**不能**在工具调用里
+ * 现场 `collectRuntimeInventory()`：它会 resolve / 探测描述符，在 utilityProcess
+ * 里可能很重（CI 上实测把一次工具调用拖到超过 90s）。这里只缓存 UI 已经请求过
+ * 的那份快照；没有缓存就当作未就绪 —— 上下文是锦上添花，不该为它阻塞工具。
+ */
+let pythonRuntimeStatusCache = { ready: false, python: "" };
+
+function updatePythonRuntimeCache(snapshot) {
+  const item = (snapshot?.items ?? []).find((entry) => entry.id === "python");
+  pythonRuntimeStatusCache = {
+    ready: item?.status?.kind === "ready",
+    python: typeof item?.executable === "string" ? item.executable : ""
+  };
+}
+
 function adoptedSessionId(bucket) {
   if (bucket.sessionId === "") {
     throw new Error("问卷/审批请求的桶 sessionId 为空：宿主尚未 adopt，adopt 顺序已变");
@@ -3711,6 +3729,11 @@ async function createHost(bucket, sessionManager) {
         homeDir: homedir(),
         getDocEditMode: () => bucket.conversation.state.docEditMode === true,
         getSessionId: () => adoptedSessionId(bucket),
+        /*
+         * 建议的上下文（#500）：只有运行时**已就绪**时才尝试定位；
+         * 未就绪直接跳过 —— 不 ensure、不阻塞建议生成。
+         */
+        getPythonStatus: () => pythonRuntimeStatusCache,
         onAudit: writeAuditRecord
       }),
       // 内联可视化（read_me + show_widget）：无副作用、无用户交互，
@@ -4861,7 +4884,11 @@ const handlers = {
    * preferences.runtimes 这一处 —— 于是「设置页看到被禁用」与「模型看到被禁用」
    * 不可能分叉。写开关后立刻重新采集：返回的清单即生效后的状态（开关无需重启）。
    */
-  [INVOKE.runtimesSnapshot]: async () => collectRuntimeInventory(),
+  [INVOKE.runtimesSnapshot]: async () => {
+    const snapshot = collectRuntimeInventory();
+    updatePythonRuntimeCache(snapshot);
+    return snapshot;
+  },
   [INVOKE.setRuntimeMaster]: async ([enabled]) => {
     writeRuntimeMaster(enabled);
     if (enabled === false) {

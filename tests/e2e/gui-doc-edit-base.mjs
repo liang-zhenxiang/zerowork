@@ -45,10 +45,25 @@ function startWriteServer() {
 			};
 			send({ role: "assistant", content: "" });
 			const messages = parsed?.messages ?? [];
+			/*
+			 * 隐藏上下文（时间 / 工作区快照）也会以 user 角色出现，所以不能只看
+			 * 「最后一条 user」—— 一条刚注入的时间快照就会让 mock 认不出这一轮的
+			 * 真实意图（#500 的 CI 失败就是这样：模型收到用户消息后没返回工具调用）。
+			 * 按顺序扫，取**最后一条带意图关键词**的 user 消息，只检查它之后的工具结果。
+			 */
+			let intentIndex = -1;
+			let intentText = "";
+			messages.forEach((message, index) => {
+				if (message.role !== "user") return;
+				const text = JSON.stringify(message.content ?? "");
+				if (text.includes("docx 替换") || text.includes("docx 跨 run") || text.includes("正常写入")) {
+					intentIndex = index;
+					intentText = text;
+				}
+			});
 			const hasToolResult = messages.some((message) => message.role === "tool");
-			const lastUserIndex = messages.map((message) => message.role).lastIndexOf("user");
-			const afterLastUser = lastUserIndex === -1 ? [] : messages.slice(lastUserIndex + 1);
-			const userText = JSON.stringify(messages[lastUserIndex]?.content ?? "");
+			const afterLastUser = intentIndex === -1 ? [] : messages.slice(intentIndex + 1);
+			const userText = intentText;
 			const wantsNormalWrite = userText.includes("正常写入");
 			/*
 			 * #483：docx 工具的真实调用链。与 `wantsNormalWrite` 同形 —— 只在最后
@@ -487,6 +502,8 @@ function readDocView() {
 						after: (node.querySelector('[data-docx-block$="-after"] .rv-hunk-line')?.textContent ?? "").trim(),
 					})),
 			docxSummary: (card?.querySelector("[data-docx-summary]")?.textContent ?? "").trim(),
+			docxWhere: (card?.querySelector("[data-docx-where]")?.textContent ?? "").trim(),
+			docxContextMissing: card?.querySelector("[data-docx-context-missing]") !== null,
 			docxDiscard: (card?.querySelector("[data-docx-discard]")?.textContent ?? "").trim(),
 			hasCheckbox: card === null ? false : card.querySelector(".rv-hunk-head input[type=checkbox]") !== null,
 			hunkToolButtons: card === null ? 0 : card.querySelectorAll(".rv-hunk-tools button").length,
@@ -793,6 +810,9 @@ await h.check("docx 建议：显示替换前/后与目标部件，没有逐段�
 	assert.match(view.docxNote, /v1 只替换正文里这一处文字/);
 	assert.match(view.docxNote, /不保留 Word 原生修订痕迹/);
 	assert.equal(view.hasCheckbox, false, "docx 建议不该出现逐段勾选框");
+	/* 种子建议没有上下文（旧版本形态）：如实说不可用，不编一个位置。 */
+	assert.equal(view.docxWhere, "", "没有上下文时不该显示位置徽标");
+	assert.equal(view.docxContextMissing, true, "没有上下文时应说明「位置信息不可用」");
 	assert.equal(view.hunkToolButtons, 0, "docx 建议不该有全选 / 全不选");
 	const accept = view.actions.find((action) => action.text === "接受替换（1 处）");
 	assert.ok(accept !== undefined, `接受按钮文案不对：${JSON.stringify(view.actions)}`);
@@ -1037,6 +1057,13 @@ await h.check("docx 工具：模型调用在修订模式下生成建议、文件
 		(state) => state.docx === true && state.cardName === DOCX_TOOL_NAME,
 		"右区切到工具生成的 docx 建议"
 	);
+	/* 运行时就绪时，工具生成建议会带上上下文；未就绪时（CI）如实显示不可用。 */
+	if (detail.context !== undefined) {
+		assert.match(selected.docxWhere, /第 \d+ 段/, `位置徽标不对：${JSON.stringify(selected.docxWhere)}`);
+		assert.equal(selected.docxContextMissing, false);
+	} else {
+		assert.equal(selected.docxContextMissing, true);
+	}
 	await h.waitForSettled();
 	assert.ok(selected.rowStats.includes("1 处替换"), "左列应报「1 处替换」");
 	await h.shoot("docx-tool-proposal-light");

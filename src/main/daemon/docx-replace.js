@@ -41,7 +41,7 @@ import {
 	sha256Bytes,
 	versionFailureText,
 } from "./doc-edits.js";
-import { DEFAULT_PATCH_PART, DocxPatchError, patchDocx } from "./docx-patch.js";
+import { DEFAULT_PATCH_PART, DocxPatchError, inspectDocx, patchDocx } from "./docx-patch.js";
 import { defaultPythonRuntimeOptions, defaultSpawn, ensurePythonRuntime } from "./runtimes.js";
 import { recordBinaryVersion } from "./version-store.js";
 
@@ -211,6 +211,43 @@ async function ensureRuntime(options) {
 }
 
 /** 引擎错误 → 面向模型的完整文案（原消息 + v1 边界引导）。 */
+/**
+ * 尝试给单条建议补一段「它在文档哪里」的上下文（#500）。
+ *
+ * 只在**单条 + 运行时已就绪**时尝试：批量要跑 N 次引擎，收益低；未就绪时
+ * 绝不 `ensure`（那会让工具调用卡几分钟）。任何失败都返回 undefined ——
+ * 上下文是锦上添花，不能让它否决一条本来能生成的建议。
+ */
+async function maybeDocxContext(options, { absPath, part, edits }) {
+	if (edits.length !== 1) return undefined;
+	if (typeof options.getPythonStatus !== "function") return undefined;
+	let status;
+	try {
+		status = options.getPythonStatus();
+	} catch {
+		return undefined;
+	}
+	if (status?.ready !== true || typeof status.python !== "string" || status.python === "") {
+		return undefined;
+	}
+	const inspect = options.inspect ?? inspectDocx;
+	try {
+		const result = await inspect(
+			{
+				python: status.python,
+				engineDir: options.engineDir,
+				inputPath: absPath,
+				part,
+				find: edits[0].find,
+			},
+			options.run,
+		);
+		return result.context;
+	} catch {
+		return undefined;
+	}
+}
+
 function describePatchFailure(error, name) {
 	const message = error instanceof Error ? error.message : String(error);
 	const code = error instanceof DocxPatchError ? error.code : "unknown";
@@ -298,11 +335,17 @@ function createDocxReplaceTool(options) {
 				if (options.getDocEditMode?.() === true) {
 					let proposal;
 					let saved;
+					const context = await maybeDocxContext(options, {
+						absPath,
+						part: DEFAULT_PATCH_PART,
+						edits: input.edits,
+					});
 					try {
 						proposal = buildDocxProposal({
 							absPath,
 							baseSha256,
 							edits: input.edits,
+							context,
 							part: DEFAULT_PATCH_PART,
 							sessionId,
 							toolName: DOCX_REPLACE_TOOL_NAME,

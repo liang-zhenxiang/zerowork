@@ -309,6 +309,86 @@ describe("修订模式开启 —— 只生成建议，不写盘、不启动 Pyth
 	});
 });
 
+describe("建议的上下文（#500）", () => {
+	function revisionCtx(overrides = {}) {
+		const ctx = setup();
+		const absPath = seedDocx(ctx);
+		const before = bytesOf(absPath);
+		const { tool, calls } = makeTool(ctx, {
+			getDocEditMode: () => true,
+			ensure: async () => {
+				throw new Error("修订模式下不该调用 ensure");
+			},
+			patch: async () => {
+				throw new Error("修订模式下不该调用 patch");
+			},
+			...overrides,
+		});
+		return { ctx, absPath, before, tool, calls };
+	}
+
+	const CONTEXT = { paragraph: 2, heading: "季度报告", text: "…本季度营收…", offset: 1, length: 5 };
+
+	it("运行时 ready：单条建议带 context，inspect 用同一份 find", async () => {
+		const seen = [];
+		const { ctx, absPath, tool } = revisionCtx({
+			getPythonStatus: () => ({ ready: true, python: "/venv/python" }),
+			inspect: async (req) => {
+				seen.push(req);
+				return { part: req.part, context: CONTEXT };
+			},
+		});
+		const receipt = await run(tool, { path: absPath, find: FIND, replace: REPLACE });
+		expect(seen).toHaveLength(1);
+		expect(seen[0]).toMatchObject({ python: "/venv/python", inputPath: absPath, find: FIND });
+		expect(readProposal(receipt.id, { dir: ctx.store }).context).toEqual(CONTEXT);
+	});
+
+	it("运行时未就绪 / inspect 抛错：建议照常生成，只是没有上下文", async () => {
+		const notReady = revisionCtx({
+			getPythonStatus: () => ({ ready: false, python: "" }),
+			inspect: async () => {
+				throw new Error("未就绪时不该调用");
+			},
+		});
+		const first = await run(notReady.tool, { path: notReady.absPath, find: FIND, replace: REPLACE });
+		expect(readProposal(first.id, { dir: notReady.ctx.store }).context).toBeUndefined();
+
+		let called = 0;
+		const failing = revisionCtx({
+			getPythonStatus: () => ({ ready: true, python: "/venv/python" }),
+			inspect: async () => {
+				called += 1;
+				throw new Error("引擎挂了");
+			},
+		});
+		const second = await run(failing.tool, { path: failing.absPath, find: FIND, replace: REPLACE });
+		expect(called).toBe(1);
+		expect(readProposal(second.id, { dir: failing.ctx.store }).context).toBeUndefined();
+		expect(second.type).toBe("docx_replace_suggestion");
+	});
+
+	it("批量建议不调用 inspect（N 次引擎调用收益低）", async () => {
+		let called = 0;
+		const { ctx, absPath, tool } = revisionCtx({
+			getPythonStatus: () => ({ ready: true, python: "/venv/python" }),
+			inspect: async () => {
+				called += 1;
+				return { part: "word/document.xml", context: CONTEXT };
+			},
+		});
+		const receipt = await run(tool, {
+			path: absPath,
+			edits: [
+				{ find: FIND, replace: REPLACE },
+				{ find: SECOND_FIND, replace: SECOND_REPLACE },
+			],
+		});
+		expect(called).toBe(0);
+		expect(readProposal(receipt.id, { dir: ctx.store }).context).toBeUndefined();
+	});
+});
+
 describe("修订模式关闭 —— 直接写回", () => {
 	it("顺序固定：ensure → 留旧版本 → 引擎修补；回执与审计齐全", async () => {
 		const ctx = setup();
@@ -502,6 +582,24 @@ describe("Proposal 模型扩展 —— kind:docx 与旧文本建议兼容", () =
 		expect(() => buildDocxProposal(docxProposalInput({ find: "" }))).toThrow(/替换条目/);
 		expect(() => buildDocxProposal(docxProposalInput({ replace: "" }))).toThrow(/替换条目/);
 		expect(() => buildDocxProposal(docxProposalInput({ replace: FIND }))).toThrow(/替换条目/);
+	});
+
+	it("context：合法则保留并往返；非法则丢弃、建议本身仍可读", () => {
+		const proposal = buildDocxProposal(
+			docxProposalInput({
+				context: { paragraph: 2, heading: "季度报告", text: "…旧文字…", offset: 1, length: 3 },
+			}),
+		);
+		expect(proposal.context).toMatchObject({ paragraph: 2, heading: "季度报告" });
+		const parsed = parseProposal(JSON.parse(JSON.stringify(proposal)));
+		expect(parsed.context).toEqual(proposal.context);
+
+		const bad = parseProposal({
+			...JSON.parse(JSON.stringify(proposal)),
+			context: { paragraph: 0, text: "x", offset: 0, length: 1, heading: null },
+		});
+		expect(bad).not.toBeUndefined();
+		expect(bad.context).toBeUndefined();
 	});
 
 	it("旧 docx 建议（只有 find/replace）读取时归一化为一条 edits", () => {

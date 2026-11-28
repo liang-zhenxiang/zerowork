@@ -187,6 +187,22 @@ export function isDocxProposal(proposal) {
 	return proposal?.kind === "docx";
 }
 
+/**
+ * 把 docx 建议的上下文切成「前文 / 命中 / 后文」（#500）。
+ * 字段不合法返回 undefined —— UI 据此显示「位置信息不可用」，而不是猜着切。
+ */
+export function splitDocxContext(context) {
+	if (context === void 0 || context === null) return undefined;
+	const { text, offset, length } = context;
+	if (typeof text !== "string" || !Number.isInteger(offset) || offset < 0) return undefined;
+	if (!Number.isInteger(length) || length <= 0 || offset + length > text.length) return undefined;
+	return {
+		before: text.slice(0, offset),
+		match: text.slice(offset, offset + length),
+		after: text.slice(offset + length),
+	};
+}
+
 /** 列表项的 `+N −M`；没有记录时如实说，不摆一个不存在的 +0 −0。 */
 export function formatProposalStats(entry) {
 	// docx 报真实的替换条数，而不是伪造的 +N −M 行。
